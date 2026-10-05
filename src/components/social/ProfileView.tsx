@@ -52,8 +52,8 @@ export function ProfileView({ user, self }: { user: User; self?: boolean }) {
               <p className="text-sm text-muted-foreground"><UserName username={user.username} verified={user.verified} /></p>
               {user.bio && <p className="mt-2 max-w-sm text-sm">{user.bio}</p>}
               <div className="mt-4 flex justify-center gap-8 md:justify-start">
-                <Stat value={user.followers} label="Followers" to={`/u/${user.username}/connections?tab=followers`} />
-                <Stat value={user.following} label="Following" to={`/u/${user.username}/connections?tab=following`} />
+                <Stat value={user.followers} label="Followers" conn={{ username: user.username, tab: "followers" }} />
+                <Stat value={user.following} label="Following" conn={{ username: user.username, tab: "following" }} />
                 <Stat value={user.played} label="Games played" />
               </div>
               <div className="mt-4 flex justify-center gap-2 md:justify-start">

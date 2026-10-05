@@ -10,11 +10,14 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ActivityRouteImport } from './routes/activity'
 import { Route as ExploreRouteImport } from './routes/explore'
 import { Route as FollowingRouteImport } from './routes/following'
 import { Route as LikesRouteImport } from './routes/likes'
 import { Route as NewRouteImport } from './routes/new'
+import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as PopularRouteImport } from './routes/popular'
+import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as RecentRouteImport } from './routes/recent'
 import { Route as SavedRouteImport } from './routes/saved'
 import { Route as SearchRouteImport } from './routes/search'
@@ -26,10 +29,17 @@ import { Route as LeaderboardsIndexRouteImport } from './routes/leaderboards.ind
 import { Route as LeaderboardsIdRouteImport } from './routes/leaderboards.$id'
 import { Route as PlayIdRouteImport } from './routes/play.$id'
 import { Route as ResultsIdRouteImport } from './routes/results.$id'
+import { Route as UUsernameIndexRouteImport } from './routes/u.$username.index'
+import { Route as UUsernameConnectionsRouteImport } from './routes/u.$username.connections'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ActivityRoute = ActivityRouteImport.update({
+  id: '/activity',
+  path: '/activity',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ExploreRoute = ExploreRouteImport.update({
@@ -52,9 +62,19 @@ const NewRoute = NewRouteImport.update({
   path: '/new',
   getParentRoute: () => rootRouteImport,
 } as any)
+const NotificationsRoute = NotificationsRouteImport.update({
+  id: '/notifications',
+  path: '/notifications',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PopularRoute = PopularRouteImport.update({
   id: '/popular',
   path: '/popular',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProfileRoute = ProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RecentRoute = RecentRouteImport.update({
@@ -112,14 +132,27 @@ const ResultsIdRoute = ResultsIdRouteImport.update({
   path: '/results/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const UUsernameIndexRoute = UUsernameIndexRouteImport.update({
+  id: '/u/$username/',
+  path: '/u/$username/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const UUsernameConnectionsRoute = UUsernameConnectionsRouteImport.update({
+  id: '/u/$username/connections',
+  path: '/u/$username/connections',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/activity': typeof ActivityRoute
   '/explore': typeof ExploreRoute
   '/following': typeof FollowingRoute
   '/likes': typeof LikesRoute
   '/new': typeof NewRoute
+  '/notifications': typeof NotificationsRoute
   '/popular': typeof PopularRoute
+  '/profile': typeof ProfileRoute
   '/recent': typeof RecentRoute
   '/saved': typeof SavedRoute
   '/search': typeof SearchRoute
@@ -131,14 +164,19 @@ export interface FileRoutesByFullPath {
   '/results/$id': typeof ResultsIdRoute
   '/categories/': typeof CategoriesIndexRoute
   '/leaderboards/': typeof LeaderboardsIndexRoute
+  '/u/$username/connections': typeof UUsernameConnectionsRoute
+  '/u/$username/': typeof UUsernameIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/activity': typeof ActivityRoute
   '/explore': typeof ExploreRoute
   '/following': typeof FollowingRoute
   '/likes': typeof LikesRoute
   '/new': typeof NewRoute
+  '/notifications': typeof NotificationsRoute
   '/popular': typeof PopularRoute
+  '/profile': typeof ProfileRoute
   '/recent': typeof RecentRoute
   '/saved': typeof SavedRoute
   '/search': typeof SearchRoute
@@ -150,15 +188,20 @@ export interface FileRoutesByTo {
   '/results/$id': typeof ResultsIdRoute
   '/categories': typeof CategoriesIndexRoute
   '/leaderboards': typeof LeaderboardsIndexRoute
+  '/u/$username/connections': typeof UUsernameConnectionsRoute
+  '/u/$username': typeof UUsernameIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/activity': typeof ActivityRoute
   '/explore': typeof ExploreRoute
   '/following': typeof FollowingRoute
   '/likes': typeof LikesRoute
   '/new': typeof NewRoute
+  '/notifications': typeof NotificationsRoute
   '/popular': typeof PopularRoute
+  '/profile': typeof ProfileRoute
   '/recent': typeof RecentRoute
   '/saved': typeof SavedRoute
   '/search': typeof SearchRoute
@@ -170,16 +213,21 @@ export interface FileRoutesById {
   '/results/$id': typeof ResultsIdRoute
   '/categories/': typeof CategoriesIndexRoute
   '/leaderboards/': typeof LeaderboardsIndexRoute
+  '/u/$username/connections': typeof UUsernameConnectionsRoute
+  '/u/$username/': typeof UUsernameIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/activity'
     | '/explore'
     | '/following'
     | '/likes'
     | '/new'
+    | '/notifications'
     | '/popular'
+    | '/profile'
     | '/recent'
     | '/saved'
     | '/search'
@@ -191,14 +239,19 @@ export interface FileRouteTypes {
     | '/results/$id'
     | '/categories/'
     | '/leaderboards/'
+    | '/u/$username/connections'
+    | '/u/$username/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/activity'
     | '/explore'
     | '/following'
     | '/likes'
     | '/new'
+    | '/notifications'
     | '/popular'
+    | '/profile'
     | '/recent'
     | '/saved'
     | '/search'
@@ -210,14 +263,19 @@ export interface FileRouteTypes {
     | '/results/$id'
     | '/categories'
     | '/leaderboards'
+    | '/u/$username/connections'
+    | '/u/$username'
   id:
     | '__root__'
     | '/'
+    | '/activity'
     | '/explore'
     | '/following'
     | '/likes'
     | '/new'
+    | '/notifications'
     | '/popular'
+    | '/profile'
     | '/recent'
     | '/saved'
     | '/search'
@@ -229,15 +287,20 @@ export interface FileRouteTypes {
     | '/results/$id'
     | '/categories/'
     | '/leaderboards/'
+    | '/u/$username/connections'
+    | '/u/$username/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ActivityRoute: typeof ActivityRoute
   ExploreRoute: typeof ExploreRoute
   FollowingRoute: typeof FollowingRoute
   LikesRoute: typeof LikesRoute
   NewRoute: typeof NewRoute
+  NotificationsRoute: typeof NotificationsRoute
   PopularRoute: typeof PopularRoute
+  ProfileRoute: typeof ProfileRoute
   RecentRoute: typeof RecentRoute
   SavedRoute: typeof SavedRoute
   SearchRoute: typeof SearchRoute
@@ -249,6 +312,8 @@ export interface RootRouteChildren {
   ResultsIdRoute: typeof ResultsIdRoute
   CategoriesIndexRoute: typeof CategoriesIndexRoute
   LeaderboardsIndexRoute: typeof LeaderboardsIndexRoute
+  UUsernameConnectionsRoute: typeof UUsernameConnectionsRoute
+  UUsernameIndexRoute: typeof UUsernameIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -258,6 +323,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/activity': {
+      id: '/activity'
+      path: '/activity'
+      fullPath: '/activity'
+      preLoaderRoute: typeof ActivityRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/explore': {
@@ -288,11 +360,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof NewRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/notifications': {
+      id: '/notifications'
+      path: '/notifications'
+      fullPath: '/notifications'
+      preLoaderRoute: typeof NotificationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/popular': {
       id: '/popular'
       path: '/popular'
       fullPath: '/popular'
       preLoaderRoute: typeof PopularRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/profile': {
+      id: '/profile'
+      path: '/profile'
+      fullPath: '/profile'
+      preLoaderRoute: typeof ProfileRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/recent': {
@@ -372,16 +458,33 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ResultsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/u/$username/': {
+      id: '/u/$username/'
+      path: '/u/$username'
+      fullPath: '/u/$username/'
+      preLoaderRoute: typeof UUsernameIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/u/$username/connections': {
+      id: '/u/$username/connections'
+      path: '/u/$username/connections'
+      fullPath: '/u/$username/connections'
+      preLoaderRoute: typeof UUsernameConnectionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ActivityRoute: ActivityRoute,
   ExploreRoute: ExploreRoute,
   FollowingRoute: FollowingRoute,
   LikesRoute: LikesRoute,
   NewRoute: NewRoute,
+  NotificationsRoute: NotificationsRoute,
   PopularRoute: PopularRoute,
+  ProfileRoute: ProfileRoute,
   RecentRoute: RecentRoute,
   SavedRoute: SavedRoute,
   SearchRoute: SearchRoute,
@@ -393,6 +496,8 @@ const rootRouteChildren: RootRouteChildren = {
   ResultsIdRoute: ResultsIdRoute,
   CategoriesIndexRoute: CategoriesIndexRoute,
   LeaderboardsIndexRoute: LeaderboardsIndexRoute,
+  UUsernameConnectionsRoute: UUsernameConnectionsRoute,
+  UUsernameIndexRoute: UUsernameIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

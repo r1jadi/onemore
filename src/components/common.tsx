@@ -57,14 +57,18 @@ export function FollowButton({ initial = false, size = "sm" }: { initial?: boole
   );
 }
 
-export function Stat({ value, label, to }: { value: number | string; label: string; to?: string }) {
+export function Stat({ value, label, conn }: { value: number | string; label: string; conn?: { username: string; tab: "followers" | "following" } }) {
   const inner = (
     <>
       <span className="block font-semibold tabular">{typeof value === "number" ? fmt(value) : value}</span>
       <span className="text-xs text-muted-foreground">{label}</span>
     </>
   );
-  return to ? <Link to={to} className="press text-center">{inner}</Link> : <div className="text-center">{inner}</div>;
+  return conn ? (
+    <Link to="/u/$username/connections" params={{ username: conn.username }} search={{ tab: conn.tab }} className="press text-center">{inner}</Link>
+  ) : (
+    <div className="text-center">{inner}</div>
+  );
 }
 
 export function EmptyState({ icon: Icon = Inbox, title, body, action }: { icon?: typeof Inbox; title: string; body?: string; action?: ReactNode }) {
