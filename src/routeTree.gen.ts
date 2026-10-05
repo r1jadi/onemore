@@ -10,33 +10,245 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ExploreRouteImport } from './routes/explore'
+import { Route as FollowingRouteImport } from './routes/following'
+import { Route as LikesRouteImport } from './routes/likes'
+import { Route as NewRouteImport } from './routes/new'
+import { Route as PopularRouteImport } from './routes/popular'
+import { Route as RecentRouteImport } from './routes/recent'
+import { Route as SavedRouteImport } from './routes/saved'
+import { Route as SearchRouteImport } from './routes/search'
+import { Route as TrendingRouteImport } from './routes/trending'
+import { Route as CategoriesIndexRouteImport } from './routes/categories.index'
+import { Route as CategoriesSlugRouteImport } from './routes/categories.$slug'
+import { Route as GamesIdRouteImport } from './routes/games.$id'
+import { Route as LeaderboardsIndexRouteImport } from './routes/leaderboards.index'
+import { Route as LeaderboardsIdRouteImport } from './routes/leaderboards.$id'
+import { Route as PlayIdRouteImport } from './routes/play.$id'
+import { Route as ResultsIdRouteImport } from './routes/results.$id'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ExploreRoute = ExploreRouteImport.update({
+  id: '/explore',
+  path: '/explore',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FollowingRoute = FollowingRouteImport.update({
+  id: '/following',
+  path: '/following',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LikesRoute = LikesRouteImport.update({
+  id: '/likes',
+  path: '/likes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NewRoute = NewRouteImport.update({
+  id: '/new',
+  path: '/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PopularRoute = PopularRouteImport.update({
+  id: '/popular',
+  path: '/popular',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RecentRoute = RecentRouteImport.update({
+  id: '/recent',
+  path: '/recent',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SavedRoute = SavedRouteImport.update({
+  id: '/saved',
+  path: '/saved',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SearchRoute = SearchRouteImport.update({
+  id: '/search',
+  path: '/search',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TrendingRoute = TrendingRouteImport.update({
+  id: '/trending',
+  path: '/trending',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CategoriesIndexRoute = CategoriesIndexRouteImport.update({
+  id: '/categories/',
+  path: '/categories/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CategoriesSlugRoute = CategoriesSlugRouteImport.update({
+  id: '/categories/$slug',
+  path: '/categories/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GamesIdRoute = GamesIdRouteImport.update({
+  id: '/games/$id',
+  path: '/games/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LeaderboardsIndexRoute = LeaderboardsIndexRouteImport.update({
+  id: '/leaderboards/',
+  path: '/leaderboards/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LeaderboardsIdRoute = LeaderboardsIdRouteImport.update({
+  id: '/leaderboards/$id',
+  path: '/leaderboards/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PlayIdRoute = PlayIdRouteImport.update({
+  id: '/play/$id',
+  path: '/play/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResultsIdRoute = ResultsIdRouteImport.update({
+  id: '/results/$id',
+  path: '/results/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/explore': typeof ExploreRoute
+  '/following': typeof FollowingRoute
+  '/likes': typeof LikesRoute
+  '/new': typeof NewRoute
+  '/popular': typeof PopularRoute
+  '/recent': typeof RecentRoute
+  '/saved': typeof SavedRoute
+  '/search': typeof SearchRoute
+  '/trending': typeof TrendingRoute
+  '/categories/$slug': typeof CategoriesSlugRoute
+  '/games/$id': typeof GamesIdRoute
+  '/leaderboards/$id': typeof LeaderboardsIdRoute
+  '/play/$id': typeof PlayIdRoute
+  '/results/$id': typeof ResultsIdRoute
+  '/categories/': typeof CategoriesIndexRoute
+  '/leaderboards/': typeof LeaderboardsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/explore': typeof ExploreRoute
+  '/following': typeof FollowingRoute
+  '/likes': typeof LikesRoute
+  '/new': typeof NewRoute
+  '/popular': typeof PopularRoute
+  '/recent': typeof RecentRoute
+  '/saved': typeof SavedRoute
+  '/search': typeof SearchRoute
+  '/trending': typeof TrendingRoute
+  '/categories/$slug': typeof CategoriesSlugRoute
+  '/games/$id': typeof GamesIdRoute
+  '/leaderboards/$id': typeof LeaderboardsIdRoute
+  '/play/$id': typeof PlayIdRoute
+  '/results/$id': typeof ResultsIdRoute
+  '/categories': typeof CategoriesIndexRoute
+  '/leaderboards': typeof LeaderboardsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/explore': typeof ExploreRoute
+  '/following': typeof FollowingRoute
+  '/likes': typeof LikesRoute
+  '/new': typeof NewRoute
+  '/popular': typeof PopularRoute
+  '/recent': typeof RecentRoute
+  '/saved': typeof SavedRoute
+  '/search': typeof SearchRoute
+  '/trending': typeof TrendingRoute
+  '/categories/$slug': typeof CategoriesSlugRoute
+  '/games/$id': typeof GamesIdRoute
+  '/leaderboards/$id': typeof LeaderboardsIdRoute
+  '/play/$id': typeof PlayIdRoute
+  '/results/$id': typeof ResultsIdRoute
+  '/categories/': typeof CategoriesIndexRoute
+  '/leaderboards/': typeof LeaderboardsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/explore'
+    | '/following'
+    | '/likes'
+    | '/new'
+    | '/popular'
+    | '/recent'
+    | '/saved'
+    | '/search'
+    | '/trending'
+    | '/categories/$slug'
+    | '/games/$id'
+    | '/leaderboards/$id'
+    | '/play/$id'
+    | '/results/$id'
+    | '/categories/'
+    | '/leaderboards/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/explore'
+    | '/following'
+    | '/likes'
+    | '/new'
+    | '/popular'
+    | '/recent'
+    | '/saved'
+    | '/search'
+    | '/trending'
+    | '/categories/$slug'
+    | '/games/$id'
+    | '/leaderboards/$id'
+    | '/play/$id'
+    | '/results/$id'
+    | '/categories'
+    | '/leaderboards'
+  id:
+    | '__root__'
+    | '/'
+    | '/explore'
+    | '/following'
+    | '/likes'
+    | '/new'
+    | '/popular'
+    | '/recent'
+    | '/saved'
+    | '/search'
+    | '/trending'
+    | '/categories/$slug'
+    | '/games/$id'
+    | '/leaderboards/$id'
+    | '/play/$id'
+    | '/results/$id'
+    | '/categories/'
+    | '/leaderboards/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ExploreRoute: typeof ExploreRoute
+  FollowingRoute: typeof FollowingRoute
+  LikesRoute: typeof LikesRoute
+  NewRoute: typeof NewRoute
+  PopularRoute: typeof PopularRoute
+  RecentRoute: typeof RecentRoute
+  SavedRoute: typeof SavedRoute
+  SearchRoute: typeof SearchRoute
+  TrendingRoute: typeof TrendingRoute
+  CategoriesSlugRoute: typeof CategoriesSlugRoute
+  GamesIdRoute: typeof GamesIdRoute
+  LeaderboardsIdRoute: typeof LeaderboardsIdRoute
+  PlayIdRoute: typeof PlayIdRoute
+  ResultsIdRoute: typeof ResultsIdRoute
+  CategoriesIndexRoute: typeof CategoriesIndexRoute
+  LeaderboardsIndexRoute: typeof LeaderboardsIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +260,139 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/explore': {
+      id: '/explore'
+      path: '/explore'
+      fullPath: '/explore'
+      preLoaderRoute: typeof ExploreRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/following': {
+      id: '/following'
+      path: '/following'
+      fullPath: '/following'
+      preLoaderRoute: typeof FollowingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/likes': {
+      id: '/likes'
+      path: '/likes'
+      fullPath: '/likes'
+      preLoaderRoute: typeof LikesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/new': {
+      id: '/new'
+      path: '/new'
+      fullPath: '/new'
+      preLoaderRoute: typeof NewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/popular': {
+      id: '/popular'
+      path: '/popular'
+      fullPath: '/popular'
+      preLoaderRoute: typeof PopularRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/recent': {
+      id: '/recent'
+      path: '/recent'
+      fullPath: '/recent'
+      preLoaderRoute: typeof RecentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/saved': {
+      id: '/saved'
+      path: '/saved'
+      fullPath: '/saved'
+      preLoaderRoute: typeof SavedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/search': {
+      id: '/search'
+      path: '/search'
+      fullPath: '/search'
+      preLoaderRoute: typeof SearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/trending': {
+      id: '/trending'
+      path: '/trending'
+      fullPath: '/trending'
+      preLoaderRoute: typeof TrendingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/categories/': {
+      id: '/categories/'
+      path: '/categories'
+      fullPath: '/categories/'
+      preLoaderRoute: typeof CategoriesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/categories/$slug': {
+      id: '/categories/$slug'
+      path: '/categories/$slug'
+      fullPath: '/categories/$slug'
+      preLoaderRoute: typeof CategoriesSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/games/$id': {
+      id: '/games/$id'
+      path: '/games/$id'
+      fullPath: '/games/$id'
+      preLoaderRoute: typeof GamesIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/leaderboards/': {
+      id: '/leaderboards/'
+      path: '/leaderboards'
+      fullPath: '/leaderboards/'
+      preLoaderRoute: typeof LeaderboardsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/leaderboards/$id': {
+      id: '/leaderboards/$id'
+      path: '/leaderboards/$id'
+      fullPath: '/leaderboards/$id'
+      preLoaderRoute: typeof LeaderboardsIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/play/$id': {
+      id: '/play/$id'
+      path: '/play/$id'
+      fullPath: '/play/$id'
+      preLoaderRoute: typeof PlayIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/results/$id': {
+      id: '/results/$id'
+      path: '/results/$id'
+      fullPath: '/results/$id'
+      preLoaderRoute: typeof ResultsIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ExploreRoute: ExploreRoute,
+  FollowingRoute: FollowingRoute,
+  LikesRoute: LikesRoute,
+  NewRoute: NewRoute,
+  PopularRoute: PopularRoute,
+  RecentRoute: RecentRoute,
+  SavedRoute: SavedRoute,
+  SearchRoute: SearchRoute,
+  TrendingRoute: TrendingRoute,
+  CategoriesSlugRoute: CategoriesSlugRoute,
+  GamesIdRoute: GamesIdRoute,
+  LeaderboardsIdRoute: LeaderboardsIdRoute,
+  PlayIdRoute: PlayIdRoute,
+  ResultsIdRoute: ResultsIdRoute,
+  CategoriesIndexRoute: CategoriesIndexRoute,
+  LeaderboardsIndexRoute: LeaderboardsIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
