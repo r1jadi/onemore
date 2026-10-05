@@ -21,6 +21,6 @@ export const settingsGroups = [
     { slug: "privacy-policy", title: "Privacy Policy", desc: "", icon: FileText },
     { slug: "about", title: "About", desc: "Version 0.1.0", icon: Info },
   ] },
-] as const;
+];
 
 export const allSettings = settingsGroups.flatMap((g) => g.items);
