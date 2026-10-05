@@ -10,33 +10,466 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AccountCreatedRouteImport } from './routes/account-created'
+import { Route as ActivityRouteImport } from './routes/activity'
+import { Route as ExploreRouteImport } from './routes/explore'
+import { Route as FollowingRouteImport } from './routes/following'
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
+import { Route as LikesRouteImport } from './routes/likes'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as NewRouteImport } from './routes/new'
+import { Route as NotificationsRouteImport } from './routes/notifications'
+import { Route as OnboardingRouteImport } from './routes/onboarding'
+import { Route as PopularRouteImport } from './routes/popular'
+import { Route as PrivacyRouteImport } from './routes/privacy'
+import { Route as ProfileRouteImport } from './routes/profile'
+import { Route as RecentRouteImport } from './routes/recent'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as SavedRouteImport } from './routes/saved'
+import { Route as SearchRouteImport } from './routes/search'
+import { Route as SignupRouteImport } from './routes/signup'
+import { Route as TermsRouteImport } from './routes/terms'
+import { Route as TrendingRouteImport } from './routes/trending'
+import { Route as VerifyEmailRouteImport } from './routes/verify-email'
+import { Route as WelcomeRouteImport } from './routes/welcome'
+import { Route as CategoriesIndexRouteImport } from './routes/categories.index'
+import { Route as CategoriesSlugRouteImport } from './routes/categories.$slug'
+import { Route as GamesIdRouteImport } from './routes/games.$id'
+import { Route as LeaderboardsIndexRouteImport } from './routes/leaderboards.index'
+import { Route as LeaderboardsIdRouteImport } from './routes/leaderboards.$id'
+import { Route as PlayIdRouteImport } from './routes/play.$id'
+import { Route as ResultsIdRouteImport } from './routes/results.$id'
+import { Route as SettingsIndexRouteImport } from './routes/settings.index'
+import { Route as SettingsSectionRouteImport } from './routes/settings.$section'
+import { Route as UUsernameIndexRouteImport } from './routes/u.$username.index'
+import { Route as UUsernameConnectionsRouteImport } from './routes/u.$username.connections'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AccountCreatedRoute = AccountCreatedRouteImport.update({
+  id: '/account-created',
+  path: '/account-created',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ActivityRoute = ActivityRouteImport.update({
+  id: '/activity',
+  path: '/activity',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ExploreRoute = ExploreRouteImport.update({
+  id: '/explore',
+  path: '/explore',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FollowingRoute = FollowingRouteImport.update({
+  id: '/following',
+  path: '/following',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: '/forgot-password',
+  path: '/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LikesRoute = LikesRouteImport.update({
+  id: '/likes',
+  path: '/likes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NewRoute = NewRouteImport.update({
+  id: '/new',
+  path: '/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NotificationsRoute = NotificationsRouteImport.update({
+  id: '/notifications',
+  path: '/notifications',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OnboardingRoute = OnboardingRouteImport.update({
+  id: '/onboarding',
+  path: '/onboarding',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PopularRoute = PopularRouteImport.update({
+  id: '/popular',
+  path: '/popular',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PrivacyRoute = PrivacyRouteImport.update({
+  id: '/privacy',
+  path: '/privacy',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProfileRoute = ProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RecentRoute = RecentRouteImport.update({
+  id: '/recent',
+  path: '/recent',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SavedRoute = SavedRouteImport.update({
+  id: '/saved',
+  path: '/saved',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SearchRoute = SearchRouteImport.update({
+  id: '/search',
+  path: '/search',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignupRoute = SignupRouteImport.update({
+  id: '/signup',
+  path: '/signup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TermsRoute = TermsRouteImport.update({
+  id: '/terms',
+  path: '/terms',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TrendingRoute = TrendingRouteImport.update({
+  id: '/trending',
+  path: '/trending',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VerifyEmailRoute = VerifyEmailRouteImport.update({
+  id: '/verify-email',
+  path: '/verify-email',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WelcomeRoute = WelcomeRouteImport.update({
+  id: '/welcome',
+  path: '/welcome',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CategoriesIndexRoute = CategoriesIndexRouteImport.update({
+  id: '/categories/',
+  path: '/categories/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CategoriesSlugRoute = CategoriesSlugRouteImport.update({
+  id: '/categories/$slug',
+  path: '/categories/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GamesIdRoute = GamesIdRouteImport.update({
+  id: '/games/$id',
+  path: '/games/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LeaderboardsIndexRoute = LeaderboardsIndexRouteImport.update({
+  id: '/leaderboards/',
+  path: '/leaderboards/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LeaderboardsIdRoute = LeaderboardsIdRouteImport.update({
+  id: '/leaderboards/$id',
+  path: '/leaderboards/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PlayIdRoute = PlayIdRouteImport.update({
+  id: '/play/$id',
+  path: '/play/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResultsIdRoute = ResultsIdRouteImport.update({
+  id: '/results/$id',
+  path: '/results/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsIndexRoute = SettingsIndexRouteImport.update({
+  id: '/settings/',
+  path: '/settings/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsSectionRoute = SettingsSectionRouteImport.update({
+  id: '/settings/$section',
+  path: '/settings/$section',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const UUsernameIndexRoute = UUsernameIndexRouteImport.update({
+  id: '/u/$username/',
+  path: '/u/$username/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const UUsernameConnectionsRoute = UUsernameConnectionsRouteImport.update({
+  id: '/u/$username/connections',
+  path: '/u/$username/connections',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/account-created': typeof AccountCreatedRoute
+  '/activity': typeof ActivityRoute
+  '/explore': typeof ExploreRoute
+  '/following': typeof FollowingRoute
+  '/forgot-password': typeof ForgotPasswordRoute
+  '/likes': typeof LikesRoute
+  '/login': typeof LoginRoute
+  '/new': typeof NewRoute
+  '/notifications': typeof NotificationsRoute
+  '/onboarding': typeof OnboardingRoute
+  '/popular': typeof PopularRoute
+  '/privacy': typeof PrivacyRoute
+  '/profile': typeof ProfileRoute
+  '/recent': typeof RecentRoute
+  '/reset-password': typeof ResetPasswordRoute
+  '/saved': typeof SavedRoute
+  '/search': typeof SearchRoute
+  '/signup': typeof SignupRoute
+  '/terms': typeof TermsRoute
+  '/trending': typeof TrendingRoute
+  '/verify-email': typeof VerifyEmailRoute
+  '/welcome': typeof WelcomeRoute
+  '/categories/$slug': typeof CategoriesSlugRoute
+  '/games/$id': typeof GamesIdRoute
+  '/leaderboards/$id': typeof LeaderboardsIdRoute
+  '/play/$id': typeof PlayIdRoute
+  '/results/$id': typeof ResultsIdRoute
+  '/settings/$section': typeof SettingsSectionRoute
+  '/categories/': typeof CategoriesIndexRoute
+  '/leaderboards/': typeof LeaderboardsIndexRoute
+  '/settings/': typeof SettingsIndexRoute
+  '/u/$username/connections': typeof UUsernameConnectionsRoute
+  '/u/$username/': typeof UUsernameIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/account-created': typeof AccountCreatedRoute
+  '/activity': typeof ActivityRoute
+  '/explore': typeof ExploreRoute
+  '/following': typeof FollowingRoute
+  '/forgot-password': typeof ForgotPasswordRoute
+  '/likes': typeof LikesRoute
+  '/login': typeof LoginRoute
+  '/new': typeof NewRoute
+  '/notifications': typeof NotificationsRoute
+  '/onboarding': typeof OnboardingRoute
+  '/popular': typeof PopularRoute
+  '/privacy': typeof PrivacyRoute
+  '/profile': typeof ProfileRoute
+  '/recent': typeof RecentRoute
+  '/reset-password': typeof ResetPasswordRoute
+  '/saved': typeof SavedRoute
+  '/search': typeof SearchRoute
+  '/signup': typeof SignupRoute
+  '/terms': typeof TermsRoute
+  '/trending': typeof TrendingRoute
+  '/verify-email': typeof VerifyEmailRoute
+  '/welcome': typeof WelcomeRoute
+  '/categories/$slug': typeof CategoriesSlugRoute
+  '/games/$id': typeof GamesIdRoute
+  '/leaderboards/$id': typeof LeaderboardsIdRoute
+  '/play/$id': typeof PlayIdRoute
+  '/results/$id': typeof ResultsIdRoute
+  '/settings/$section': typeof SettingsSectionRoute
+  '/categories': typeof CategoriesIndexRoute
+  '/leaderboards': typeof LeaderboardsIndexRoute
+  '/settings': typeof SettingsIndexRoute
+  '/u/$username/connections': typeof UUsernameConnectionsRoute
+  '/u/$username': typeof UUsernameIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/account-created': typeof AccountCreatedRoute
+  '/activity': typeof ActivityRoute
+  '/explore': typeof ExploreRoute
+  '/following': typeof FollowingRoute
+  '/forgot-password': typeof ForgotPasswordRoute
+  '/likes': typeof LikesRoute
+  '/login': typeof LoginRoute
+  '/new': typeof NewRoute
+  '/notifications': typeof NotificationsRoute
+  '/onboarding': typeof OnboardingRoute
+  '/popular': typeof PopularRoute
+  '/privacy': typeof PrivacyRoute
+  '/profile': typeof ProfileRoute
+  '/recent': typeof RecentRoute
+  '/reset-password': typeof ResetPasswordRoute
+  '/saved': typeof SavedRoute
+  '/search': typeof SearchRoute
+  '/signup': typeof SignupRoute
+  '/terms': typeof TermsRoute
+  '/trending': typeof TrendingRoute
+  '/verify-email': typeof VerifyEmailRoute
+  '/welcome': typeof WelcomeRoute
+  '/categories/$slug': typeof CategoriesSlugRoute
+  '/games/$id': typeof GamesIdRoute
+  '/leaderboards/$id': typeof LeaderboardsIdRoute
+  '/play/$id': typeof PlayIdRoute
+  '/results/$id': typeof ResultsIdRoute
+  '/settings/$section': typeof SettingsSectionRoute
+  '/categories/': typeof CategoriesIndexRoute
+  '/leaderboards/': typeof LeaderboardsIndexRoute
+  '/settings/': typeof SettingsIndexRoute
+  '/u/$username/connections': typeof UUsernameConnectionsRoute
+  '/u/$username/': typeof UUsernameIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/account-created'
+    | '/activity'
+    | '/explore'
+    | '/following'
+    | '/forgot-password'
+    | '/likes'
+    | '/login'
+    | '/new'
+    | '/notifications'
+    | '/onboarding'
+    | '/popular'
+    | '/privacy'
+    | '/profile'
+    | '/recent'
+    | '/reset-password'
+    | '/saved'
+    | '/search'
+    | '/signup'
+    | '/terms'
+    | '/trending'
+    | '/verify-email'
+    | '/welcome'
+    | '/categories/$slug'
+    | '/games/$id'
+    | '/leaderboards/$id'
+    | '/play/$id'
+    | '/results/$id'
+    | '/settings/$section'
+    | '/categories/'
+    | '/leaderboards/'
+    | '/settings/'
+    | '/u/$username/connections'
+    | '/u/$username/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/account-created'
+    | '/activity'
+    | '/explore'
+    | '/following'
+    | '/forgot-password'
+    | '/likes'
+    | '/login'
+    | '/new'
+    | '/notifications'
+    | '/onboarding'
+    | '/popular'
+    | '/privacy'
+    | '/profile'
+    | '/recent'
+    | '/reset-password'
+    | '/saved'
+    | '/search'
+    | '/signup'
+    | '/terms'
+    | '/trending'
+    | '/verify-email'
+    | '/welcome'
+    | '/categories/$slug'
+    | '/games/$id'
+    | '/leaderboards/$id'
+    | '/play/$id'
+    | '/results/$id'
+    | '/settings/$section'
+    | '/categories'
+    | '/leaderboards'
+    | '/settings'
+    | '/u/$username/connections'
+    | '/u/$username'
+  id:
+    | '__root__'
+    | '/'
+    | '/account-created'
+    | '/activity'
+    | '/explore'
+    | '/following'
+    | '/forgot-password'
+    | '/likes'
+    | '/login'
+    | '/new'
+    | '/notifications'
+    | '/onboarding'
+    | '/popular'
+    | '/privacy'
+    | '/profile'
+    | '/recent'
+    | '/reset-password'
+    | '/saved'
+    | '/search'
+    | '/signup'
+    | '/terms'
+    | '/trending'
+    | '/verify-email'
+    | '/welcome'
+    | '/categories/$slug'
+    | '/games/$id'
+    | '/leaderboards/$id'
+    | '/play/$id'
+    | '/results/$id'
+    | '/settings/$section'
+    | '/categories/'
+    | '/leaderboards/'
+    | '/settings/'
+    | '/u/$username/connections'
+    | '/u/$username/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AccountCreatedRoute: typeof AccountCreatedRoute
+  ActivityRoute: typeof ActivityRoute
+  ExploreRoute: typeof ExploreRoute
+  FollowingRoute: typeof FollowingRoute
+  ForgotPasswordRoute: typeof ForgotPasswordRoute
+  LikesRoute: typeof LikesRoute
+  LoginRoute: typeof LoginRoute
+  NewRoute: typeof NewRoute
+  NotificationsRoute: typeof NotificationsRoute
+  OnboardingRoute: typeof OnboardingRoute
+  PopularRoute: typeof PopularRoute
+  PrivacyRoute: typeof PrivacyRoute
+  ProfileRoute: typeof ProfileRoute
+  RecentRoute: typeof RecentRoute
+  ResetPasswordRoute: typeof ResetPasswordRoute
+  SavedRoute: typeof SavedRoute
+  SearchRoute: typeof SearchRoute
+  SignupRoute: typeof SignupRoute
+  TermsRoute: typeof TermsRoute
+  TrendingRoute: typeof TrendingRoute
+  VerifyEmailRoute: typeof VerifyEmailRoute
+  WelcomeRoute: typeof WelcomeRoute
+  CategoriesSlugRoute: typeof CategoriesSlugRoute
+  GamesIdRoute: typeof GamesIdRoute
+  LeaderboardsIdRoute: typeof LeaderboardsIdRoute
+  PlayIdRoute: typeof PlayIdRoute
+  ResultsIdRoute: typeof ResultsIdRoute
+  SettingsSectionRoute: typeof SettingsSectionRoute
+  CategoriesIndexRoute: typeof CategoriesIndexRoute
+  LeaderboardsIndexRoute: typeof LeaderboardsIndexRoute
+  SettingsIndexRoute: typeof SettingsIndexRoute
+  UUsernameConnectionsRoute: typeof UUsernameConnectionsRoute
+  UUsernameIndexRoute: typeof UUsernameIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +481,275 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/account-created': {
+      id: '/account-created'
+      path: '/account-created'
+      fullPath: '/account-created'
+      preLoaderRoute: typeof AccountCreatedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/activity': {
+      id: '/activity'
+      path: '/activity'
+      fullPath: '/activity'
+      preLoaderRoute: typeof ActivityRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/explore': {
+      id: '/explore'
+      path: '/explore'
+      fullPath: '/explore'
+      preLoaderRoute: typeof ExploreRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/following': {
+      id: '/following'
+      path: '/following'
+      fullPath: '/following'
+      preLoaderRoute: typeof FollowingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/forgot-password': {
+      id: '/forgot-password'
+      path: '/forgot-password'
+      fullPath: '/forgot-password'
+      preLoaderRoute: typeof ForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/likes': {
+      id: '/likes'
+      path: '/likes'
+      fullPath: '/likes'
+      preLoaderRoute: typeof LikesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/new': {
+      id: '/new'
+      path: '/new'
+      fullPath: '/new'
+      preLoaderRoute: typeof NewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/notifications': {
+      id: '/notifications'
+      path: '/notifications'
+      fullPath: '/notifications'
+      preLoaderRoute: typeof NotificationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/onboarding': {
+      id: '/onboarding'
+      path: '/onboarding'
+      fullPath: '/onboarding'
+      preLoaderRoute: typeof OnboardingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/popular': {
+      id: '/popular'
+      path: '/popular'
+      fullPath: '/popular'
+      preLoaderRoute: typeof PopularRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/privacy': {
+      id: '/privacy'
+      path: '/privacy'
+      fullPath: '/privacy'
+      preLoaderRoute: typeof PrivacyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/profile': {
+      id: '/profile'
+      path: '/profile'
+      fullPath: '/profile'
+      preLoaderRoute: typeof ProfileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/recent': {
+      id: '/recent'
+      path: '/recent'
+      fullPath: '/recent'
+      preLoaderRoute: typeof RecentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/saved': {
+      id: '/saved'
+      path: '/saved'
+      fullPath: '/saved'
+      preLoaderRoute: typeof SavedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/search': {
+      id: '/search'
+      path: '/search'
+      fullPath: '/search'
+      preLoaderRoute: typeof SearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/signup': {
+      id: '/signup'
+      path: '/signup'
+      fullPath: '/signup'
+      preLoaderRoute: typeof SignupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/terms': {
+      id: '/terms'
+      path: '/terms'
+      fullPath: '/terms'
+      preLoaderRoute: typeof TermsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/trending': {
+      id: '/trending'
+      path: '/trending'
+      fullPath: '/trending'
+      preLoaderRoute: typeof TrendingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/verify-email': {
+      id: '/verify-email'
+      path: '/verify-email'
+      fullPath: '/verify-email'
+      preLoaderRoute: typeof VerifyEmailRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/welcome': {
+      id: '/welcome'
+      path: '/welcome'
+      fullPath: '/welcome'
+      preLoaderRoute: typeof WelcomeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/categories/': {
+      id: '/categories/'
+      path: '/categories'
+      fullPath: '/categories/'
+      preLoaderRoute: typeof CategoriesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/categories/$slug': {
+      id: '/categories/$slug'
+      path: '/categories/$slug'
+      fullPath: '/categories/$slug'
+      preLoaderRoute: typeof CategoriesSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/games/$id': {
+      id: '/games/$id'
+      path: '/games/$id'
+      fullPath: '/games/$id'
+      preLoaderRoute: typeof GamesIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/leaderboards/': {
+      id: '/leaderboards/'
+      path: '/leaderboards'
+      fullPath: '/leaderboards/'
+      preLoaderRoute: typeof LeaderboardsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/leaderboards/$id': {
+      id: '/leaderboards/$id'
+      path: '/leaderboards/$id'
+      fullPath: '/leaderboards/$id'
+      preLoaderRoute: typeof LeaderboardsIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/play/$id': {
+      id: '/play/$id'
+      path: '/play/$id'
+      fullPath: '/play/$id'
+      preLoaderRoute: typeof PlayIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/results/$id': {
+      id: '/results/$id'
+      path: '/results/$id'
+      fullPath: '/results/$id'
+      preLoaderRoute: typeof ResultsIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/': {
+      id: '/settings/'
+      path: '/settings'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof SettingsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/$section': {
+      id: '/settings/$section'
+      path: '/settings/$section'
+      fullPath: '/settings/$section'
+      preLoaderRoute: typeof SettingsSectionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/u/$username/': {
+      id: '/u/$username/'
+      path: '/u/$username'
+      fullPath: '/u/$username/'
+      preLoaderRoute: typeof UUsernameIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/u/$username/connections': {
+      id: '/u/$username/connections'
+      path: '/u/$username/connections'
+      fullPath: '/u/$username/connections'
+      preLoaderRoute: typeof UUsernameConnectionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AccountCreatedRoute: AccountCreatedRoute,
+  ActivityRoute: ActivityRoute,
+  ExploreRoute: ExploreRoute,
+  FollowingRoute: FollowingRoute,
+  ForgotPasswordRoute: ForgotPasswordRoute,
+  LikesRoute: LikesRoute,
+  LoginRoute: LoginRoute,
+  NewRoute: NewRoute,
+  NotificationsRoute: NotificationsRoute,
+  OnboardingRoute: OnboardingRoute,
+  PopularRoute: PopularRoute,
+  PrivacyRoute: PrivacyRoute,
+  ProfileRoute: ProfileRoute,
+  RecentRoute: RecentRoute,
+  ResetPasswordRoute: ResetPasswordRoute,
+  SavedRoute: SavedRoute,
+  SearchRoute: SearchRoute,
+  SignupRoute: SignupRoute,
+  TermsRoute: TermsRoute,
+  TrendingRoute: TrendingRoute,
+  VerifyEmailRoute: VerifyEmailRoute,
+  WelcomeRoute: WelcomeRoute,
+  CategoriesSlugRoute: CategoriesSlugRoute,
+  GamesIdRoute: GamesIdRoute,
+  LeaderboardsIdRoute: LeaderboardsIdRoute,
+  PlayIdRoute: PlayIdRoute,
+  ResultsIdRoute: ResultsIdRoute,
+  SettingsSectionRoute: SettingsSectionRoute,
+  CategoriesIndexRoute: CategoriesIndexRoute,
+  LeaderboardsIndexRoute: LeaderboardsIndexRoute,
+  SettingsIndexRoute: SettingsIndexRoute,
+  UUsernameConnectionsRoute: UUsernameConnectionsRoute,
+  UUsernameIndexRoute: UUsernameIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
