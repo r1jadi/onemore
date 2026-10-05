@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
-import { AuthLayout, Field } from "@/components/auth/AuthLayout";
+import { AuthLayout, Field, SocialButtons } from "@/components/auth/AuthLayout";
 import { Button } from "@/components/ui/button";
 import { seo } from "@/lib/seo";
 
@@ -9,18 +9,6 @@ export const Route = createFileRoute("/login")({
   head: () => seo("Log in", "Log in to onemore to keep your scores and streaks."),
   component: Login,
 });
-
-export function SocialButtons() {
-  return (
-    <>
-      <div className="grid gap-2">
-        <Button variant="secondary" size="lg" type="button">Continue with Apple</Button>
-        <Button variant="secondary" size="lg" type="button">Continue with Google</Button>
-      </div>
-      <div className="my-6 flex items-center gap-3 text-xs text-muted-foreground"><span className="h-px flex-1 bg-border" />or with email<span className="h-px flex-1 bg-border" /></div>
-    </>
-  );
-}
 
 function Login() {
   const nav = useNavigate();

@@ -1,9 +1,8 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Check, FileText, Shield, Mail } from "lucide-react";
 import { useState } from "react";
-import { AuthLayout, Field } from "@/components/auth/AuthLayout";
+import { AuthLayout, Field, SocialButtons } from "@/components/auth/AuthLayout";
 import { LegalBody, privacy, terms } from "@/components/legal";
-import { SocialButtons } from "./login";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { seo } from "@/lib/seo";

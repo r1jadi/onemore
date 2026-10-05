@@ -45,3 +45,16 @@ export function Field({ id, label, hint, error, ...props }: React.ComponentProps
     </div>
   );
 }
+
+export function SocialButtons() {
+  return (
+    <>
+      <div className="grid gap-2">
+        <Button variant="secondary" size="lg" type="button">Continue with Apple</Button>
+        <Button variant="secondary" size="lg" type="button">Continue with Google</Button>
+      </div>
+      <div className="my-6 flex items-center gap-3 text-xs text-muted-foreground"><span className="h-px flex-1 bg-border" />or with email<span className="h-px flex-1 bg-border" /></div>
+    </>
+  );
+}
+
