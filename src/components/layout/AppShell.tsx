@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Bell, Bookmark, Clock, Compass, Home, Search, Settings, Shield, Trophy, User, Users } from "lucide-react";
+import { Bell, Bookmark, Clock, Compass, Home, Search, Settings, Trophy, User, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import { Logo } from "./Logo";
 import { cn } from "@/lib/utils";
@@ -47,7 +47,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         </nav>
         <div className="flex flex-col gap-0.5 border-t border-sidebar-border pt-3">
           <Link to="/settings" className={cn("press flex h-10 items-center gap-3 rounded-lg px-3 text-sm text-sidebar-foreground/75 hover:bg-sidebar-accent", isActive("/settings") && "bg-sidebar-accent text-sidebar-foreground")}><Settings className="size-[18px]" strokeWidth={1.75} />Settings</Link>
-          <Link to="/admin" className="press flex h-10 items-center gap-3 rounded-lg px-3 text-sm text-sidebar-foreground/75 hover:bg-sidebar-accent"><Shield className="size-[18px]" strokeWidth={1.75} />Admin</Link>
           <Link to="/welcome" className="px-3 pt-2 text-xs text-muted-foreground hover:text-foreground">Sign-in screens</Link>
         </div>
       </aside>
