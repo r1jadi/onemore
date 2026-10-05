@@ -17,10 +17,12 @@ import { Route as LikesRouteImport } from './routes/likes'
 import { Route as NewRouteImport } from './routes/new'
 import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as PopularRouteImport } from './routes/popular'
+import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as RecentRouteImport } from './routes/recent'
 import { Route as SavedRouteImport } from './routes/saved'
 import { Route as SearchRouteImport } from './routes/search'
+import { Route as TermsRouteImport } from './routes/terms'
 import { Route as TrendingRouteImport } from './routes/trending'
 import { Route as CategoriesIndexRouteImport } from './routes/categories.index'
 import { Route as CategoriesSlugRouteImport } from './routes/categories.$slug'
@@ -72,6 +74,11 @@ const PopularRoute = PopularRouteImport.update({
   path: '/popular',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PrivacyRoute = PrivacyRouteImport.update({
+  id: '/privacy',
+  path: '/privacy',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProfileRoute = ProfileRouteImport.update({
   id: '/profile',
   path: '/profile',
@@ -90,6 +97,11 @@ const SavedRoute = SavedRouteImport.update({
 const SearchRoute = SearchRouteImport.update({
   id: '/search',
   path: '/search',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TermsRoute = TermsRouteImport.update({
+  id: '/terms',
+  path: '/terms',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TrendingRoute = TrendingRouteImport.update({
@@ -152,10 +164,12 @@ export interface FileRoutesByFullPath {
   '/new': typeof NewRoute
   '/notifications': typeof NotificationsRoute
   '/popular': typeof PopularRoute
+  '/privacy': typeof PrivacyRoute
   '/profile': typeof ProfileRoute
   '/recent': typeof RecentRoute
   '/saved': typeof SavedRoute
   '/search': typeof SearchRoute
+  '/terms': typeof TermsRoute
   '/trending': typeof TrendingRoute
   '/categories/$slug': typeof CategoriesSlugRoute
   '/games/$id': typeof GamesIdRoute
@@ -176,10 +190,12 @@ export interface FileRoutesByTo {
   '/new': typeof NewRoute
   '/notifications': typeof NotificationsRoute
   '/popular': typeof PopularRoute
+  '/privacy': typeof PrivacyRoute
   '/profile': typeof ProfileRoute
   '/recent': typeof RecentRoute
   '/saved': typeof SavedRoute
   '/search': typeof SearchRoute
+  '/terms': typeof TermsRoute
   '/trending': typeof TrendingRoute
   '/categories/$slug': typeof CategoriesSlugRoute
   '/games/$id': typeof GamesIdRoute
@@ -201,10 +217,12 @@ export interface FileRoutesById {
   '/new': typeof NewRoute
   '/notifications': typeof NotificationsRoute
   '/popular': typeof PopularRoute
+  '/privacy': typeof PrivacyRoute
   '/profile': typeof ProfileRoute
   '/recent': typeof RecentRoute
   '/saved': typeof SavedRoute
   '/search': typeof SearchRoute
+  '/terms': typeof TermsRoute
   '/trending': typeof TrendingRoute
   '/categories/$slug': typeof CategoriesSlugRoute
   '/games/$id': typeof GamesIdRoute
@@ -227,10 +245,12 @@ export interface FileRouteTypes {
     | '/new'
     | '/notifications'
     | '/popular'
+    | '/privacy'
     | '/profile'
     | '/recent'
     | '/saved'
     | '/search'
+    | '/terms'
     | '/trending'
     | '/categories/$slug'
     | '/games/$id'
@@ -251,10 +271,12 @@ export interface FileRouteTypes {
     | '/new'
     | '/notifications'
     | '/popular'
+    | '/privacy'
     | '/profile'
     | '/recent'
     | '/saved'
     | '/search'
+    | '/terms'
     | '/trending'
     | '/categories/$slug'
     | '/games/$id'
@@ -275,10 +297,12 @@ export interface FileRouteTypes {
     | '/new'
     | '/notifications'
     | '/popular'
+    | '/privacy'
     | '/profile'
     | '/recent'
     | '/saved'
     | '/search'
+    | '/terms'
     | '/trending'
     | '/categories/$slug'
     | '/games/$id'
@@ -300,10 +324,12 @@ export interface RootRouteChildren {
   NewRoute: typeof NewRoute
   NotificationsRoute: typeof NotificationsRoute
   PopularRoute: typeof PopularRoute
+  PrivacyRoute: typeof PrivacyRoute
   ProfileRoute: typeof ProfileRoute
   RecentRoute: typeof RecentRoute
   SavedRoute: typeof SavedRoute
   SearchRoute: typeof SearchRoute
+  TermsRoute: typeof TermsRoute
   TrendingRoute: typeof TrendingRoute
   CategoriesSlugRoute: typeof CategoriesSlugRoute
   GamesIdRoute: typeof GamesIdRoute
@@ -374,6 +400,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PopularRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/privacy': {
+      id: '/privacy'
+      path: '/privacy'
+      fullPath: '/privacy'
+      preLoaderRoute: typeof PrivacyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/profile': {
       id: '/profile'
       path: '/profile'
@@ -400,6 +433,13 @@ declare module '@tanstack/react-router' {
       path: '/search'
       fullPath: '/search'
       preLoaderRoute: typeof SearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/terms': {
+      id: '/terms'
+      path: '/terms'
+      fullPath: '/terms'
+      preLoaderRoute: typeof TermsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/trending': {
@@ -484,10 +524,12 @@ const rootRouteChildren: RootRouteChildren = {
   NewRoute: NewRoute,
   NotificationsRoute: NotificationsRoute,
   PopularRoute: PopularRoute,
+  PrivacyRoute: PrivacyRoute,
   ProfileRoute: ProfileRoute,
   RecentRoute: RecentRoute,
   SavedRoute: SavedRoute,
   SearchRoute: SearchRoute,
+  TermsRoute: TermsRoute,
   TrendingRoute: TrendingRoute,
   CategoriesSlugRoute: CategoriesSlugRoute,
   GamesIdRoute: GamesIdRoute,

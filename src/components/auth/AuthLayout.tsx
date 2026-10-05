@@ -1,0 +1,47 @@
+import { Link, useRouter } from "@tanstack/react-router";
+import { ArrowLeft } from "lucide-react";
+import type { ReactNode } from "react";
+import { GameArt } from "@/components/game/GameArt";
+import { Logo } from "@/components/layout/Logo";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import type { GameId } from "@/lib/mock";
+
+const collage: GameId[] = ["stack-10", "memory-flash", "color-merge", "dont-break-the-chain"];
+
+export function AuthLayout({ title, subtitle, children, back = true, footer }: { title: string; subtitle?: string; children: ReactNode; back?: boolean; footer?: ReactNode }) {
+  const router = useRouter();
+  return (
+    <div className="min-h-dvh lg:grid lg:grid-cols-2">
+      <div className="hidden border-r border-border bg-sidebar p-10 lg:flex lg:flex-col">
+        <Link to="/" aria-label="onemore home"><Logo /></Link>
+        <div className="my-auto grid max-w-md grid-cols-2 gap-3 self-center">
+          {collage.map((id) => <GameArt key={id} id={id} className="aspect-square rounded-2xl border border-glass-border" />)}
+        </div>
+        <p className="max-w-sm text-sm text-muted-foreground">Short games. Real scores. Always one more.</p>
+      </div>
+      <div className="flex min-h-dvh flex-col px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+        <div className="flex h-12 items-center">
+          {back && <Button variant="ghost" size="icon" aria-label="Go back" className="-ml-2" onClick={() => router.history.back()}><ArrowLeft /></Button>}
+        </div>
+        <div className="enter mx-auto flex w-full max-w-sm flex-1 flex-col pt-4 lg:justify-center lg:pt-0">
+          <h1 className="text-2xl font-semibold">{title}</h1>
+          {subtitle && <p className="mt-1.5 text-sm text-muted-foreground">{subtitle}</p>}
+          <div className="mt-8 flex flex-1 flex-col lg:flex-none">{children}</div>
+          {footer && <div className="mt-6 text-center text-sm text-muted-foreground">{footer}</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function Field({ id, label, hint, error, ...props }: React.ComponentProps<typeof Input> & { id: string; label: string; hint?: ReactNode; error?: string }) {
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-baseline justify-between"><Label htmlFor={id}>{label}</Label>{hint}</div>
+      <Input id={id} aria-invalid={!!error} aria-describedby={error ? `${id}-err` : undefined} className="h-12 rounded-lg bg-surface text-base md:text-sm" {...props} />
+      {error && <p id={`${id}-err`} className="text-xs text-destructive">{error}</p>}
+    </div>
+  );
+}
