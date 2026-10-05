@@ -39,6 +39,8 @@ import { Route as LeaderboardsIndexRouteImport } from './routes/leaderboards.ind
 import { Route as LeaderboardsIdRouteImport } from './routes/leaderboards.$id'
 import { Route as PlayIdRouteImport } from './routes/play.$id'
 import { Route as ResultsIdRouteImport } from './routes/results.$id'
+import { Route as SettingsIndexRouteImport } from './routes/settings.index'
+import { Route as SettingsSectionRouteImport } from './routes/settings.$section'
 import { Route as UUsernameIndexRouteImport } from './routes/u.$username.index'
 import { Route as UUsernameConnectionsRouteImport } from './routes/u.$username.connections'
 
@@ -192,6 +194,16 @@ const ResultsIdRoute = ResultsIdRouteImport.update({
   path: '/results/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsIndexRoute = SettingsIndexRouteImport.update({
+  id: '/settings/',
+  path: '/settings/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsSectionRoute = SettingsSectionRouteImport.update({
+  id: '/settings/$section',
+  path: '/settings/$section',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const UUsernameIndexRoute = UUsernameIndexRouteImport.update({
   id: '/u/$username/',
   path: '/u/$username/',
@@ -232,8 +244,10 @@ export interface FileRoutesByFullPath {
   '/leaderboards/$id': typeof LeaderboardsIdRoute
   '/play/$id': typeof PlayIdRoute
   '/results/$id': typeof ResultsIdRoute
+  '/settings/$section': typeof SettingsSectionRoute
   '/categories/': typeof CategoriesIndexRoute
   '/leaderboards/': typeof LeaderboardsIndexRoute
+  '/settings/': typeof SettingsIndexRoute
   '/u/$username/connections': typeof UUsernameConnectionsRoute
   '/u/$username/': typeof UUsernameIndexRoute
 }
@@ -266,8 +280,10 @@ export interface FileRoutesByTo {
   '/leaderboards/$id': typeof LeaderboardsIdRoute
   '/play/$id': typeof PlayIdRoute
   '/results/$id': typeof ResultsIdRoute
+  '/settings/$section': typeof SettingsSectionRoute
   '/categories': typeof CategoriesIndexRoute
   '/leaderboards': typeof LeaderboardsIndexRoute
+  '/settings': typeof SettingsIndexRoute
   '/u/$username/connections': typeof UUsernameConnectionsRoute
   '/u/$username': typeof UUsernameIndexRoute
 }
@@ -301,8 +317,10 @@ export interface FileRoutesById {
   '/leaderboards/$id': typeof LeaderboardsIdRoute
   '/play/$id': typeof PlayIdRoute
   '/results/$id': typeof ResultsIdRoute
+  '/settings/$section': typeof SettingsSectionRoute
   '/categories/': typeof CategoriesIndexRoute
   '/leaderboards/': typeof LeaderboardsIndexRoute
+  '/settings/': typeof SettingsIndexRoute
   '/u/$username/connections': typeof UUsernameConnectionsRoute
   '/u/$username/': typeof UUsernameIndexRoute
 }
@@ -337,8 +355,10 @@ export interface FileRouteTypes {
     | '/leaderboards/$id'
     | '/play/$id'
     | '/results/$id'
+    | '/settings/$section'
     | '/categories/'
     | '/leaderboards/'
+    | '/settings/'
     | '/u/$username/connections'
     | '/u/$username/'
   fileRoutesByTo: FileRoutesByTo
@@ -371,8 +391,10 @@ export interface FileRouteTypes {
     | '/leaderboards/$id'
     | '/play/$id'
     | '/results/$id'
+    | '/settings/$section'
     | '/categories'
     | '/leaderboards'
+    | '/settings'
     | '/u/$username/connections'
     | '/u/$username'
   id:
@@ -405,8 +427,10 @@ export interface FileRouteTypes {
     | '/leaderboards/$id'
     | '/play/$id'
     | '/results/$id'
+    | '/settings/$section'
     | '/categories/'
     | '/leaderboards/'
+    | '/settings/'
     | '/u/$username/connections'
     | '/u/$username/'
   fileRoutesById: FileRoutesById
@@ -440,8 +464,10 @@ export interface RootRouteChildren {
   LeaderboardsIdRoute: typeof LeaderboardsIdRoute
   PlayIdRoute: typeof PlayIdRoute
   ResultsIdRoute: typeof ResultsIdRoute
+  SettingsSectionRoute: typeof SettingsSectionRoute
   CategoriesIndexRoute: typeof CategoriesIndexRoute
   LeaderboardsIndexRoute: typeof LeaderboardsIndexRoute
+  SettingsIndexRoute: typeof SettingsIndexRoute
   UUsernameConnectionsRoute: typeof UUsernameConnectionsRoute
   UUsernameIndexRoute: typeof UUsernameIndexRoute
 }
@@ -658,6 +684,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ResultsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings/': {
+      id: '/settings/'
+      path: '/settings'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof SettingsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/$section': {
+      id: '/settings/$section'
+      path: '/settings/$section'
+      fullPath: '/settings/$section'
+      preLoaderRoute: typeof SettingsSectionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/u/$username/': {
       id: '/u/$username/'
       path: '/u/$username'
@@ -704,8 +744,10 @@ const rootRouteChildren: RootRouteChildren = {
   LeaderboardsIdRoute: LeaderboardsIdRoute,
   PlayIdRoute: PlayIdRoute,
   ResultsIdRoute: ResultsIdRoute,
+  SettingsSectionRoute: SettingsSectionRoute,
   CategoriesIndexRoute: CategoriesIndexRoute,
   LeaderboardsIndexRoute: LeaderboardsIndexRoute,
+  SettingsIndexRoute: SettingsIndexRoute,
   UUsernameConnectionsRoute: UUsernameConnectionsRoute,
   UUsernameIndexRoute: UUsernameIndexRoute,
 }
