@@ -277,8 +277,9 @@ func RateLimit(limiter *RateLimiter, cfg config.RateLimit) Middleware {
 			return next
 		}
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Health probes must never be rate limited.
-			if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
+			// Health probes must never be rate limited: a throttled client
+			// would otherwise turn a healthy deployment red.
+			if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" || r.URL.Path == HealthPath {
 				next.ServeHTTP(w, r)
 				return
 			}

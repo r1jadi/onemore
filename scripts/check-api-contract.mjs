@@ -83,8 +83,10 @@ if (undocumented.length > 0) {
 
 // The reverse direction: a documented path the gateway cannot route would ship
 // a contract that 503s for every caller.
-// Paths the gateway answers itself rather than proxying to a service group.
-const GATEWAY_OWNED_PATHS = ["/"];
+// Paths the gateway answers itself rather than proxying to a service group: the
+// version endpoint and the versioned liveness probe (httpx.HealthPath, which the
+// gateway's own router serves — see services/gateway/internal/proxy).
+const GATEWAY_OWNED_PATHS = ["/", "/health"];
 
 const unroutable = paths.filter(
   (path) =>

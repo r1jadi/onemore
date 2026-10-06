@@ -5,9 +5,9 @@
 | Environment | Purpose | Web | API | Database |
 | --- | --- | --- | --- | --- |
 | **development** | a developer's machine | `npm run dev` on `:8081` | `go run ./gateway/cmd/gateway` on `:8080` | local Supabase (`supabase start`) or the Docker harness |
-| **preview** | one per pull request | Vercel preview | not deployed — an unconfigured API answers `503` | staging project (read-only data) |
-| **staging** | pre-production verification | Vercel preview of `main` | same image as production, separate config | separate Supabase project |
-| **production** | users | `https://onemorestartup.vercel.app` | to be provisioned | hosted Supabase project |
+| **preview** | one per pull request | Vercel preview | Vercel preview (same deployment, `development`-like config) | staging project (read-only data) |
+| **staging** | pre-production verification | Vercel preview of `main` | same deployment as production, separate config | separate Supabase project |
+| **production** | users | `https://onemorestartup.vercel.app` | `https://onemorestartup.vercel.app/api/v1` (a service of the same Vercel project) | hosted Supabase project |
 
 `ENVIRONMENT` drives the hardening rules: a wildcard CORS origin, an empty CORS
 allowlist, missing auth material, a non-HTTPS JWKS URL and a disabled rate limiter
@@ -57,8 +57,8 @@ leaked — see [security/env-and-secrets.md](../security/env-and-secrets.md).
 | Environment | Mechanism |
 | --- | --- |
 | development | `.env.local` (web), shell environment or a `direnv`-style loader (Go) |
-| preview / production (web) | Vercel → Project → Settings → Environment Variables, scoped per environment |
-| staging / production (API) | the platform's secret store (e.g. Fly/Render/Railway secrets, or a mounted env file) — never a committed file |
+| preview / production (web and API) | Vercel → Project → Settings → Environment Variables, scoped per environment. Variables are project-scoped, so the web service and the API service read the same set; only `VITE_*` names reach the browser bundle. The required set and exact values are in [deployment/vercel.md](../deployment/vercel.md). |
+| any other API host | the platform's secret store (e.g. a mounted env file or container secrets) — never a committed file |
 
 Vercel scoping matters: a preview deployment must not receive production
 secrets. Set public values for all environments and secrets only for Production.
@@ -91,10 +91,10 @@ onto the names in this repository.
 | Value | Where a human gets it |
 | --- | --- |
 | `VITE_PUBLIC_SITE_URL` | The origin the app is actually served from: the custom domain, otherwise the Vercel production domain. |
-| `VITE_API_BASE_URL` | The deployed gateway's origin. Empty until an API host exists. |
-| `ENVIRONMENT` | Chosen, not found: `development` locally, `staging` or `production` on a host. It selects the hardening rules in `config.Validate`. |
+| `VITE_API_BASE_URL` | The deployed gateway's origin: `https://onemorestartup.vercel.app/api/v1` in production, `http://localhost:8080/api/v1` locally. Empty means same-origin `/api/v1`, which is also correct in production now that the gateway is part of the same deployment. |
+| `ENVIRONMENT` | Chosen, not found: `development` locally, `production` on Vercel, `staging` on a staging host. It selects the hardening rules in `config.Validate`. |
 | `SERVICE_NAME` | Chosen: the service being run (`gateway`, `auth`, …), used in logs. |
-| `HTTP_ADDR` | Chosen: the port the service listens on. Most hosts inject `PORT`; set `:8080` locally. |
+| `HTTP_ADDR` | Chosen: the port the service listens on. Set `:8080` locally; on Vercel leave it unset, because the platform injects `PORT` and `config.Load` prefers `HTTP_ADDR`, then `PORT_HTTP`, then `PORT`. |
 | `LOG_LEVEL`, `LOG_FORMAT` | Chosen: `debug`/`info`/`warn`/`error` and `json`/`text`. |
 | `CORS_ALLOWED_ORIGINS` | The exact browser origins the web app is served from — dev server, Vercel production and preview domains. Comma-separated, no wildcard outside development. |
 | `RATE_LIMIT_*` | Tuned from observed traffic, not discovered. Defaults suit a single instance; raise them deliberately. |
@@ -142,13 +142,19 @@ dashboard access:
    `supabase/migrations` are written for a project without those objects and must
    be reconciled before they are applied to a project that already has data.
    Run `supabase link` and `supabase db pull` to compare.
-2. **API deployment.** The Go services have no host yet. Until one exists,
-   `VITE_API_BASE_URL` should stay empty so the web app calls the same origin and
-   fails predictably with `503` rather than pointing at a host that is not there.
+2. **Vercel services mode.** `vercel.json` declares the two services, but Vercel
+   only builds them as services when the project's framework preset is set to
+   **Services**, which needs dashboard access. Until then the configuration is
+   inert and `/api/v1` is still served by the web app. Steps, exact environment
+   variables and the verification commands are in
+   [deployment/vercel.md](../deployment/vercel.md).
 3. **Vercel environment variables.** `VITE_SUPABASE_URL` and
    `VITE_SUPABASE_PUBLISHABLE_KEY` must be set in Vercel for auth to work; the app
    reports a clear configuration error until they are. Set them for all
-   environments; keep `SUPABASE_SECRET_KEY` scoped to Production only.
+   environments; keep `SUPABASE_SECRET_KEY` scoped to Production only. The
+   gateway's own variables (`ENVIRONMENT`, `SUPABASE_URL`, `CORS_ALLOWED_ORIGINS`,
+   `RATE_LIMIT_ENABLED`) are listed in the same document — it must never be given
+   `SUPABASE_JWT_SECRET` or `SUPABASE_SECRET_KEY`.
 4. **Custom domain.** When one is chosen, set `VITE_PUBLIC_SITE_URL`, regenerate
    the sitemap (`npm run sitemap`), update the `Sitemap:` line in `robots.txt`,
    and add the origin to `CORS_ALLOWED_ORIGINS`. Nothing else changes.

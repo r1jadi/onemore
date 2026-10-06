@@ -80,6 +80,8 @@ tags:
     description: Product analytics.
   - name: admin
     description: Operations API behind the admin dashboard.
+  - name: health
+    description: Liveness of the gateway itself, for uptime checks and deployments.
 
 security:
   - bearerAuth: []
@@ -104,6 +106,34 @@ paths:
                   apiVersion: { type: string, const: v1 }
                   version: { type: string, example: 0.1.0 }
                   commit: { type: string, example: 9f2c1ab }
+
+  /health:
+    get:
+      operationId: getHealth
+      tags: [health]
+      summary: Report that the gateway is serving requests
+      description: |
+        Liveness of the deployed gateway itself, not of anything behind it: it
+        verifies no token, opens no database connection and calls no upstream, so
+        it answers `200` even while every backend service is unimplemented and
+        answers `501`. Readiness — which does run dependency checks — is the
+        unversioned `/readyz`, and orchestrators keep using `/healthz` and
+        `/readyz`.
+      security: []
+      x-status: available
+      responses:
+        "200":
+          description: The gateway is serving requests.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, version]
+                properties:
+                  status: { type: string, const: ok }
+                  version: { type: string, example: 0.1.0 }
+        "503":
+          description: The process is draining, so it must receive no new traffic.
 
   /auth/session:
     post:

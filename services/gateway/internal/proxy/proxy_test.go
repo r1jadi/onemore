@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/r1jadi/onemore/packages/go/platform/config"
+	"github.com/r1jadi/onemore/packages/go/platform/httpx"
 )
 
 // recorder is a stand-in upstream service.
@@ -160,6 +161,21 @@ func TestNonAPIPathFallsThroughToTheNextHandler(t *testing.T) {
 
 	if response.StatusCode != http.StatusTeapot {
 		t.Fatalf("status = %d, want the fallback handler's 418", response.StatusCode)
+	}
+}
+
+func TestGatewayOwnedPathsAreNotTreatedAsUnconfiguredGroups(t *testing.T) {
+	handler := proxyHandler(t, nil)
+
+	// `/api/v1` (version discovery) and `/api/v1/health` (liveness) belong to the
+	// gateway's own router. Answering them with the unconfigured-upstream 503
+	// would make a healthy deployment look down to every probe that reports it.
+	for _, path := range []string{"/api/v1", "/api/v1/", httpx.HealthPath} {
+		response := do(t, handler, http.MethodGet, path, nil)
+		response.Body.Close()
+		if response.StatusCode != http.StatusTeapot {
+			t.Errorf("%s = %d, want the fallback handler's 418 (never proxied, never 503)", path, response.StatusCode)
+		}
 	}
 }
 

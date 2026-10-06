@@ -89,9 +89,16 @@ Run the gateway:
 cd services
 ENVIRONMENT=development LOG_FORMAT=text CORS_ALLOWED_ORIGINS=http://localhost:8081 \
   go run ./gateway/cmd/gateway
-curl -s localhost:8080/healthz
-curl -s localhost:8080/api/v1
+curl -s localhost:8080/healthz        # liveness, plain text
+curl -s localhost:8080/api/v1/health  # the published liveness route
+curl -s localhost:8080/readyz         # readiness, runs dependency checks
+curl -s localhost:8080/api/v1         # version discovery
 ```
+
+`services/cmd/api` is the entrypoint Vercel detects (`go run ./cmd/api` uses
+`PORT` when it is set, `:8080` otherwise). It runs the same wiring; the routing
+and environment variables the deployment needs are in
+[deployment/vercel.md](../deployment/vercel.md).
 
 Run one service:
 

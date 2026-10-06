@@ -1,0 +1,20 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "web": {
+      "root": "./"
+    },
+    "api": {
+      "root": "services/",
+      "framework": "go",
+      "entrypoint": "cmd/api/main.go"
+    }
+  },
+  "rewrites": [
+    { "source": "/api/v1", "destination": { "service": "api" } },
+    { "source": "/api/v1/(.*)", "destination": { "service": "api" } },
+    { "source": "/healthz", "destination": { "service": "api" } },
+    { "source": "/readyz", "destination": { "service": "api" } },
+    { "source": "/(.*)", "destination": { "service": "web" } }
+  ]
+}

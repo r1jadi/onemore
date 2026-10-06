@@ -14,6 +14,7 @@ not edit history.
 | [0006](0006-dependency-and-lockfile-policy.md) | `bun.lock` is authoritative; no dependency is added without updating it | Accepted |
 | [0007](0007-database-authorization-model.md) | Grants plus RLS, with privileges in a separate table | Accepted |
 | [0008](0008-browser-data-access.md) | The browser talks to `/api/v1` for domain data; Supabase directly only for auth and storage | Accepted |
+| [0009](0009-vercel-deployment-topology.md) | The Go gateway deploys as a service of the existing Vercel project, on the platform's port | Accepted |
 
 ## Template
 

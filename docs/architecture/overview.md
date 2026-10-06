@@ -4,8 +4,11 @@
 
 ```
                     ┌──────────────────────────────────────────┐
-   browser / PWA ──▶│  Vercel                                  │
-                    │  TanStack Start (React 19, SSR) + assets │
+   browser / PWA ──▶│  Vercel project (one domain)             │
+                    │    web service → /                       │
+                    │      TanStack Start (React 19, SSR)      │
+                    │    api service → /api/v1/*               │
+                    │      Go gateway (services/)              │
                     └───────────────┬──────────────────────────┘
                                     │  /api/v1/*  (bearer token)
                     ┌───────────────▼──────────────────────────┐
@@ -35,19 +38,25 @@ where they will attach is described in
 
 ## The request path, end to end
 
-1. A page is rendered by the web app on Vercel. Public pages are server rendered
-   with canonical URLs and structured data; private pages are served with
-   `noindex` (see [web-app.md](web-app.md)).
+1. A page is rendered by the web service of the Vercel project. Public pages are
+   server rendered with canonical URLs and structured data; private pages are
+   served with `noindex` (see [web-app.md](web-app.md)).
 2. The browser calls `https://<origin>/api/v1/<group>/...` through
    `apiFetch` (`src/lib/api/client.ts`). The caller's identity travels in an
-   `Authorization: Bearer <supabase access token>` header and nowhere else.
-3. The gateway strips any client-supplied identity headers, applies the security
+   `Authorization: Bearer <supabase access token>` header and nowhere else. The
+   rewrite table in [`vercel.json`](../../vercel.json) sends every `/api/v1/*`
+   path to the API service and nothing else, so the web app never renders an API
+   URL — see [deployment/vercel.md](../deployment/vercel.md).
+3. The api service is the second service of the same project: the Go gateway. It
+   strips any client-supplied identity headers, applies the security
    headers, the CORS allowlist, a per-IP rate limit and a 1 MiB body limit, then
    routes by prefix using `services/internal/apiroutes/routes.go`.
 4. The owning service repeats authentication locally: it verifies the token
    signature and audience against the Supabase JWKS, derives the user id and role
    from the token, and enforces the route tier (`public`, `optional`,
-   `authenticated`, `moderator`, `admin`).
+   `authenticated`, `moderator`, `admin`). The gateway's own routes
+   (`/api/v1` version discovery and `GET /api/v1/health`) answer before the proxy
+   is consulted, so a health check never depends on an upstream being deployed.
 5. Domain logic talks to Postgres. A service uses the `service_role` key only for
    work a user cannot be trusted to do (writing a score, hiding a comment,
    granting a role); anything a user could legitimately do is additionally
@@ -69,6 +78,7 @@ where they will attach is described in
 | `scripts/` | Operational helpers: `test-rls.sh`, `generate-sitemap.mjs`, `check-api-contract.mjs`. |
 | `.github/workflows/` | CI: web, go, database, api-contract, security. |
 | `infrastructure/` | Placeholders for container, CDN, monitoring and Terraform work. |
+| `vercel.json` | The deployment: two services (web and Go api) and the rewrites that route `/api/v1/*` to the gateway. See [deployment/vercel.md](../deployment/vercel.md). |
 
 ## Two modules, one workspace
 
@@ -83,9 +93,12 @@ graduation path to per-service modules are in
 | Environment | Web | API | Database |
 | --- | --- | --- | --- |
 | development | `npm run dev`, port 8081 | `go run ./gateway/cmd/gateway`, port 8080 | local Supabase or the Docker harness in `scripts/test-rls.sh` |
-| preview | Vercel preview per pull request | not deployed yet — calls fall back to the production API or fail closed | shares the staging project |
-| staging | Vercel preview of `main` | same image as production | separate Supabase project |
-| production | `https://onemorestartup.vercel.app` | to be provisioned (see [Blockers](../development/environments.md)) | the hosted Supabase project |
+| preview | Vercel preview per pull request | the same deployment's api service, `development`-like config | shares the staging project |
+| staging | Vercel preview of `main` | same deployment as production, separate config | separate Supabase project |
+| production | `https://onemorestartup.vercel.app` | `https://onemorestartup.vercel.app/api/v1` (the api service of the same project) | the hosted Supabase project |
+
+Enable services mode — the framework preset in the Vercel dashboard — before
+relying on the API column: see [deployment/vercel.md](../deployment/vercel.md).
 
 ## What this foundation deliberately does not do
 

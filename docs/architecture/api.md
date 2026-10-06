@@ -14,6 +14,19 @@ what it is talking to:
 { "apiVersion": "v1", "version": "0.1.0", "commit": "9f2c1ab" }
 ```
 
+`GET /api/v1/health` is the versioned liveness probe for deployments and uptime
+checks. It needs no token and checks nothing behind the gateway, so it answers
+`200` while every backend service is still unimplemented:
+
+```json
+{ "status": "ok", "version": "0.1.0" }
+```
+
+Readiness — which does run the registered dependency checks — stays at the
+unversioned `/readyz`, and `/healthz` remains the plain-text liveness probe for
+orchestrators. Deploying both is described in
+[../deployment/vercel.md](../deployment/vercel.md).
+
 When a breaking change is unavoidable, `v2` is added alongside `v1` and the old
 version is deprecated with a dated removal note in this file. Additive changes
 (new optional fields, new endpoints) do not require a version bump.
@@ -67,6 +80,11 @@ An unconfigured group answers `503` with the standard envelope; it is never
 resolved dynamically, so the gateway cannot be used as an open proxy. Both
 directions of that mapping are checked in CI by
 `scripts/check-api-contract.mjs`.
+
+Two paths are the gateway's own and are never proxied: `/api/v1` (version
+discovery) and `/api/v1/health` (liveness). They keep working in the default
+environment, where no upstream is configured — otherwise the first probe after a
+deployment would report a healthy gateway as down.
 
 ## Error envelope
 

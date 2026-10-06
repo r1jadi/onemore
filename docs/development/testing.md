@@ -10,8 +10,8 @@
 | Web build | `bun run build` | The production bundle Vercel ships |
 | Sitemap drift | `bun run sitemap:check` | `public/sitemap.xml` matches the SEO allowlist |
 | Contract drift | `node scripts/check-api-contract.mjs` | OpenAPI paths vs the gateway routing table |
-| Go unit + integration | `cd services && go test ./...` | JWT verification (14 cases), the wired service (probes, tiers, CORS, headers, rate limits, fail-closed config), the gateway proxy (routing, header stripping, SSRF safety) |
-| Go platform tests | `cd packages/go/platform && go test ./...` | Token verification and JWKS key handling |
+| Go unit + integration | `cd services && go test ./...` | The wired service (probes incl. `GET /api/v1/health`, tiers, CORS, headers, rate limits, fail-closed config), the gateway proxy (routing, gateway-owned paths, header stripping, SSRF safety), and a gateway smoke test that boots the real wiring the deployment runs |
+| Go platform tests | `cd packages/go/platform && go test ./...` | Token verification and JWKS key handling, listen-address resolution (`PORT` before `HTTP_ADDR`'s absence) and production configuration validation |
 | Go static checks | `go vet ./...`, `gofmt -l` (both modules) | Correctness and formatting |
 | Database security | `./scripts/test-rls.sh` | Migrations, seed idempotency and 50+ RLS assertions (allowed **and** denied) across six roles |
 | Go vulnerabilities | `govulncheck ./...` (CI) | Known CVEs in the dependency graph |
@@ -19,6 +19,10 @@
 
 CI mirrors all of it: `.github/workflows/web.yml`, `go.yml`, `database.yml`,
 `api-contract.yml`, `security.yml`.
+
+The deployed API is its own verification step, because nothing local can prove a
+routing rule Vercel owns: see
+[deployment/vercel.md](../deployment/vercel.md#deploying).
 
 ## The database suite in detail
 

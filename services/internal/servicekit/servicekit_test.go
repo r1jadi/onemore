@@ -121,12 +121,38 @@ func decodeError(t *testing.T, response *http.Response) map[string]any {
 func TestProbesAnswerWithoutAuth(t *testing.T) {
 	server := newTestServer(t, testOptions{withAuth: true})
 
-	for _, path := range []string{"/healthz", "/readyz"} {
+	for _, path := range []string{"/healthz", "/readyz", httpx.HealthPath} {
 		response := get(t, server.URL+path, nil)
 		response.Body.Close()
 		if response.StatusCode != http.StatusOK {
 			t.Fatalf("%s returned %d, want 200", path, response.StatusCode)
 		}
+	}
+}
+
+func TestVersionedHealthRouteNeedsNoAuthMaterial(t *testing.T) {
+	// No SUPABASE_JWT_SECRET: authenticated routes fail closed with 503 while
+	// health keeps answering, because it verifies nothing and checks nothing
+	// external. A deployment therefore reports healthy before Supabase is wired
+	// up — and cannot be made unhealthy by a slow dependency either.
+	server := newTestServer(t, testOptions{})
+
+	response := get(t, server.URL+httpx.HealthPath, nil)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("%s = %d, want 200", httpx.HealthPath, response.StatusCode)
+	}
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("reading body: %v", err)
+	}
+	payload := map[string]any{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("health response is not JSON: %v (%s)", err, body)
+	}
+	if payload["status"] != "ok" {
+		t.Fatalf("status = %v, want ok", payload["status"])
 	}
 }
 
@@ -325,12 +351,15 @@ func TestRateLimitAppliesToAPIRoutesButNotProbes(t *testing.T) {
 	}
 
 	// Probes must keep working while a client is being throttled, or an
-	// orchestrator would restart a perfectly healthy service.
+	// orchestrator would restart a perfectly healthy service — and an uptime
+	// check on the published health route would report an outage.
 	for i := 0; i < 5; i++ {
-		response := get(t, server.URL+"/healthz", nil)
-		response.Body.Close()
-		if response.StatusCode != http.StatusOK {
-			t.Fatalf("probe %d returned %d, want 200", i, response.StatusCode)
+		for _, path := range []string{"/healthz", httpx.HealthPath} {
+			response := get(t, server.URL+path, nil)
+			response.Body.Close()
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("probe %s #%d returned %d, want 200", path, i, response.StatusCode)
+			}
 		}
 	}
 }

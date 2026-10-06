@@ -102,7 +102,10 @@ func Load(service string) (*Config, error) {
 		Service:     service,
 		Environment: env,
 		HTTP: HTTP{
-			Addr:              defaultString(Getenv("HTTP_ADDR", "PORT_HTTP"), ":8080"),
+			// HTTP_ADDR is the explicit setting. PORT is what Vercel (and most
+			// PaaS) injects, so a platform-managed process never has to guess its
+			// port — see docs/deployment/vercel.md.
+			Addr:              normalizeAddr(Getenv("HTTP_ADDR", "PORT_HTTP", "PORT"), ":8080"),
 			ReadHeaderTimeout: 5 * time.Second,
 			ReadTimeout:       15 * time.Second,
 			WriteTimeout:      30 * time.Second,
@@ -265,6 +268,22 @@ func splitList(raw string) []string {
 func defaultString(v, fallback string) string {
 	if strings.TrimSpace(v) == "" {
 		return fallback
+	}
+	return v
+}
+
+// normalizeAddr turns the ways a host names a listen port into an address
+// net.Listen accepts. An explicit ":8080" or "0.0.0.0:8080" is returned
+// unchanged, while a bare port — which is how Vercel passes PORT — gets the
+// colon it needs; without that, "8080" would be read as a host name and the
+// server would refuse to start.
+func normalizeAddr(raw, fallback string) string {
+	v := strings.TrimSpace(raw)
+	if v == "" {
+		return fallback
+	}
+	if _, err := strconv.Atoi(v); err == nil {
+		return ":" + v
 	}
 	return v
 }

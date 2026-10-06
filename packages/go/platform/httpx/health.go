@@ -7,6 +7,16 @@ import (
 	"time"
 )
 
+// healthSuffix is the liveness route relative to the API base path.
+const healthSuffix = "/health"
+
+// HealthPath is the versioned liveness route, `/api/v1/health`. It is part of
+// the published API surface (packages/api-contracts/openapi-v1.yaml) because
+// clients, uptime checks and the deployment (see docs/deployment/vercel.md)
+// need a stable, unauthenticated path. `/healthz` stays unversioned for
+// orchestrators that must not have to know the API version.
+const HealthPath = "/api/" + APIVersion + healthSuffix
+
 // Checker reports dependency health for /readyz. A service registers one
 // checker per external dependency (database, upstream service, cache).
 type Checker interface {
@@ -59,7 +69,8 @@ func (h *Health) Drain() {
 // Version returns the build version reported by health endpoints.
 func (h *Health) Version() string { return h.version }
 
-// LivenessHandler always answers 200 unless the process is draining.
+// LivenessHandler always answers 200 unless the process is draining. It answers
+// plain text because orchestrators only read the status code.
 func (h *Health) LivenessHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		h.mu.RLock()
@@ -75,11 +86,32 @@ func (h *Health) LivenessHandler() http.HandlerFunc {
 	}
 }
 
-type readinessResponse struct {
+// healthResponse is the JSON body of both the readiness probe and the versioned
+// liveness route, so a client parses one shape and reads `status` to tell them
+// apart (`ok` / `ready` / `not_ready` / `draining`).
+type healthResponse struct {
 	Status   string            `json:"status"`
 	Version  string            `json:"version"`
 	Checks   map[string]string `json:"checks,omitempty"`
 	Failures []string          `json:"failures,omitempty"`
+}
+
+// APIHealthHandler answers the versioned liveness route (`HealthPath`) in the
+// same JSON shape readiness uses, but it checks nothing external: no Supabase
+// auth, no upstream, no database. It therefore answers `{"status":"ok",…}` as
+// long as this process can serve requests, and a slow or missing dependency can
+// never make it fail or hang.
+func (h *Health) APIHealthHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		h.mu.RLock()
+		draining := h.draining
+		h.mu.RUnlock()
+		if draining {
+			WriteJSON(w, r, http.StatusServiceUnavailable, healthResponse{Status: "draining", Version: h.version})
+			return
+		}
+		WriteJSON(w, r, http.StatusOK, healthResponse{Status: "ok", Version: h.version})
+	}
 }
 
 // ReadinessHandler runs every registered check with a short deadline.
@@ -90,7 +122,7 @@ func (h *Health) ReadinessHandler() http.HandlerFunc {
 		draining := h.draining
 		h.mu.RUnlock()
 
-		response := readinessResponse{Status: "ready", Version: h.version}
+		response := healthResponse{Status: "ready", Version: h.version}
 		if len(checkers) > 0 {
 			response.Checks = make(map[string]string, len(checkers))
 		}
@@ -118,10 +150,14 @@ func (h *Health) ReadinessHandler() http.HandlerFunc {
 	}
 }
 
-// RegisterHealthRoutes mounts the standard probe endpoints on a mux. They are
-// intentionally on the root path so orchestrators do not need to know the API
-// version.
+// RegisterHealthRoutes mounts the standard probe endpoints on a mux.
+//
+// Liveness and readiness stay separate: `/healthz` and `HealthPath` report the
+// process only, while `/readyz` runs the registered dependency checks and can
+// fail without the process being restarted. The versioned route is mounted here
+// rather than in a service so every service exposes it identically.
 func (h *Health) RegisterHealthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /healthz", h.LivenessHandler())
 	mux.HandleFunc("GET /readyz", h.ReadinessHandler())
+	mux.HandleFunc("GET "+HealthPath, h.APIHealthHandler())
 }

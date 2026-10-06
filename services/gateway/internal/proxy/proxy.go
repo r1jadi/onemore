@@ -39,6 +39,13 @@ var hopByHopHeaders = []string{
 	"Te", "Trailer", "Transfer-Encoding", "Upgrade",
 }
 
+// gatewayOwnedPaths are answered by the gateway's own router and are never
+// proxied. They have to keep working in every environment, including the
+// default one where no upstream is configured, because they are what a
+// deployment checks first: `/api/v1` reports the API version and
+// `/api/v1/health` reports that this process is serving requests.
+var gatewayOwnedPaths = []string{apiroutes.BasePath, httpx.HealthPath}
+
 type route struct {
 	prefix   string
 	service  string
@@ -102,11 +109,18 @@ func New(cfg *config.Config, logger *slog.Logger) *Proxy {
 	return p
 }
 
-// Middleware returns the proxy as a middleware. Requests that match no group
-// continue down the chain so the gateway keeps its own routes and probes.
+// Middleware returns the proxy as a middleware. A group with a configured
+// upstream is forwarded; a group without one is answered with a 503 envelope
+// instead of being resolved dynamically (never an open proxy). Everything else
+// continues down the chain, which is how the gateway's own routes (`/api/v1`,
+// `/api/v1/health`) and the probes stay reachable.
 func (p *Proxy) Middleware() httpx.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if isGatewayOwned(r.URL.Path) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			for _, rt := range p.routes {
 				if !strings.HasPrefix(r.URL.Path, rt.prefix) {
 					continue
@@ -136,6 +150,20 @@ func (p *Proxy) Routes() map[string]string {
 		out[rt.prefix] = rt.upstream
 	}
 	return out
+}
+
+// isGatewayOwned reports whether the gateway's own router answers this path. A
+// trailing slash is tolerated so `GET /api/v1/` reaches the router and gets an
+// accurate "no such endpoint" instead of a misleading "this API is not available
+// in this environment yet" from the unconfigured-group branch.
+func isGatewayOwned(path string) bool {
+	trimmed := strings.TrimSuffix(path, "/")
+	for _, owned := range gatewayOwnedPaths {
+		if path == owned || trimmed == owned {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Proxy) errorHandler(service string) func(http.ResponseWriter, *http.Request, error) {

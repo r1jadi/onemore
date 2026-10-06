@@ -21,6 +21,12 @@ change something safely, not to describe the project to a stranger.
 | [development/conventions.md](development/conventions.md) | Before opening a pull request. |
 | [development/testing.md](development/testing.md) | To run the tests that exist and to add new ones. |
 
+## Deployment — how it ships
+
+| Document | Read it when you need |
+| --- | --- |
+| [deployment/vercel.md](deployment/vercel.md) | To deploy, to change the routing or the environment variables of the Vercel project, or to verify the API after a deploy. |
+
 ## Security — how it is defended
 
 | Document | Read it when you need |
