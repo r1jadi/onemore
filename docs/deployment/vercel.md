@@ -7,7 +7,7 @@ app and the Go API gateway. There is no second host and no `api.` subdomain.
 | --- | --- |
 | Project | `onemorestartup` → `https://onemorestartup.vercel.app` |
 | Configuration | [`vercel.json`](../../vercel.json) (services + rewrites) |
-| Web service | the repository root: TanStack Start, SSR on the platform's Nitro target |
+| Web service | the repository root, framework `tanstack-start-lovable` (TanStack Start + Vite, SSR through Nitro) |
 | API service | `services/`, framework `go`, entrypoint `services/cmd/api/main.go` |
 | Local API | `http://localhost:8080/api/v1` (`go run ./gateway/cmd/gateway`, `HTTP_ADDR=:8080`) |
 | Production API | `https://onemorestartup.vercel.app/api/v1` |
@@ -31,6 +31,25 @@ The alternatives were rejected on purpose:
   they are not part of what a Nitro build emits.
 * **A container image service** works, but it packages an operating system to run
   one Go binary. The Go framework preset builds the binary and runs it.
+
+### Why the web service pins a framework
+
+A service has no dashboard preset of its own, and Vercel refuses to guess: the
+first deployment with only `"root": "./"` failed with
+
+> Multiple frameworks detected in project root: TanStack Start, Nitro, Node.
+> Specify "framework" explicitly in services.
+
+`tanstack-start-lovable` is the entry Vercel defines for a repository that has
+both `@lovable.dev/vite-tanstack-config` and `@tanstack/react-start` — exactly
+this one. It **supersedes** the generic `tanstack-start` and `vite` detectors,
+and its build settings are `vite build` with output `dist`, identical to the
+generic entry, so `"framework": "tanstack-start"` is the drop-in fallback if the
+Lovable slug is ever removed. Both slugs are real values in Vercel's published
+schema.
+
+The project-wide framework preset must still be **Services**; the per-service
+`framework` only replaces the ambiguous auto-detection inside the service.
 
 ## Routing
 
@@ -174,6 +193,15 @@ relaxes the CORS and auth-material checks instead of loosening production.
 entirely, set the framework preset back to its previous value and remove the
 `services` key; the web app then deploys exactly as it did before this change.
 
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `Multiple frameworks detected in project root: TanStack Start, Nitro, Node. Specify "framework" explicitly in services.` | A service has no dashboard preset, and the root matches several detectors | Already fixed: the `web` service pins `"framework": "tanstack-start-lovable"` |
+| The `web` service build emits a Cloudflare worker (`.output/nitro.json` with `"preset": "cloudflare-module"`) | `@lovable.dev/vite-tanstack-config` sets that preset as the *default* for local builds; Vercel needs the `vercel` preset | Set `NITRO_PRESET=vercel` in the project's environment variables (Nitro's documented switch; an explicit preset beats the default). Never run that in Lovable's sandbox — the config ignores it there |
+| `/api/v1/*` returns the app's HTML 404 | The project is not in services mode, so the rewrites are inert | Set the framework preset to **Services** |
+| A group answers `503 This API is not available in this environment yet.` | That group has no `UPSTREAM_<SERVICE>_URL` | Expected until that service is deployed; set the variable then |
+
 ## What is verified, and what is not
 
 Verified in the repository (see [development/testing.md](../development/testing.md)):
@@ -198,8 +226,9 @@ Verified in the repository (see [development/testing.md](../development/testing.
 * Vercel Services is in Beta. If the platform rejects a `services` configuration
   detail (for example a `root` or `framework` slug), the fix belongs in
   `vercel.json`; nothing in the Go code depends on it.
-* The web service is declared as `"root": "./"` with no explicit framework, so
-  Vercel auto-detects it exactly as it does today. If the project has a custom
-  build or install command in the dashboard, Services mode invalidates top-level
-  build settings — move them into the `web` service object in `vercel.json`
-  (`buildCommand`, `installCommand`, `outputDirectory`, `framework`).
+* If the project has a custom build or install command in the dashboard, Services
+  mode invalidates top-level build settings — move them into the `web` service
+  object in `vercel.json` (`buildCommand`, `installCommand`, `outputDirectory`).
+  The `tanstack-start-lovable` framework already supplies `vite build` and the
+  `dist` output directory, which is what this repository's `bun run build` / `npm
+  run build` runs.

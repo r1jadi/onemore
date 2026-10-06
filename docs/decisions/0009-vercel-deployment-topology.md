@@ -28,11 +28,17 @@ platform that assigns the port.
 Deploy the gateway as a **service of the existing Vercel project**, next to the web
 app, using Vercel's Go framework preset:
 
-* `vercel.json` declares two services — `web` (the repository root) and `api`
-  (`services/`, `framework: "go"`, `entrypoint: "cmd/api/main.go"`) — and routes
-  `/api/v1`, `/api/v1/(.*)`, `/healthz` and `/readyz` to `api`, with a final
-  catch-all to `web`. Routing into a service is final, so `/api/v1/*` can never
-  fall through to the web app.
+* `vercel.json` declares two services — `web` (the repository root, framework
+  `tanstack-start-lovable`) and `api` (`services/`, `framework: "go"`,
+  `entrypoint: "cmd/api/main.go"`) — and routes `/api/v1`, `/api/v1/(.*)`,
+  `/healthz` and `/readyz` to `api`, with a final catch-all to `web`. Routing into
+  a service is final, so `/api/v1/*` can never fall through to the web app.
+* Both frameworks are explicit because a service has no dashboard preset: the
+  root contains a Nitro config, a TanStack Start app and a Node project at once,
+  and Vercel refuses to choose between them ("Multiple frameworks detected in
+  project root"). `tanstack-start-lovable` is the Lovable variant of the TanStack
+  Start preset, which supersedes the generic detectors for a repository holding
+  `@lovable.dev/vite-tanstack-config` and `@tanstack/react-start`.
 * `services/cmd/api/main.go` is the deployment entrypoint Vercel detects. It is
   `servicekit.MustRun(gateway.Options())`: the same wiring the local
   `services/gateway/cmd/gateway` runs, extracted into `services/gateway` so the
