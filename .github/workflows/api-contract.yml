@@ -1,0 +1,50 @@
+name: api-contract
+
+# The API contract is the interface between the web app and the Go services, so
+# it is verified on its own:
+#   1. scripts/check-api-contract.mjs — every routed group is documented and every
+#      documented path is routable (no drift in either direction);
+#   2. redocly lint — the document is a valid OpenAPI 3.1 description.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/api-contracts/**"
+      - "services/internal/apiroutes/**"
+      - "scripts/check-api-contract.mjs"
+      - ".github/workflows/api-contract.yml"
+  pull_request:
+    paths:
+      - "packages/api-contracts/**"
+      - "services/internal/apiroutes/**"
+      - "scripts/check-api-contract.mjs"
+      - ".github/workflows/api-contract.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: api-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: lint + drift check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Routing table and contract agree
+        run: node scripts/check-api-contract.mjs
+
+      - name: Validate the OpenAPI document
+        run: |
+          npx --yes @redocly/cli@2 lint \
+            --config packages/api-contracts/redocly.yaml \
+            packages/api-contracts/openapi-v1.yaml

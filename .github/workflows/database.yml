@@ -1,0 +1,66 @@
+name: database
+
+# Applies every migration to an empty Postgres 16 and runs the RLS and
+# authorization suite (tests/security/rls_test.sql) against it.
+#
+# Migrations are applied in lexicographic filename order, which is the same order
+# the Supabase CLI uses. Nothing here touches a hosted project: the suite refuses
+# to run where the `supabase_admin` role exists.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "supabase/**"
+      - "tests/security/**"
+      - "scripts/test-rls.sh"
+      - ".github/workflows/database.yml"
+  pull_request:
+    paths:
+      - "supabase/**"
+      - "tests/security/**"
+      - "scripts/test-rls.sh"
+      - ".github/workflows/database.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: database-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  migrations-and-rls:
+    name: migrations + RLS
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: onemore_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d onemore_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/onemore_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install psql
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Apply migrations, seed and RLS suite
+        run: ./scripts/test-rls.sh
+
+      # The seed runs after every migration during `supabase db reset`, so it
+      # must be safe to apply repeatedly.
+      - name: Seed is idempotent
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f supabase/seed.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f supabase/seed.sql

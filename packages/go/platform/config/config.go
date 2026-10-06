@@ -1,0 +1,284 @@
+// Package config loads and validates service configuration from the
+// environment. Configuration is fail-fast: a service refuses to start with an
+// invalid or insecure configuration instead of falling back to a default that
+// silently weakens security.
+package config
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// Environment names the deployment stage a service runs in.
+type Environment string
+
+const (
+	EnvDevelopment Environment = "development"
+	EnvStaging     Environment = "staging"
+	EnvProduction  Environment = "production"
+)
+
+// IsProduction reports whether extra hardening rules apply.
+func (e Environment) IsProduction() bool { return e == EnvProduction }
+
+// IsDevelopment reports whether development-only conveniences are allowed.
+func (e Environment) IsDevelopment() bool { return e == EnvDevelopment }
+
+// HTTP holds the server level settings shared by every service.
+type HTTP struct {
+	Addr              string
+	ReadHeaderTimeout time.Duration
+	ReadTimeout       time.Duration
+	WriteTimeout      time.Duration
+	IdleTimeout       time.Duration
+	ShutdownTimeout   time.Duration
+	MaxRequestBytes   int64
+	MaxHeaderBytes    int
+	RateLimit         RateLimit
+}
+
+// RateLimit configures the in-process token bucket limiter. It protects the
+// API from abuse today; the same interface moves to Redis when the API runs on
+// more than one instance (see docs/decisions/0004-rate-limiting.md).
+type RateLimit struct {
+	Enabled           bool
+	RequestsPerMinute int
+	Burst             int
+}
+
+// Supabase holds the project metadata used to verify access tokens. No secret
+// values belong here — the service role key never reaches a Go service.
+type Supabase struct {
+	ProjectURL  string
+	JWKSURL     string
+	JWTAudience string
+	JWTIssuer   string
+	JWTSecret   string // legacy HS256 projects only, server-side
+}
+
+// Logging holds structured logging settings.
+type Logging struct {
+	Level  string
+	Format string
+}
+
+// Config is the fully resolved configuration for one service.
+type Config struct {
+	Service     string
+	Environment Environment
+	HTTP        HTTP
+	Supabase    Supabase
+	Logging     Logging
+	// CORSAllowedOrigins is an exact allowlist. A wildcard is rejected outside
+	// development so credentials can never be sent to an untrusted origin.
+	CORSAllowedOrigins []string
+	// Upstreams maps a logical service name to its base URL (gateway only).
+	Upstreams map[string]string
+}
+
+// Getenv reads an environment variable, preferring the service-scoped name so a
+// single process can be pointed at a different dependency than its neighbours.
+func Getenv(keys ...string) string {
+	for _, key := range keys {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// Load resolves configuration for the named service.
+func Load(service string) (*Config, error) {
+	env, err := parseEnvironment(Getenv("ENVIRONMENT", "APP_ENV"))
+	if err != nil {
+		return nil, err
+	}
+
+	cfg := &Config{
+		Service:     service,
+		Environment: env,
+		HTTP: HTTP{
+			Addr:              defaultString(Getenv("HTTP_ADDR", "PORT_HTTP"), ":8080"),
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       15 * time.Second,
+			WriteTimeout:      30 * time.Second,
+			IdleTimeout:       60 * time.Second,
+			ShutdownTimeout:   20 * time.Second,
+			MaxRequestBytes:   1 << 20, // 1 MiB
+			MaxHeaderBytes:    1 << 16, // 64 KiB
+			RateLimit: RateLimit{
+				Enabled:           EnvInt("RATE_LIMIT_ENABLED", 1) == 1,
+				RequestsPerMinute: EnvInt("RATE_LIMIT_REQUESTS_PER_MINUTE", 600),
+				Burst:             EnvInt("RATE_LIMIT_BURST", 60),
+			},
+		},
+		Supabase: Supabase{
+			ProjectURL:  strings.TrimRight(Getenv("SUPABASE_URL"), "/"),
+			JWKSURL:     Getenv("SUPABASE_JWKS_URL"),
+			JWTAudience: Getenv("SUPABASE_JWT_AUDIENCE"),
+			JWTIssuer:   Getenv("SUPABASE_JWT_ISSUER"),
+			JWTSecret:   Getenv("SUPABASE_JWT_SECRET"),
+		},
+		Logging: Logging{
+			Level:  defaultString(Getenv("LOG_LEVEL"), "info"),
+			Format: defaultString(Getenv("LOG_FORMAT"), "json"),
+		},
+		CORSAllowedOrigins: splitList(Getenv("CORS_ALLOWED_ORIGINS")),
+		Upstreams:          loadUpstreams(),
+	}
+
+	if cfg.Supabase.JWKSURL == "" && cfg.Supabase.ProjectURL != "" {
+		cfg.Supabase.JWKSURL = cfg.Supabase.ProjectURL + "/auth/v1/.well-known/jwks.json"
+	}
+	if cfg.Supabase.JWTIssuer == "" && cfg.Supabase.ProjectURL != "" {
+		cfg.Supabase.JWTIssuer = cfg.Supabase.ProjectURL + "/auth/v1"
+	}
+	if cfg.Supabase.JWTAudience == "" {
+		cfg.Supabase.JWTAudience = "authenticated"
+	}
+
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// MustLoad is Load with fail-fast semantics, used by service main functions.
+func MustLoad(service string) *Config {
+	cfg, err := Load(service)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "configuration error: %v\n", err)
+		os.Exit(1)
+	}
+	return cfg
+}
+
+// Validate rejects configurations that would be insecure in the current
+// environment. Messages name the variable to change.
+func (c *Config) Validate() error {
+	var problems []error
+
+	if c.Service == "" {
+		problems = append(problems, errors.New("SERVICE_NAME must not be empty"))
+	}
+	switch c.Logging.Level {
+	case "debug", "info", "warn", "error":
+	default:
+		problems = append(problems, fmt.Errorf("LOG_LEVEL %q must be one of debug, info, warn, error", c.Logging.Level))
+	}
+	switch c.Logging.Format {
+	case "json", "text":
+	default:
+		problems = append(problems, fmt.Errorf("LOG_FORMAT %q must be json or text", c.Logging.Format))
+	}
+	if c.HTTP.MaxRequestBytes <= 0 || c.HTTP.MaxRequestBytes > 64<<20 {
+		problems = append(problems, fmt.Errorf("request body limit %d is outside the supported range", c.HTTP.MaxRequestBytes))
+	}
+	if c.HTTP.RateLimit.Enabled && c.HTTP.RateLimit.RequestsPerMinute <= 0 {
+		problems = append(problems, errors.New("rate limit requires a positive requests-per-minute budget"))
+	}
+	if c.HTTP.RateLimit.Enabled && c.HTTP.RateLimit.Burst <= 0 {
+		problems = append(problems, errors.New("rate limit requires a positive burst size"))
+	}
+	if !c.HTTP.RateLimit.Enabled && c.Environment.IsProduction() {
+		// An environment flag that removes abuse protection is a footgun; make it
+		// impossible to ship.
+		problems = append(problems, errors.New("RATE_LIMIT_ENABLED=0 is not allowed in production"))
+	}
+
+	for _, origin := range c.CORSAllowedOrigins {
+		if origin == "*" && !c.Environment.IsDevelopment() {
+			problems = append(problems, fmt.Errorf("CORS_ALLOWED_ORIGINS must not contain \"*\" in %s", c.Environment))
+		}
+		if origin != "*" && !strings.HasPrefix(origin, "http://") && !strings.HasPrefix(origin, "https://") {
+			problems = append(problems, fmt.Errorf("CORS origin %q must be an absolute http(s) origin", origin))
+		}
+	}
+	if c.Environment.IsProduction() && len(c.CORSAllowedOrigins) == 0 {
+		problems = append(problems, errors.New("CORS_ALLOWED_ORIGINS must be set in production"))
+	}
+
+	if c.Environment.IsProduction() {
+		if c.Supabase.JWKSURL == "" && c.Supabase.JWTSecret == "" {
+			problems = append(problems, errors.New("production requires SUPABASE_JWKS_URL (preferred) or SUPABASE_JWT_SECRET"))
+		}
+		if c.Supabase.JWKSURL != "" && !strings.HasPrefix(c.Supabase.JWKSURL, "https://") {
+			problems = append(problems, errors.New("SUPABASE_JWKS_URL must use https in production"))
+		}
+	}
+
+	return errors.Join(problems...)
+}
+
+// HasAuthMaterial reports whether tokens can be verified.
+func (c *Config) HasAuthMaterial() bool {
+	return c.Supabase.JWKSURL != "" || c.Supabase.JWTSecret != ""
+}
+
+func parseEnvironment(raw string) (Environment, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", string(EnvDevelopment), "dev", "local":
+		return EnvDevelopment, nil
+	case string(EnvStaging), "stage", "preview":
+		return EnvStaging, nil
+	case string(EnvProduction), "prod":
+		return EnvProduction, nil
+	default:
+		return "", fmt.Errorf("ENVIRONMENT %q must be development, staging or production", raw)
+	}
+}
+
+func loadUpstreams() map[string]string {
+	names := []string{
+		"auth", "users", "games", "game-sessions", "scores", "leaderboards",
+		"feed", "recommendations", "social", "notifications", "search",
+		"moderation", "analytics", "admin",
+	}
+	upstreams := make(map[string]string, len(names))
+	for _, name := range names {
+		key := "UPSTREAM_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_URL"
+		if v := strings.TrimRight(Getenv(key), "/"); v != "" {
+			upstreams[name] = v
+		}
+	}
+	return upstreams
+}
+
+func splitList(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if v := strings.TrimSpace(p); v != "" {
+			out = append(out, strings.TrimRight(v, "/"))
+		}
+	}
+	return out
+}
+
+func defaultString(v, fallback string) string {
+	if strings.TrimSpace(v) == "" {
+		return fallback
+	}
+	return v
+}
+
+// EnvInt parses an integer environment variable with a fallback. Exported for
+// services that need their own tuning knobs.
+func EnvInt(key string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return v
+}

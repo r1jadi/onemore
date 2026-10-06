@@ -1,0 +1,16 @@
+// Go workspace for the onemore backend.
+//
+// Two modules for now:
+//   ./packages/go/platform — shared library (config, logging, errors, HTTP, auth)
+//   ./services             — one module holding every service, each with its own
+//                            cmd/<service> binary so they deploy independently.
+//
+// A service graduates to its own module when it needs an independent release
+// cadence or dependency set; `go work use` then gains that module and nothing
+// else changes. See docs/decisions/0001-go-module-strategy.md.
+go 1.23
+
+use (
+	./packages/go/platform
+	./services
+)

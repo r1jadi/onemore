@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { Bookmark, Heart, MessageCircle, Play, Share2 } from "lucide-react";
 import { useState } from "react";
 import { Avatar, FollowButton, Page, PageHeader, Section, useMockLoad } from "@/components/common";
@@ -9,18 +9,32 @@ import { CommentsSheet, ShareSheet } from "@/components/social/Sheets";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fmt, games, getGame } from "@/lib/mock";
+import { breadcrumbJsonLd, seo, videoGameJsonLd } from "@/lib/seo";
 
 export const Route = createFileRoute("/games/$id")({
+  // An unknown id must not render another game's page: that would create an
+  // unlimited number of duplicate URLs for search engines to index.
+  beforeLoad: ({ params }) => {
+    if (!games.some((g) => g.id === params.id)) throw notFound();
+  },
   head: ({ params }) => {
     const g = getGame(params.id);
-    return {
-      meta: [
-        { title: `${g.title} — onemore` },
-        { name: "description", content: g.description },
-        { property: "og:title", content: `${g.title} — onemore` },
-        { property: "og:description", content: g.description },
+    return seo(g.title, g.description, {
+      type: "video.other",
+      jsonLd: [
+        videoGameJsonLd({
+          id: g.id,
+          title: g.title,
+          description: g.description,
+          category: g.category,
+        }),
+        breadcrumbJsonLd([
+          { name: "Explore", path: "/explore" },
+          { name: g.category, path: `/categories/${g.category.toLowerCase()}` },
+          { name: g.title, path: `/games/${g.id}` },
+        ]),
       ],
-    };
+    });
   },
   component: GameDetails,
 });

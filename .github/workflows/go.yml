@@ -1,0 +1,102 @@
+name: go
+
+# Two modules, one workspace: packages/go/platform (shared library) and
+# services (every service binary). See docs/decisions/0001-go-module-strategy.md.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/go/**"
+      - "services/**"
+      - "go.work"
+      - ".github/workflows/go.yml"
+  pull_request:
+    paths:
+      - "packages/go/**"
+      - "services/**"
+      - "go.work"
+      - ".github/workflows/go.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: go-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  verify:
+    name: format, vet, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/go.mod
+          cache-dependency-path: |
+            services/go.sum
+            packages/go/platform/go.sum
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l packages/go services)"
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet (platform)
+        working-directory: packages/go/platform
+        run: go vet ./...
+
+      - name: go vet (services)
+        working-directory: services
+        run: go vet ./...
+
+      # -race needs cgo and a C toolchain, which is why it runs here rather than
+      # in a developer's Git Bash checkout.
+      - name: go test -race (platform)
+        working-directory: packages/go/platform
+        run: go test -race -count=1 ./...
+
+      - name: go test -race (services)
+        working-directory: services
+        run: go test -race -count=1 ./...
+
+      - name: build every service binary
+        working-directory: services
+        run: |
+          for service in gateway auth users games game-sessions scores leaderboards \
+                         feed recommendations social notifications search moderation analytics admin; do
+            echo "building $service"
+            go build -o /dev/null "./${service}/cmd/${service}"
+          done
+
+  vulnerabilities:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/go.mod
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: govulncheck (platform)
+        working-directory: packages/go/platform
+        run: govulncheck ./...
+
+      - name: govulncheck (services)
+        working-directory: services
+        run: govulncheck ./...

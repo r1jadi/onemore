@@ -1,0 +1,20 @@
+# Redocly lint configuration for the v1 contract.
+#
+# CI runs:
+#   npx @redocly/cli@2 lint --config packages/api-contracts/redocly.yaml \
+#     packages/api-contracts/openapi-v1.yaml
+#
+# The recommended ruleset is kept, with two documented exceptions. Both would
+# otherwise force the contract to describe a deployment that does not exist yet.
+extends:
+  - recommended
+
+rules:
+  # The contract intentionally publishes the local gateway (http://localhost:8080)
+  # alongside production so the contract is usable during development.
+  no-server-example.com: off
+
+  # Operations are published before they are implemented and answer 501 until
+  # the owning task lands. Each group documents its real error responses as it
+  # is implemented, so requiring a 4XX now would mean inventing them.
+  operation-4xx-response: off

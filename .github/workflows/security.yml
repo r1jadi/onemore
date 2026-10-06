@@ -1,0 +1,89 @@
+name: security
+
+# Continuous security checks that are not language specific.
+#
+#   secret-scan      — no credential may ever be committed (.env.example only)
+#   dependency-review — blocks a pull request that introduces a vulnerable or
+#                       badly licensed dependency
+#
+# Language-specific scanning lives in go.yml (govulncheck) and web.yml
+# (bun audit).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # A weekly run catches a secret that predates the workflow.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secret-scan:
+    name: secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: a secret that was committed and then deleted is still
+          # a leaked secret.
+          fetch-depth: 0
+
+      - name: Scan the repository history for secrets
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/repo" \
+            ghcr.io/gitleaks/gitleaks:latest \
+            detect --source /repo --redact --no-banner --exit-code 1
+
+  dependency-review:
+    name: dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/dependency-review-action@v4
+        with:
+          # Matches the audit thresholds in web.yml.
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
+
+  workflow-integrity:
+    name: workflow integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # A leftover debug step, an unpinned action or a write-all token is how CI
+      # becomes the weakest link. These checks keep the workflow files honest.
+      - name: No unpinned action references
+        run: |
+          if grep -rnE "uses:\s+[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@(main|master|latest)\b" .github/workflows; then
+            echo "Actions must be pinned to a major version tag or a commit SHA."
+            exit 1
+          fi
+          echo "All action references are pinned."
+
+      - name: Workflows declare least-privilege permissions
+        run: |
+          for file in .github/workflows/*.yml; do
+            if ! grep -q "^permissions:" "$file"; then
+              echo "$file does not declare a permissions block"
+              exit 1
+            fi
+            if grep -qE "^permissions:\s*(write-all|\{[^}]*write)" "$file"; then
+              echo "$file requests write permissions it should not need"
+              exit 1
+            fi
+          done
+          echo "Every workflow declares read-only permissions."

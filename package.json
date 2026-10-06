@@ -10,8 +10,12 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "sitemap": "node scripts/generate-sitemap.mjs",
+    "sitemap:check": "node scripts/generate-sitemap.mjs --check",
+    "env:supabase": "node scripts/env-from-supabase.mjs"
   },
   "overrides": {
     "rolldown": "1.2.1"

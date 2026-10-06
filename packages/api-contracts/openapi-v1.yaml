@@ -1,0 +1,1046 @@
+openapi: 3.1.0
+info:
+  title: onemore API
+  version: "1.0.0"
+  summary: The versioned HTTP API behind the onemore web app.
+  description: |
+    Every endpoint lives under `/api/v1`. The gateway owns `/api/v1` and routes
+    each group to the service that implements it
+    (`services/internal/apiroutes/routes.go`).
+
+    ## Authorization tiers
+    * **public** — no credentials.
+    * **optional** — works anonymously, personalises when a valid token is sent.
+    * **authenticated** — a verified Supabase access token is required. The
+      caller's user id always comes from that token; it is never a parameter.
+    * **moderator** / **admin** — an authenticated caller whose role, read from
+      the token's `app_metadata.role`, is `moderator` or `admin`.
+
+    ## Errors
+    Failures always use the same envelope:
+
+    ```json
+    { "error": { "code": "forbidden", "message": "...", "requestId": "..." } }
+    ```
+
+    Codes: `bad_request`, `unauthorized`, `forbidden`, `not_found`, `conflict`,
+    `unprocessable`, `rate_limited`, `payload_too_large`, `unsupported`,
+    `not_implemented`, `unavailable`, `timeout`, `internal`.
+
+    ## Implementation status
+    Operations carry `x-status`. `planned` means the route exists, is authorized
+    and rate limited, and answers `501 not_implemented` until the feature task
+    that owns it lands. Clients can therefore be written against this contract
+    today without guessing at the final shape.
+
+    ## Conventions
+    * JSON in, JSON out. Unknown request fields are rejected.
+    * Request bodies are limited to 1 MiB unless stated otherwise.
+    * Idempotency: `POST` creates, `PATCH` updates a subset, `DELETE` removes.
+    * Lists are cursor paginated with a bounded page size (`limit`, `cursor`).
+  contact:
+    name: onemore
+    url: https://onemorestartup.vercel.app
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+
+servers:
+  - url: https://onemorestartup.vercel.app/api/v1
+    description: Production
+  - url: http://localhost:8080/api/v1
+    description: Local gateway
+
+tags:
+  - name: auth
+    description: Session exchange on top of Supabase Auth.
+  - name: users
+    description: Player profiles.
+  - name: games
+    description: Game catalogue.
+  - name: sessions
+    description: Play sessions; the only path to a score.
+  - name: scores
+    description: Score records and personal bests.
+  - name: leaderboards
+    description: Global and friends boards.
+  - name: feed
+    description: The personalised game feed.
+  - name: recommendations
+    description: Suggested games.
+  - name: social
+    description: Comments, follows and likes.
+  - name: notifications
+    description: In-app and push notifications.
+  - name: search
+    description: Game, creator and player search.
+  - name: moderation
+    description: Reports and moderation actions.
+  - name: analytics
+    description: Product analytics.
+  - name: admin
+    description: Operations API behind the admin dashboard.
+
+security:
+  - bearerAuth: []
+
+paths:
+  /:
+    get:
+      operationId: getApiVersion
+      tags: [admin]
+      summary: Report the API version
+      security: []
+      x-status: available
+      responses:
+        "200":
+          description: Version discovery for clients and probes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [apiVersion, version]
+                properties:
+                  apiVersion: { type: string, const: v1 }
+                  version: { type: string, example: 0.1.0 }
+                  commit: { type: string, example: 9f2c1ab }
+
+  /auth/session:
+    post:
+      operationId: createSession
+      tags: [auth]
+      summary: Exchange a Supabase session for the application session
+      description: |
+        Supabase Auth owns credentials. This endpoint returns the application's
+        view of the session (roles, onboarding state) and is the only auth route
+        reachable anonymously.
+      security: []
+      x-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [accessToken]
+              properties:
+                accessToken: { type: string, minLength: 20 }
+      responses:
+        "200":
+          description: The current session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+    get:
+      operationId: getSession
+      tags: [auth]
+      summary: Read the current session
+      x-status: planned
+      responses:
+        "200":
+          description: The current session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /auth/sign-out:
+    post:
+      operationId: signOut
+      tags: [auth]
+      summary: Revoke the current session
+      x-status: planned
+      responses:
+        "204": { description: Session revoked. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /users/me:
+    get:
+      operationId: getMyProfile
+      tags: [users]
+      summary: Read the signed-in profile
+      x-status: planned
+      responses:
+        "200":
+          description: The profile of the caller.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Profile" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+    patch:
+      operationId: updateMyProfile
+      tags: [users]
+      summary: Update the signed-in profile
+      description: |
+        Only presentation fields are writable: `username`, `role` and
+        `is_suspended` are rejected, not ignored.
+      x-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                displayName: { type: string, minLength: 1, maxLength: 60 }
+                bio: { type: string, maxLength: 300 }
+                avatarPath: { type: string, maxLength: 160 }
+      responses:
+        "200":
+          description: The updated profile.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Profile" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /users/{userID}:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+    get:
+      operationId: getPublicProfile
+      tags: [users]
+      summary: Read a public profile
+      security: []
+      x-status: planned
+      responses:
+        "200":
+          description: Public profile fields only.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublicProfile" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /games:
+    get:
+      operationId: listGames
+      tags: [games]
+      summary: Browse the catalogue
+      security: []
+      x-status: planned
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: category
+          in: query
+          schema: { type: string, pattern: "^[a-z0-9-]{2,32}$" }
+        - name: status
+          in: query
+          schema: { type: string, enum: [published] }
+      responses:
+        "200":
+          description: A page of games.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Game" }
+                  nextCursor: { type: [string, "null"] }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+    post:
+      operationId: createGame
+      tags: [games]
+      summary: Create a game
+      description: The owner is taken from the token; a body field cannot set it.
+      x-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GameCreate" }
+      responses:
+        "201":
+          description: The created game.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Game" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /games/{gameID}:
+    parameters:
+      - $ref: "#/components/parameters/GameID"
+    get:
+      operationId: getGame
+      tags: [games]
+      summary: Read a game
+      security: []
+      x-status: planned
+      responses:
+        "200":
+          description: The game.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Game" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+    patch:
+      operationId: updateGame
+      tags: [games]
+      summary: Update an owned game
+      x-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GameUpdate" }
+      responses:
+        "200":
+          description: The updated game.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Game" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /sessions:
+    post:
+      operationId: startSession
+      tags: [sessions]
+      summary: Start a play session
+      description: |
+        The server owns the session id and (where the game needs one) the seed.
+        A session is the precondition for submitting a score.
+      x-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [gameId]
+              properties:
+                gameId: { type: string, format: uuid }
+                client: { type: string, maxLength: 40, example: web/1.0 }
+      responses:
+        "201":
+          description: The open session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GameSession" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /sessions/{sessionID}/complete:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: completeSession
+      tags: [sessions]
+      summary: Complete a play session and record the score
+      description: |
+        The session must belong to the caller and still be open. Progress is
+        validated server-side before a score exists.
+      x-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [score]
+              properties:
+                score: { type: integer, minimum: 0 }
+                durationMs: { type: integer, minimum: 1 }
+                progress:
+                  type: object
+                  description: "Game-defined payload, validated per game."
+                  additionalProperties: true
+      responses:
+        "200":
+          description: The recorded score.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Score" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /scores/me:
+    get:
+      operationId: getMyScores
+      tags: [scores]
+      summary: Read your scores and personal bests
+      x-status: planned
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: A page of scores.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Score" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /scores/{scoreID}:
+    parameters:
+      - name: scoreID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getScore
+      tags: [scores]
+      summary: Read a score
+      security: []
+      x-status: planned
+      responses:
+        "200":
+          description: The score.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Score" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /leaderboards:
+    get:
+      operationId: listLeaderboards
+      tags: [leaderboards]
+      summary: List available boards
+      security: []
+      x-status: planned
+      responses:
+        "200":
+          description: Board summaries.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Leaderboard" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /leaderboards/{boardID}:
+    parameters:
+      - name: boardID
+        in: path
+        required: true
+        schema: { type: string, pattern: "^[a-z0-9-]{2,48}$" }
+    get:
+      operationId: getLeaderboard
+      tags: [leaderboards]
+      summary: Read a board
+      security: []
+      x-status: planned
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Ranked entries.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  scope: { type: string, enum: [global, friends] }
+                  entries:
+                    type: array
+                    items: { $ref: "#/components/schemas/LeaderboardEntry" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /feed:
+    get:
+      operationId: getFeed
+      tags: [feed]
+      summary: Read the game feed
+      x-status: planned
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: A page of feed items.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Game" }
+                  nextCursor: { type: [string, "null"] }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /recommendations:
+    get:
+      operationId: getRecommendations
+      tags: [recommendations]
+      summary: Read personalised game suggestions
+      description: |
+        Derived from the caller's own history when a token is present, from the
+        public ranking otherwise. Taste data is never accepted from the client.
+      x-status: planned
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: A ranked list of games.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Game" }
+                  reason:
+                    type: string
+                    description: Why these games were chosen, for display.
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /recommendations/feedback:
+    post:
+      operationId: recordRecommendationFeedback
+      tags: [recommendations]
+      summary: Record feedback on a suggestion
+      x-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [gameId, signal]
+              properties:
+                gameId: { type: string, format: uuid }
+                signal: { type: string, enum: [more_like_this, less_like_this, hidden] }
+      responses:
+        "204": { description: Feedback recorded. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /comments:
+    get:
+      operationId: listComments
+      tags: [social]
+      summary: List comments for a game
+      security: []
+      x-status: planned
+      parameters:
+        - name: gameId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: A page of comments.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Comment" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+    post:
+      operationId: createComment
+      tags: [social]
+      summary: Comment on a game
+      x-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [gameId, body]
+              properties:
+                gameId: { type: string, format: uuid }
+                body: { type: string, minLength: 1, maxLength: 2000 }
+      responses:
+        "201":
+          description: The created comment.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Comment" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /likes:
+    post:
+      operationId: createLike
+      tags: [social]
+      summary: Like a game or comment
+      x-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [targetKind, targetId]
+              properties:
+                targetKind: { type: string, enum: [game, comment] }
+                targetId: { type: string, format: uuid }
+      responses:
+        "204": { description: Like recorded. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /follows:
+    post:
+      operationId: createFollow
+      tags: [social]
+      summary: Follow a user
+      x-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [username]
+              properties:
+                username: { type: string, pattern: "^[a-z0-9_]{3,24}$" }
+      responses:
+        "204": { description: Follow recorded. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /notifications:
+    get:
+      operationId: listNotifications
+      tags: [notifications]
+      summary: List your notifications
+      x-status: planned
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: A page of notifications.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Notification" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /search:
+    get:
+      operationId: search
+      tags: [search]
+      summary: Search games, creators and players
+      security: []
+      x-status: planned
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 2, maxLength: 80 }
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Search results.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  games:
+                    type: array
+                    items: { $ref: "#/components/schemas/Game" }
+                  players:
+                    type: array
+                    items: { $ref: "#/components/schemas/PublicProfile" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /moderation/reports:
+    get:
+      operationId: listReports
+      tags: [moderation]
+      summary: Read the report queue
+      x-status: planned
+      security:
+        - bearerAuth: []
+          # moderator or admin
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: A page of reports.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Report" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+    post:
+      operationId: createReport
+      tags: [moderation]
+      summary: Report content
+      x-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [targetKind, targetId, reason]
+              properties:
+                targetKind: { type: string, enum: [game, comment, profile] }
+                targetId: { type: string, format: uuid }
+                reason: { type: string, minLength: 3, maxLength: 80 }
+                details: { type: string, maxLength: 1000 }
+      responses:
+        "201":
+          description: The created report.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Report" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /analytics/events:
+    post:
+      operationId: recordEvent
+      tags: [analytics]
+      summary: Record a product analytics event
+      description: |
+        Event names are validated against an allowlist and properties against a
+        size limit. The user id comes from the token when one is present.
+      x-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name: { type: string, pattern: "^[a-z][a-z0-9_.]{2,63}$" }
+                properties: { type: object, additionalProperties: true }
+      responses:
+        "204": { description: Event accepted. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /admin/users:
+    get:
+      operationId: listUsers
+      tags: [admin]
+      summary: List users
+      x-status: planned
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: A page of accounts.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Profile" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Supabase access token. Verified against the project's JWKS (ES256/RS256)
+        or, for legacy projects, the HS256 secret. `service_role` tokens are
+        rejected on every user-facing route.
+
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string, maxLength: 200 }
+    UserID:
+      name: userID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    GameID:
+      name: gameID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    BadRequest:
+      description: The request was malformed or missing a required value.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Missing, expired or invalid credentials.
+      headers:
+        WWW-Authenticate:
+          schema: { type: string }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: Authenticated, but not allowed to perform this action.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: No such resource — or none the caller may know about.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: The request conflicts with the current state.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unprocessable:
+      description: Well-formed input that failed validation.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    RateLimited:
+      description: The caller exceeded its budget.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotImplemented:
+      description: The route exists and is authorized but is not implemented yet.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum:
+                - bad_request
+                - unauthorized
+                - forbidden
+                - not_found
+                - conflict
+                - unprocessable
+                - rate_limited
+                - payload_too_large
+                - unsupported
+                - not_implemented
+                - unavailable
+                - timeout
+                - internal
+            message: { type: string }
+            requestId: { type: string }
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  field: { type: string }
+                  rule: { type: string }
+    Session:
+      type: object
+      required: [userId, role]
+      properties:
+        userId: { type: string, format: uuid }
+        role: { type: string, enum: [user, moderator, admin] }
+        onboarded: { type: boolean }
+        expiresAt: { type: string, format: date-time }
+    Profile:
+      type: object
+      required: [id, username, displayName]
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string, pattern: "^[a-z0-9_]{3,24}$" }
+        displayName: { type: string }
+        bio: { type: [string, "null"] }
+        avatarPath: { type: [string, "null"] }
+        role: { type: string, enum: [user, moderator, admin] }
+        createdAt: { type: string, format: date-time }
+    PublicProfile:
+      type: object
+      required: [id, username, displayName]
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        displayName: { type: string }
+        bio: { type: [string, "null"] }
+        avatarPath: { type: [string, "null"] }
+        followers: { type: integer, minimum: 0 }
+        following: { type: integer, minimum: 0 }
+    Game:
+      type: object
+      required: [id, slug, title, status]
+      properties:
+        id: { type: string, format: uuid }
+        slug: { type: string, pattern: "^[a-z0-9-]{2,48}$" }
+        title: { type: string, maxLength: 80 }
+        tagline: { type: [string, "null"] }
+        description: { type: [string, "null"] }
+        status: { type: string, enum: [draft, review, published, rejected, archived] }
+        categoryId: { type: [string, "null"], format: uuid }
+        ownerId: { type: string, format: uuid }
+        publishedAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+    GameCreate:
+      type: object
+      additionalProperties: false
+      required: [slug, title]
+      properties:
+        slug: { type: string, pattern: "^[a-z0-9-]{2,48}$" }
+        title: { type: string, minLength: 1, maxLength: 80 }
+        tagline: { type: string, maxLength: 120 }
+        description: { type: string, maxLength: 2000 }
+        categoryId: { type: string, format: uuid }
+    GameUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        title: { type: string, minLength: 1, maxLength: 80 }
+        tagline: { type: string, maxLength: 120 }
+        description: { type: string, maxLength: 2000 }
+        categoryId: { type: string, format: uuid }
+    GameSession:
+      type: object
+      required: [id, gameId, startedAt]
+      properties:
+        id: { type: string, format: uuid }
+        gameId: { type: string, format: uuid }
+        seed: { type: integer, format: int64 }
+        startedAt: { type: string, format: date-time }
+        completedAt: { type: [string, "null"], format: date-time }
+    Score:
+      type: object
+      required: [id, gameId, userId, score, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        gameId: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        score: { type: integer, minimum: 0 }
+        durationMs: { type: [integer, "null"], minimum: 1 }
+        createdAt: { type: string, format: date-time }
+    Leaderboard:
+      type: object
+      required: [id, gameId, scope]
+      properties:
+        id: { type: string }
+        gameId: { type: string, format: uuid }
+        scope: { type: string, enum: [global, friends, daily] }
+        updatedAt: { type: string, format: date-time }
+    LeaderboardEntry:
+      type: object
+      required: [rank, userId, score]
+      properties:
+        rank: { type: integer, minimum: 1 }
+        userId: { type: string, format: uuid }
+        username: { type: string }
+        score: { type: integer, minimum: 0 }
+        achievedAt: { type: string, format: date-time }
+    Comment:
+      type: object
+      required: [id, gameId, authorId, body, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        gameId: { type: string, format: uuid }
+        authorId: { type: string, format: uuid }
+        body: { type: string, maxLength: 2000 }
+        createdAt: { type: string, format: date-time }
+        editedAt: { type: [string, "null"], format: date-time }
+    Notification:
+      type: object
+      required: [id, kind, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [follow, comment, like, score, moderation, system] }
+        payload: { type: object, additionalProperties: true }
+        readAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+    Report:
+      type: object
+      required: [id, targetKind, targetId, reason, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        targetKind: { type: string, enum: [game, comment, profile] }
+        targetId: { type: string, format: uuid }
+        reason: { type: string }
+        details: { type: [string, "null"] }
+        status: { type: string, enum: [open, reviewing, resolved, dismissed] }
+        createdAt: { type: string, format: date-time }
+        resolvedAt: { type: [string, "null"], format: date-time }

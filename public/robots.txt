@@ -1,14 +1,35 @@
-User-agent: Googlebot
-Allow: /
-
-User-agent: Bingbot
-Allow: /
-
-User-agent: Twitterbot
-Allow: /
-
-User-agent: facebookexternalhit
-Allow: /
+# onemore — crawler policy
+# Public routes are listed in /sitemap.xml. Everything that renders account,
+# admin, play-session or search state is disallowed, because those pages carry
+# no crawlable content and must not appear in search results.
+# Keep this list in sync with INDEXABLE_PATHS in src/lib/seo.ts.
 
 User-agent: *
 Allow: /
+Disallow: /admin
+Disallow: /settings
+Disallow: /play
+Disallow: /results
+Disallow: /onboarding
+Disallow: /notifications
+Disallow: /activity
+Disallow: /following
+Disallow: /likes
+Disallow: /saved
+Disallow: /profile
+Disallow: /search
+Disallow: /forgot-password
+Disallow: /reset-password
+Disallow: /verify-email
+Disallow: /account-created
+Disallow: /_serverFn/
+Disallow: /api/
+
+# Crawl budget: nothing under these prefixes is content.
+User-agent: AhrefsBot
+Disallow: /
+
+User-agent: SemrushBot
+Disallow: /
+
+Sitemap: https://onemorestartup.vercel.app/sitemap.xml
