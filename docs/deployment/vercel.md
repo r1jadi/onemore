@@ -353,7 +353,7 @@ in services mode.
 | The container build fails with `"/packages/go/platform": not found` | The build context is a subdirectory, so the relative `replace` in `services/go.mod` cannot resolve | `api` must keep `"root": "./"` and build from the repository root |
 | Every browser request fails with a CORS error naming two origins | An upstream set its own `Access-Control-Allow-Origin` and the gateway's was appended | Already fixed: the gateway strips upstream CORS headers (`corsResponseHeaders` in `services/gateway/internal/proxy`) |
 
-## What is verified, and what is not
+## Verified in the repository
 
 Verified in the repository (see [development/testing.md](../development/testing.md)):
 
@@ -382,26 +382,76 @@ Verified in the repository (see [development/testing.md](../development/testing.
 * `node scripts/check-api-contract.mjs` reports the 16 routed groups documented
   across 28 paths, and `redocly lint` accepts the contract.
 
-**Not verified — no Vercel credentials are available to this checkout:**
+## Verified against production
 
-* **The deployment itself.** The Vercel CLI is present but logged out and there is
-  no access token, so `vercel.json` has never been processed by Vercel, no
-  deployment was created, and **no Vercel build log has been read**. The
-  three-service detection, the container-image build and the binding's injected
-  `UPSTREAM_AUTH_URL` are all documented behaviour that was reproduced locally
-  wherever it could be, not observed in production.
-* **`https://onemorestartup.vercel.app/api/v1/auth/*` has not been requested.**
-  Until it is, treat the routing above as configured-but-unproven.
-* **Vercel Services is in Beta.** If the platform rejects a `services`
-  configuration detail (a `root`, a `framework` slug, or a binding on a service),
-  the fix belongs in `vercel.json`; nothing in the Go code depends on it.
-* **The Go builder's module resolution for the `auth` service.** `services/go.mod`
-  replaces the platform module with the relative path `../packages/go/platform`,
-  which only resolves if the build runs in a full checkout rather than an isolated
-  copy of `services/`. The deployed gateway already proves this holds — it is the
-  same root and the same relative replace, and it serves production today — but
-  the auth service's own build has not been observed.
-* **Auth against the live project.** The hosted project's settings (email
-  confirmation on, password policy) were not changed and no real account was
-  created, so the `201`-without-tokens path for a confirming project is covered by
-  tests rather than by a live round trip.
+The deployment described above was performed and exercised on **2026-10-08**
+against `https://onemorestartup.vercel.app`. Every request below was a real
+request to the live deployment, and the credential cases ran against the live
+Supabase project.
+
+| Request | Observed | What it proves |
+| --- | --- | --- |
+| `GET /api/v1/health` | `200 {"status":"ok","version":"dev"}` | The container-image gateway is serving |
+| `GET /api/v1` | `200 {"apiVersion":"v1","commit":"","version":"dev"}` | Version discovery |
+| `GET /healthz` · `GET /readyz` | `200 ok` · `200 {"status":"ready","version":"dev"}` | Both probes |
+| `GET /` | `200` | The web app still renders alongside two backends |
+| `GET /api/v1/games` | `503 This API is not available in this environment yet.` | A group with no upstream still answers as documented — so the gateway distinguishes configured from unconfigured groups, and `/api/v1/auth/*` reaching `auth` is not a wildcard |
+| `GET /api/v1/auth/session` (no token) | `401 unauthorized` | **The binding resolved**: this is the auth service's answer, not the gateway's `503` |
+| `POST /api/v1/auth/sign-in` (unknown field) | `400 bad_request`, `details[0] = {field:"sneaky",rule:"unknown"}` | Request validation through production |
+| `POST /api/v1/auth/sign-in` (wrong password) | `401 "That email and password do not match."` | A live round trip to Supabase, mapped to the platform envelope |
+| `OPTIONS /api/v1/auth/sign-in` | `204`, exactly **one** `Access-Control-Allow-Origin: https://onemorestartup.vercel.app` | CORS works and the upstream's header is not duplicated |
+| `POST /api/v1/auth/sign-in` (confirmed account) | `200`, `session.userId` = a real Supabase uuid, `role: user`, `onboarded: false`, `tokens.expiresIn: 3600` | Sign-in end to end, including the RLS-guarded `profiles` read |
+| `GET /api/v1/auth/session` (bearer) | `200` with the same session | **JWKS verification of a live Supabase token** |
+| `POST /api/v1/auth/refresh` | `200`, a new access *and* refresh token | Refresh works |
+| `POST /api/v1/auth/refresh` (garbage token) | `422 unprocessable_entity` | Invalid material is distinguishable from a valid session |
+| `POST /api/v1/auth/sign-out` | `204` | Revocation |
+| `POST /api/v1/auth/sign-up` (address already registered) | `201` with a user object and **no** `tokens` | Supabase's anti-enumeration answer is passed through as the documented "awaiting confirmation" success |
+
+One disposable probe account (`phase3b-probe@example.com`) was created confirmed,
+with the Supabase admin API, to exercise the authenticated paths above. It is
+signed out and holds no data or role. Delete it from **Authentication → Users**
+when it is no longer useful.
+
+Two behaviours that look like defects and are not:
+
+* **After `sign-out`, the access token still reads the session until it expires.**
+  Access tokens are verified statelessly against the project's JWKS, so
+  revocation ends the *refresh* chain rather than rewriting an issued JWT. This
+  is why the client must not keep a token past its expiry.
+* **Replaying a refresh token is accepted even after the response handed back a
+  new one.** See the gap below.
+
+## Known gap: refresh-token rotation is off in this Supabase project
+
+Measured on 2026-10-08: the same refresh token was accepted by
+`POST /api/v1/auth/refresh` repeatedly, including **60 seconds** after the first
+rotation — long past Supabase's 10-second reuse interval (the default that exists
+to tolerate client retries). Refresh-token **rotation is therefore disabled for
+this project**, which is a Supabase Auth setting, not a code path: the service
+does exactly what it is told and there is no Go change that can turn it on.
+
+The consequence is worth stating plainly, because the code used to assume the
+opposite: a stolen refresh token stays usable for its whole lifetime, and reuse
+is not detected. Enable **refresh token rotation** in the Supabase dashboard
+(Authentication → Sessions / attack protection) so that each refresh invalidates
+its predecessor. Until then, treat a refresh token as a long-lived credential.
+
+## Still not verified
+
+* **No Vercel build log has been read.** The deployment succeeded and every route
+  above behaves as designed, but the log line naming the detected services was
+  never inspected, so *why* the routing works is documented behaviour rather than
+  an observation. It matters only if a future change makes a service disappear:
+  a service that is not detected does not error, it simply stops existing.
+* **Deployment Protection for previews.** Only production was exercised, so
+  whether an outside `curl` to a preview URL is answered by the protection wall
+  is untested here.
+* **The rate limiter under Vercel's instance model.** `AUTH_RATE_LIMIT_*` is
+  in-process, so it is per instance; asserting a `429` in production would depend
+  on which instance answered. It is covered by the test suite and by a local run
+  that observed the `429` and its `Retry-After`, which is the strongest claim
+  available without a shared store.
+* **Vercel Services is still in Beta.** If the platform later rejects a
+  configuration detail (a `root`, a `framework` slug, or a binding on a
+  container service), the fix belongs in `vercel.json`; nothing in the Go code
+  depends on it.

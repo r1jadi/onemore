@@ -151,8 +151,15 @@ export function signIn(email: string, password: string): Promise<AuthSession> {
 }
 
 /**
- * Rotates the current session. Supabase invalidates the old refresh token, so
- * the new pair replaces the stored one.
+ * Rotates the current session: the new pair always replaces the stored one.
+ *
+ * Whether Supabase also invalidates the *previous* refresh token depends on the
+ * project's refresh-token rotation setting, and it is a project setting rather
+ * than something this client controls. It was measured **off** for this project
+ * on 2026-10-08 — the same refresh token was accepted repeatedly, a minute
+ * apart — so until that changes, a refresh token has to be treated as a live
+ * credential for its whole lifetime rather than as single-use. See the
+ * production verification section of docs/deployment/vercel.md.
  */
 export function refreshSession(): Promise<AuthSession> {
   const refreshToken = tokens?.refreshToken;
