@@ -22,6 +22,11 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Local Vercel CLI state: created by `vercel dev`, `vercel link` and
+# `vercel deploy` in this checkout. It holds a project link and a dev cache, not
+# configuration that belongs in the repository.
+.vercel
+
 node_modules
 dist
 dist-ssr

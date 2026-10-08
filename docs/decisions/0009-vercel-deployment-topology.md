@@ -2,6 +2,10 @@
 
 * Status: accepted
 * Date: 2026-10-06
+* Amended by [0010](0010-auth-service-deployment-topology.md): a second Go
+  service needs a private route from the gateway, which requires the gateway to be
+  a container image and moves its root back to `./`. The routing, the explicit
+  per-service frameworks and the entrypoint pattern below still stand.
 
 ## Context
 

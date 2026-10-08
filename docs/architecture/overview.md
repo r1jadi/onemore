@@ -78,7 +78,7 @@ where they will attach is described in
 | `scripts/` | Operational helpers: `test-rls.sh`, `generate-sitemap.mjs`, `check-api-contract.mjs`. |
 | `.github/workflows/` | CI: web, go, database, api-contract, security. |
 | `infrastructure/` | Placeholders for container, CDN, monitoring and Terraform work. |
-| `vercel.json` | The deployment: two services (web and Go api) and the rewrites that route `/api/v1/*` to the gateway. See [deployment/vercel.md](../deployment/vercel.md). |
+| `vercel.json`, `Dockerfile.vercel` | The deployment: three services (`web`, the container-image Go gateway `api`, and the internal Go `auth` service), the rewrites that route `/api/v1/*` to the gateway, and the service binding that gives the gateway a private route to `auth`. See [deployment/vercel.md](../deployment/vercel.md) and [0010](../decisions/0010-auth-service-deployment-topology.md). |
 
 ## Two modules, one workspace
 
