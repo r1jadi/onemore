@@ -179,6 +179,38 @@ func TestGatewayOwnedPathsAreNotTreatedAsUnconfiguredGroups(t *testing.T) {
 	}
 }
 
+func TestUpstreamCorsHeadersAreDropped(t *testing.T) {
+	// The browser's origin is the gateway's, so the gateway answers for it. An
+	// upstream is free to set its own CORS headers (it may be reached directly),
+	// but copying them in beside the gateway's produces two
+	// `Access-Control-Allow-Origin` values — which every browser rejects.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "http://localhost:8081")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"upstream":true}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	handler := proxyHandler(t, map[string]string{"auth": upstream.URL})
+	response := do(t, handler, http.MethodPost, "/api/v1/auth/sign-in", nil)
+	response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.StatusCode)
+	}
+	if got := response.Header.Values("Access-Control-Allow-Origin"); len(got) != 0 {
+		t.Errorf("Access-Control-Allow-Origin = %v, want none: the gateway owns CORS", got)
+	}
+	if got := response.Header.Get("Access-Control-Allow-Credentials"); got != "" {
+		t.Errorf("Access-Control-Allow-Credentials = %q, want empty", got)
+	}
+	// Everything else the upstream sent must survive untouched.
+	if got := response.Header.Get("Content-Type"); got != "application/json" {
+		t.Errorf("Content-Type = %q, want the upstream's value", got)
+	}
+}
+
 func TestLongestPrefixWins(t *testing.T) {
 	admin := newRecorder(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))

@@ -61,7 +61,7 @@ where they will attach is described in
    work a user cannot be trusted to do (writing a score, hiding a comment,
    granting a role); anything a user could legitimately do is additionally
    protected by RLS, so a bug in one layer does not become a data breach.
-6. Errors are one envelope: `{"error":{"code","message","requestId"}}`, produced
+6. Errors are one envelope: `{"error":{"code","message","request_id"}}`, produced
    by `packages/go/platform/apierr` and re-exported by `httpx`.
 
 ## Repository layout

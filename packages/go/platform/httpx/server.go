@@ -164,6 +164,10 @@ type ServerOptions struct {
 	Health  *Health
 	Logger  *slog.Logger
 	Limiter *RateLimiter
+	// ExtraLimiters are additional buckets a service created for its own
+	// endpoints (the auth service's credential endpoints). Run keeps them
+	// garbage collected alongside the shared limiter.
+	ExtraLimiters []*RateLimiter
 	// ExtraHandlers run after the middleware chain, before the mux. The gateway
 	// uses this hook to install its reverse proxy.
 	ExtraHandlers []Middleware
@@ -215,12 +219,21 @@ func Run(opts ServerOptions) error {
 	server := NewServer(opts)
 	logger := opts.Logger
 
+	// One ticker, every bucket: a limiter that is never cleaned up grows without
+	// bound, so a service cannot forget one.
+	limiters := make([]*RateLimiter, 0, len(opts.ExtraLimiters)+1)
 	if opts.Limiter != nil {
+		limiters = append(limiters, opts.Limiter)
+	}
+	limiters = append(limiters, opts.ExtraLimiters...)
+	if len(limiters) > 0 {
 		go func() {
 			ticker := time.NewTicker(10 * time.Minute)
 			defer ticker.Stop()
 			for range ticker.C {
-				opts.Limiter.Cleanup()
+				for _, limiter := range limiters {
+					limiter.Cleanup()
+				}
 			}
 		}()
 	}

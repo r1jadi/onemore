@@ -20,18 +20,20 @@ info:
     Failures always use the same envelope:
 
     ```json
-    { "error": { "code": "forbidden", "message": "...", "requestId": "..." } }
+    { "error": { "code": "forbidden", "message": "...", "request_id": "..." } }
     ```
 
     Codes: `bad_request`, `unauthorized`, `forbidden`, `not_found`, `conflict`,
-    `unprocessable`, `rate_limited`, `payload_too_large`, `unsupported`,
-    `not_implemented`, `unavailable`, `timeout`, `internal`.
+    `unprocessable_entity`, `rate_limited`, `payload_too_large`,
+    `unsupported_media_type`, `not_implemented`, `service_unavailable`,
+    `timeout`, `internal_error`.
 
     ## Implementation status
-    Operations carry `x-status`. `planned` means the route exists, is authorized
-    and rate limited, and answers `501 not_implemented` until the feature task
-    that owns it lands. Clients can therefore be written against this contract
-    today without guessing at the final shape.
+    Operations carry `x-status`. `available` means the endpoint is implemented and
+    behaves as documented. `planned` means the route exists, is authorized and
+    rate limited, and answers `501 not_implemented` until the feature task that
+    owns it lands, so clients can be written against this contract today without
+    guessing at the final shape.
 
     ## Conventions
     * JSON in, JSON out. Unknown request fields are rejected.
@@ -53,7 +55,11 @@ servers:
 
 tags:
   - name: auth
-    description: Session exchange on top of Supabase Auth.
+    description: |
+      The credential lifecycle on top of Supabase Auth. Supabase stores the
+      credentials and issues the tokens; this group owns the application session.
+      Credential and token bodies are limited to 8 KiB, and the endpoints that
+      verify a password are throttled per client and per account.
   - name: users
     description: Player profiles.
   - name: games
@@ -135,17 +141,142 @@ paths:
         "503":
           description: The process is draining, so it must receive no new traffic.
 
+  /auth/sign-up:
+    post:
+      operationId: signUp
+      tags: [auth]
+      summary: Create an account
+      description: |
+        Creates the account in Supabase Auth and returns the new session.
+
+        This service stores no credential: the password is forwarded to Supabase,
+        which applies the project's own password policy, sends the confirmation
+        mail and creates the profile row through its `handle_new_user` trigger.
+
+        When the project requires email confirmation no session exists until the
+        address is confirmed, so that response carries `user` and no `tokens`.
+      security: []
+      x-status: available
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email, password]
+              properties:
+                email: { type: string, format: email, minLength: 3, maxLength: 254 }
+                password: { type: string, minLength: 8, maxLength: 72 }
+      responses:
+        "201":
+          description: |
+            The account was created. `tokens` is present when Supabase issued a
+            session, and omitted while email confirmation is pending.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthSession" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /auth/sign-in:
+    post:
+      operationId: signIn
+      tags: [auth]
+      summary: Sign in with an email and password
+      description: |
+        Verifies the credential against Supabase Auth and returns the session.
+
+        A wrong password and an unknown address answer identically, and the reason
+        is never echoed: nothing here reveals whether an account exists.
+      security: []
+      x-status: available
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email, password]
+              properties:
+                email: { type: string, format: email, minLength: 3, maxLength: 254 }
+                password: { type: string, minLength: 1, maxLength: 72 }
+      responses:
+        "200":
+          description: The credential matched, and the session is returned.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthSession" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: The credential is right but the address is not confirmed yet.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /auth/refresh:
+    post:
+      operationId: refreshSession
+      tags: [auth]
+      summary: Exchange a refresh token for a new session
+      description: |
+        Rotates the Supabase session and returns both tokens again.
+
+        The refresh token travels in the body of a `POST`, never in a query
+        string, so it stays out of access logs and browser history. A token
+        Supabase no longer recognises answers `401`, which the client should treat
+        as "sign in again".
+      security: []
+      x-status: available
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string, minLength: 1, maxLength: 8192 }
+      responses:
+        "200":
+          description: The session was rotated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthSession" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
   /auth/session:
     post:
       operationId: createSession
       tags: [auth]
-      summary: Exchange a Supabase session for the application session
+      summary: Exchange a Supabase access token for the application session
       description: |
-        Supabase Auth owns credentials. This endpoint returns the application's
-        view of the session (roles, onboarding state) and is the only auth route
-        reachable anonymously.
+        Returns the application's view of a session — role, onboarding state,
+        expiry — for a Supabase access token the caller already holds. That is how
+        a client which just finished a Supabase-side flow (an emailed link, an
+        OAuth redirect) asks for the session it does not hold yet.
+
+        The token is verified exactly as on every other authenticated route: a
+        JWKS-checked signature plus issuer, audience and expiry. It is the only
+        auth route reachable without a bearer token, and it returns no token of
+        its own.
       security: []
-      x-status: planned
+      x-status: available
       requestBody:
         required: true
         content:
@@ -155,20 +286,27 @@ paths:
               additionalProperties: false
               required: [accessToken]
               properties:
-                accessToken: { type: string, minLength: 20 }
+                accessToken: { type: string, minLength: 1, maxLength: 8192 }
       responses:
         "200":
-          description: The current session.
+          description: The session belonging to that token.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Session" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "501": { $ref: "#/components/responses/NotImplemented" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "503": { $ref: "#/components/responses/Unavailable" }
     get:
       operationId: getSession
       tags: [auth]
       summary: Read the current session
-      x-status: planned
+      description: |
+        Reports the session of the caller whose bearer token the shared auth
+        middleware verified. The user id, role and email come from that token and
+        are never parameters.
+      x-status: available
       responses:
         "200":
           description: The current session.
@@ -176,18 +314,25 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Session" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "501": { $ref: "#/components/responses/NotImplemented" }
+        "503": { $ref: "#/components/responses/Unavailable" }
 
   /auth/sign-out:
     post:
       operationId: signOut
       tags: [auth]
       summary: Revoke the current session
-      x-status: planned
+      description: |
+        Revokes the presented Supabase session, so its refresh token can no longer
+        mint an access token. The access token itself stays verifiable until it
+        expires, so the client discards it too.
+
+        Retrying is safe: revoking an already-revoked session is a success, which
+        lets a client finish signing out after a dropped response.
+      x-status: available
       responses:
-        "204": { description: Session revoked. }
+        "204": { description: The session is revoked. }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "501": { $ref: "#/components/responses/NotImplemented" }
+        "503": { $ref: "#/components/responses/Unavailable" }
 
   /users/me:
     get:
@@ -905,6 +1050,16 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    Unavailable:
+      description: A dependency of this endpoint is not configured or not reachable.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    PayloadTooLarge:
+      description: The request body is larger than the endpoint accepts.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     NotImplemented:
       description: The route exists and is authorized but is not implemented yet.
       content:
@@ -937,7 +1092,7 @@ components:
                 - timeout
                 - internal
             message: { type: string }
-            requestId: { type: string }
+            request_id: { type: string }
             details:
               type: array
               items:
@@ -948,11 +1103,54 @@ components:
     Session:
       type: object
       required: [userId, role]
+      description: |
+        The application's view of a session, built from a verified token. It
+        carries no token of its own: only what a screen needs to render.
       properties:
         userId: { type: string, format: uuid }
         role: { type: string, enum: [user, moderator, admin] }
-        onboarded: { type: boolean }
+        email: { type: string, format: email }
+        onboarded:
+          type: boolean
+          description: |
+            Omitted when it could not be read. `false` means the caller has not
+            finished onboarding, which is an answer; a failed read is not, and
+            reporting one as the other would restart onboarding.
         expiresAt: { type: string, format: date-time }
+    AuthSession:
+      type: object
+      required: [session]
+      description: What the credential and refresh endpoints return.
+      properties:
+        session: { $ref: "#/components/schemas/Session" }
+        tokens: { $ref: "#/components/schemas/Tokens" }
+        user: { $ref: "#/components/schemas/AuthUser" }
+    Tokens:
+      type: object
+      required: [accessToken, refreshToken, tokenType]
+      description: |
+        The Supabase token pair, returned only to the caller that earned it, in a
+        response marked `no-store`. The refresh token is a credential: a client
+        keeps it out of anything a page could read back. Omitted while email
+        confirmation is pending, when no session exists yet.
+      properties:
+        accessToken: { type: string }
+        refreshToken: { type: string }
+        tokenType: { type: string, example: bearer }
+        expiresAt: { type: string, format: date-time }
+        expiresIn:
+          type: integer
+          minimum: 0
+          description: Lifetime of `accessToken` in seconds.
+    AuthUser:
+      type: object
+      required: [id, email, emailConfirmed, createdAt]
+      description: The Supabase user record, trimmed to what the app shows.
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        emailConfirmed: { type: boolean }
+        createdAt: { type: string, format: date-time }
     Profile:
       type: object
       required: [id, username, displayName]

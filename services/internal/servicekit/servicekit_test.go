@@ -3,6 +3,7 @@ package servicekit
 import (
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
+	"github.com/r1jadi/onemore/packages/go/platform/authn"
 	"github.com/r1jadi/onemore/packages/go/platform/config"
 	"github.com/r1jadi/onemore/packages/go/platform/httpx"
 )
@@ -116,6 +118,54 @@ func decodeError(t *testing.T, response *http.Response) map[string]any {
 		t.Fatalf("response is not JSON: %v (%s)", err, body)
 	}
 	return payload
+}
+
+func TestRegisterWithRunsAfterRegisterWithTheResolvedDependencies(t *testing.T) {
+	t.Setenv("ENVIRONMENT", "development")
+	t.Setenv("LOG_LEVEL", "error")
+	t.Setenv("HTTP_ADDR", ":0")
+	t.Setenv("SUPABASE_JWT_SECRET", testSecret)
+	t.Setenv("SUPABASE_JWT_AUDIENCE", "authenticated")
+
+	order := make([]string, 0, 2)
+	service := New(Options{
+		Name: "test-service",
+		Register: func(*httpx.Router) {
+			order = append(order, "Register")
+		},
+		// A service whose handlers need the resolved dependencies (the auth
+		// service calls Supabase and verifies a token presented in a body) gets
+		// them here instead of reading the environment a second time.
+		RegisterWith: func(router *httpx.Router, cfg *config.Config, logger *slog.Logger, verifier *authn.Verifier) {
+			order = append(order, "RegisterWith")
+			if cfg == nil || cfg.Service != "test-service" {
+				t.Errorf("RegisterWith got configuration %+v, want the resolved service configuration", cfg)
+			}
+			if logger == nil {
+				t.Error("RegisterWith got a nil logger")
+			}
+			if verifier == nil {
+				t.Error("RegisterWith got a nil verifier although auth material is configured")
+			}
+			router.PublicFunc("GET /api/v1/things/extra", func(w http.ResponseWriter, r *http.Request) {
+				httpx.WriteJSON(w, r, http.StatusOK, map[string]string{"ok": "extra"})
+			})
+		},
+	})
+
+	server := httpx.NewServer(service.server)
+	httpServer := httptest.NewServer(server.Handler)
+	t.Cleanup(httpServer.Close)
+
+	if len(order) != 2 || order[0] != "Register" || order[1] != "RegisterWith" {
+		t.Fatalf("registration order = %v, want [Register RegisterWith]", order)
+	}
+
+	response := get(t, httpServer.URL+"/api/v1/things/extra", nil)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("route registered from RegisterWith = %d, want 200", response.StatusCode)
+	}
 }
 
 func TestProbesAnswerWithoutAuth(t *testing.T) {

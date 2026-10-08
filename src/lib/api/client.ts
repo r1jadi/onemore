@@ -17,6 +17,9 @@ type ApiErrorEnvelope = {
   error?: {
     code?: string;
     message?: string;
+    /** The envelope's own field name: the Go API serialises it snake_case. */
+    request_id?: string;
+    /** Read as a fallback so a response written against the older spelling still works. */
     requestId?: string;
     details?: Array<ApiErrorDetail>;
   };
@@ -149,7 +152,11 @@ export async function apiFetch<T>(path: string, options: ApiRequestOptions = {})
       {
         code: envelope.error?.code ?? "http_error",
         status: response.status,
-        requestId: envelope.error?.requestId ?? response.headers.get("X-Request-ID") ?? undefined,
+        requestId:
+          envelope.error?.request_id ??
+          envelope.error?.requestId ??
+          response.headers.get("X-Request-ID") ??
+          undefined,
         details: envelope.error?.details ?? [],
       },
     );

@@ -21,9 +21,17 @@ var (
 	hmacAlgorithm        = "HS256"
 )
 
-// serviceRoleClaim is the Supabase role used by server-side tooling. A browser
-// must never be able to present it, so it is refused explicitly.
-const serviceRoleClaim = "service_role"
+// Roles carried by Supabase's own project keys. Neither is a signed-in user: the
+// service role key bypasses row-level security and the anon key is published in
+// every browser bundle. A genuine signature on either is not an identity.
+const (
+	serviceRoleClaim = "service_role"
+	anonRoleClaim    = "anon"
+)
+
+// nonUserRoles is refused before an Identity is built, so a leaked project key
+// can never be replayed as a user.
+var nonUserRoles = map[string]struct{}{serviceRoleClaim: {}, anonRoleClaim: {}}
 
 var userIDPattern = regexp.MustCompile(`^[0-9a-fA-F-]{16,64}$`)
 
@@ -103,10 +111,11 @@ func (v *Verifier) Verify(ctx context.Context, rawToken string) (identity.Identi
 		return identity.Identity{}, errors.New("token is not valid")
 	}
 
-	if claims.Role == serviceRoleClaim {
-		// Server-side tooling uses this role. A user-facing request must never
-		// be able to present it, even if the signature is genuine.
-		return identity.Identity{}, errors.New("service role tokens are not accepted on user endpoints")
+	if _, refused := nonUserRoles[strings.ToLower(strings.TrimSpace(claims.Role))]; refused {
+		// Server-side tooling and the public project key use these roles. A
+		// user-facing request must never be able to present one, even if the
+		// signature is genuine.
+		return identity.Identity{}, errors.New("project keys are not accepted on user endpoints")
 	}
 	if claims.Subject == "" || !userIDPattern.MatchString(claims.Subject) {
 		return identity.Identity{}, errors.New("token subject is not a valid user id")
@@ -115,28 +124,23 @@ func (v *Verifier) Verify(ctx context.Context, rawToken string) (identity.Identi
 	role := identity.RoleUser
 	if claims.AppMeta != nil {
 		if raw, ok := claims.AppMeta["role"].(string); ok {
-			role = normalizeRole(raw)
+			role = identity.NormalizeRole(raw)
 		}
 	}
 
-	return identity.Identity{
-		UserID: claims.Subject,
-		Email:  claims.Email,
-		Role:   role,
-	}, nil
-}
-
-func normalizeRole(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case identity.RoleAdmin:
-		return identity.RoleAdmin
-	case identity.RoleModerator:
-		return identity.RoleModerator
-	case identity.RoleUser, "authenticated":
-		return identity.RoleUser
-	default:
-		return identity.RoleUser
+	// The expiry is already validated above; carrying it lets a handler report
+	// the session's remaining life without parsing the token a second time.
+	var expiresAt time.Time
+	if claims.ExpiresAt != nil {
+		expiresAt = claims.ExpiresAt.Time
 	}
+
+	return identity.Identity{
+		UserID:    claims.Subject,
+		Email:     claims.Email,
+		Role:      role,
+		ExpiresAt: expiresAt,
+	}, nil
 }
 
 func (v *Verifier) parserOptions() []jwt.ParserOption {

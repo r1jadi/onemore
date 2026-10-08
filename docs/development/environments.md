@@ -40,6 +40,7 @@ is updated before another. `VITE_SUPABASE_ANON_KEY` is still read as a fallback 
 | `SUPABASE_SECRET_KEY` | web SSR, Go services (reserved — no code reads it yet) | bypasses RLS; the current name for the service role key |
 | `SUPABASE_JWT_SECRET` | Go services | forges tokens in legacy HS256 projects |
 | `SUPABASE_JWKS_URL`, `SUPABASE_URL`, `SUPABASE_JWT_AUDIENCE`, `SUPABASE_JWT_ISSUER` | Go services | project metadata, not secret, but server-side |
+| `SUPABASE_PUBLISHABLE_KEY` | the auth service | the browser is given the same value, so it is not secret — but only the server needs to make Auth API calls |
 | `CORS_ALLOWED_ORIGINS`, `RATE_LIMIT_*`, `LOG_*`, `HTTP_ADDR`, `ENVIRONMENT`, `SERVICE_NAME` | Go services | service configuration |
 | `UPSTREAM_*_URL` | gateway | internal addresses |
 | `RAIACCEPT_*` | payments service (later) | payment credentials |
@@ -76,6 +77,7 @@ the API Keys page show the same values.
 | `VITE_SUPABASE_URL` / `SUPABASE_URL` | Dashboard → **Project Settings → API Keys → Project URL**, or the project's **Connect** dialog. Self-hosted or local: `supabase status` → *APIs* → Project URL. |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | Dashboard → **Project Settings → API Keys → Publishable and secret API keys** tab → the publishable key (`sb_publishable_…`). If the tab offers *Create new API keys*, create them; the anon key keeps working meanwhile. Local: `supabase status` → *Authentication Keys* → **Publishable**. |
 | `SUPABASE_SECRET_KEY` | Same tab → **secret** key (`sb_secret_…`); create one per backend component so a leak forces a single rotation. Local: `supabase status` → *Authentication Keys* → **Secret**. |
+| `SUPABASE_PUBLISHABLE_KEY` | The same publishable key as `VITE_SUPABASE_PUBLISHABLE_KEY` — one value, two names, because the browser reads the `VITE_` copy and the auth service reads this one. |
 | `SUPABASE_JWKS_URL` | Leave empty. `config.go` derives `<SUPABASE_URL>/auth/v1/.well-known/jwks.json`, which is public — paste it into a browser to confirm it returns JSON. |
 | `SUPABASE_JWT_ISSUER` | Leave empty; derived as `<SUPABASE_URL>/auth/v1`. |
 | `SUPABASE_JWT_AUDIENCE` | Fixed: `authenticated`. |
@@ -98,6 +100,7 @@ onto the names in this repository.
 | `LOG_LEVEL`, `LOG_FORMAT` | Chosen: `debug`/`info`/`warn`/`error` and `json`/`text`. |
 | `CORS_ALLOWED_ORIGINS` | The exact browser origins the web app is served from — dev server, Vercel production and preview domains. Comma-separated, no wildcard outside development. |
 | `RATE_LIMIT_*` | Tuned from observed traffic, not discovered. Defaults suit a single instance; raise them deliberately. |
+| `AUTH_RATE_LIMIT_*` | The credential budget for the auth endpoints, metered per client and per account. Defaults to 10/minute with a burst of 5, deliberately far tighter than `RATE_LIMIT_*` because every attempt can verify a password. |
 | `UPSTREAM_*_URL` | The private address of each deployed service. Unset means the gateway answers `503` for that route group, which is the intended state before an API host exists. |
 | `RAIACCEPT_*` | The RaiAccept merchant dashboard, once payments start. Not read by any service today. |
 | Database password / connection string | Supabase dashboard → **Project Settings → Database → Connection string** (or `supabase status` → *Database* → URL locally). Nothing in this repository stores it: migrations run through the CLI, which keeps its own session. |
@@ -121,6 +124,19 @@ In development a service starts without Supabase auth material; protected routes
 then answer `503` with a log line explaining what to set, rather than pretending
 to authenticate. To exercise real token verification locally, set
 `SUPABASE_URL` (the service derives the JWKS URL) or `SUPABASE_JWT_SECRET`.
+
+To exercise the auth endpoints locally, add `SUPABASE_PUBLISHABLE_KEY` (the
+auth service calls Supabase Auth with it) and run that service too:
+
+```bash
+SERVICE_NAME=auth HTTP_ADDR=:8082 go run ./auth/cmd/auth   # from services/
+UPSTREAM_AUTH_URL=http://localhost:8082 SERVICE_NAME=gateway HTTP_ADDR=:8080 go run ./gateway/cmd/gateway
+```
+
+The gateway proxies `/api/v1/auth/*` to `UPSTREAM_AUTH_URL`; with the variable
+unset it answers `503` for that group, which is the intended state until the
+service is deployed. `services/auth/README.md` lists the endpoints and what each
+one calls at Supabase.
 
 ## Configuration is fail-fast
 
@@ -158,3 +174,11 @@ dashboard access:
 4. **Custom domain.** When one is chosen, set `VITE_PUBLIC_SITE_URL`, regenerate
    the sitemap (`npm run sitemap`), update the `Sitemap:` line in `robots.txt`,
    and add the origin to `CORS_ALLOWED_ORIGINS`. Nothing else changes.
+5. **The auth service needs a host and one upstream variable.** The binary builds
+   and its tests pass, but `/api/v1/auth/*` is only reachable once the service is
+   deployed and `UPSTREAM_AUTH_URL` points at it. That address is
+   environment-specific and is deliberately not committed — set it in the API
+   host's environment, and set `SUPABASE_PUBLISHABLE_KEY` next to `SUPABASE_URL`
+   so the service can reach Supabase Auth. Until both are set, the group answers
+   `503`, and the web app's Log in form reports the failure instead of pretending
+   to sign anyone in. No `UPSTREAM_*` value appears anywhere in this repository.

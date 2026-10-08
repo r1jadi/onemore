@@ -25,12 +25,20 @@ type Options struct {
 	// published contract but not implemented yet must use httpx.NotImplemented
 	// so clients receive 501 instead of an accidental 404.
 	Register func(router *httpx.Router)
+	// RegisterWith is Register with the resolved dependencies, for a service
+	// whose handlers need them: the auth service calls Supabase Auth and verifies
+	// a token presented in a request body. It runs after Register.
+	RegisterWith func(router *httpx.Router, cfg *config.Config, logger *slog.Logger, verifier *authn.Verifier)
 	// Checkers add readiness probes for external dependencies.
 	Checkers []httpx.Checker
 	// ExtraHandlers builds middleware that runs inside the standard chain. It
 	// receives the resolved configuration and logger because it is called after
 	// configuration loading; the gateway uses it to install its reverse proxy.
 	ExtraHandlers func(cfg *config.Config, logger *slog.Logger) []httpx.Middleware
+	// ExtraLimiters are per-service token buckets (the auth service meters its
+	// credential endpoints separately from the shared budget). Run cleans them
+	// up with the shared limiter.
+	ExtraLimiters []*httpx.RateLimiter
 }
 
 // Service is a fully wired service that has not started listening yet.
@@ -71,6 +79,9 @@ func New(opts Options) *Service {
 	if opts.Register != nil {
 		opts.Register(router)
 	}
+	if opts.RegisterWith != nil {
+		opts.RegisterWith(router, cfg, logger, verifier)
+	}
 
 	var extra []httpx.Middleware
 	if opts.ExtraHandlers != nil {
@@ -89,6 +100,7 @@ func New(opts Options) *Service {
 			Health:        health,
 			Logger:        logger,
 			Limiter:       limiter,
+			ExtraLimiters: opts.ExtraLimiters,
 			ExtraHandlers: extra,
 		},
 	}

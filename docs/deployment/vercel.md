@@ -130,6 +130,7 @@ reads the variable and falls back to same-origin `/api/v1`.
 | --- | --- | --- |
 | `ENVIRONMENT` | `production` | Selects `config.Validate`'s hardening rules |
 | `SUPABASE_URL` | same URL as `VITE_SUPABASE_URL` | The service derives `<SUPABASE_URL>/auth/v1/.well-known/jwks.json` |
+| `SUPABASE_PUBLISHABLE_KEY` | same value as `VITE_SUPABASE_PUBLISHABLE_KEY` | Needed **only** by the auth service, which calls the Supabase Auth API. The value is already public, so this is not a secret — it is set twice because the browser and the service read different names |
 | `CORS_ALLOWED_ORIGINS` | `https://onemorestartup.vercel.app` | Required in production; `*` is rejected |
 | `RATE_LIMIT_ENABLED` | `1` | Cannot be disabled in production |
 | `LOG_LEVEL`, `LOG_FORMAT` | `info`, `json` (defaults) | Optional; structured logs are what Vercel captures |
@@ -147,6 +148,8 @@ Deliberately **not** set:
 * `SUPABASE_JWKS_URL`, `SUPABASE_JWT_ISSUER` — derived from `SUPABASE_URL`.
 * `UPSTREAM_*_URL` — the gateway answers `503` for a group whose upstream is
   unset, which is the intended state until the individual services are deployed.
+  `UPSTREAM_AUTH_URL` is the first one that will be needed (see below); no value
+  is committed here, because a deployment address is environment-specific.
 
 Vercel environment variables are project-scoped, so the API service can read the
 `VITE_` values too — that is harmless in that direction. The rule that matters is
@@ -162,6 +165,45 @@ those origins to `CORS_ALLOWED_ORIGINS` if the preview is meant to call the API
 cross-origin. Leave `ENVIRONMENT=production` scoped to Production so a preview
 cannot be mistaken for it; unscoped, a service defaults to `development`, which
 relaxes the CORS and auth-material checks instead of loosening production.
+
+## Deploying the auth service
+
+The Auth API (`/api/v1/auth/*`) is implemented and answers real requests, but it
+reaches users only when two things exist that this repository cannot create:
+
+1. **A host for `services/auth`.** The service builds as a standalone binary
+   (`go build ./auth/cmd/auth`) and serves `/api/v1/auth/*` on its own port. How it
+   is hosted is a deployment decision that has not been made here — the current
+   `vercel.json` deploys two services (`web`, the Go gateway `api`), and adding a
+   third is a topology change.
+2. **`UPSTREAM_AUTH_URL` on the API service.** The gateway proxies a group only
+   when its upstream is set, so this variable must be set to the address where the
+   auth service actually listens. The value is environment-specific; it is
+   deliberately absent from this repository (no placeholder, no guess). Until it
+   is set, `/api/v1/auth/*` answers `503` with the standard envelope — routed, not
+   a `404` — and the web app shows the failure message rather than a fake session.
+
+`SUPABASE_PUBLISHABLE_KEY` and `SUPABASE_URL` must be visible to whichever
+process runs the auth service. They are not secrets (the publishable key is
+already in the browser bundle), but `SUPABASE_SECRET_KEY` must **not** be given to
+it: the service authorizes with the caller's own token, so Row Level Security
+remains the boundary.
+
+Once both are in place, verification is three requests:
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}\n' -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"you@example.com","password":"a-long-password"}' \
+  https://onemorestartup.vercel.app/api/v1/auth/sign-up
+# 201 (or 409 if the address already exists) — 503 means UPSTREAM_AUTH_URL is unset
+curl -sS -o /dev/null -w '%{http_code}\n' https://onemorestartup.vercel.app/api/v1/auth/session
+# 401 — the route exists and demands a token
+```
+
+The access token from sign-up or sign-in is what every other endpoint expects in
+`Authorization: Bearer …`; tokens are verified against the project's JWKS, so no
+`SUPABASE_JWT_SECRET` is involved anywhere in this flow.
 
 ## Deploying
 
@@ -216,6 +258,14 @@ Verified in the repository (see [development/testing.md](../development/testing.
 * `node scripts/check-api-contract.mjs`: the `/health` path is documented in
   `packages/api-contracts/openapi-v1.yaml`.
 
+Verified for the auth service (see [../architecture/api.md](../architecture/api.md)
+and [`services/auth/README.md`](../../services/auth/README.md)): `go vet` and
+`go test ./...` in both modules, `gofmt -l` clean, all sixteen binaries built
+(fifteen services plus `cmd/api`), the endpoints exercised through a test server
+table-driven over success, invalid credential, unauthenticated, valid, expired and
+forged token, refresh, sign-out and malformed-body cases, and the contract checked
+by both `redocly lint` and `scripts/check-api-contract.mjs`.
+
 **Not verified — no Vercel credentials were available to this checkout:**
 
 * The deployment itself. No Vercel CLI, no linked project and no access token,
@@ -232,3 +282,11 @@ Verified in the repository (see [development/testing.md](../development/testing.
   The `tanstack-start-lovable` framework already supplies `vite build` and the
   `dist` output directory, which is what this repository's `bun run build` / `npm
   run build` runs.
+* **Auth against the live project.** No Supabase credentials or CLI were available
+  either, so the hosted project's Auth settings (whether email confirmation is on,
+  the password policy) were not inspected and no real sign-up was performed. The
+  service handles both sign-up answers — a session, or a user awaiting
+  confirmation — and the tests cover each, but the live round trip is unproven.
+* **Where the auth service is hosted.** Unset `UPSTREAM_AUTH_URL` means the group is
+  `503` in production today. See *Deploying the auth service* above for exactly
+  what must be set, and what must not be invented.

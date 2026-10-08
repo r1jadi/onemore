@@ -283,7 +283,7 @@ func RateLimit(limiter *RateLimiter, cfg config.RateLimit) Middleware {
 				next.ServeHTTP(w, r)
 				return
 			}
-			if !limiter.Allow(clientKey(r)) {
+			if !limiter.Allow(ClientKey(r)) {
 				w.Header().Set("Retry-After", "30")
 				WriteError(w, r, NewError(CodeRateLimited, "Too many requests. Slow down and try again shortly."))
 				return
@@ -293,7 +293,12 @@ func RateLimit(limiter *RateLimiter, cfg config.RateLimit) Middleware {
 	}
 }
 
-func clientKey(r *http.Request) string {
+// ClientKey names the bucket a request is metered in: the verified user id when
+// the caller is authenticated, otherwise the client IP. It is exported so a
+// service can add its own, tighter bucket to a sensitive endpoint (the auth
+// service meters credential attempts by IP and by account) without inventing a
+// second way to identify a caller.
+func ClientKey(r *http.Request) string {
 	if id, ok := identity.FromContext(r.Context()); ok && !id.Anonymous && id.UserID != "" {
 		return "user:" + id.UserID
 	}

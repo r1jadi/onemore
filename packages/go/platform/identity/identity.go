@@ -3,7 +3,11 @@
 // service may build an Identity from a header, body or query parameter.
 package identity
 
-import "context"
+import (
+	"context"
+	"strings"
+	"time"
+)
 
 // Role values stored in Supabase app_metadata.role.
 const (
@@ -17,9 +21,28 @@ type Identity struct {
 	UserID string
 	Email  string
 	Role   string
+	// ExpiresAt is when the presented token stops being valid. It is zero for an
+	// anonymous identity. Handlers report it (the auth service returns it as the
+	// session expiry) instead of parsing the token again.
+	ExpiresAt time.Time
 	// Anonymous is true when no credentials were presented on an optional-auth
 	// route. Anonymous callers receive public, read-only data.
 	Anonymous bool
+}
+
+// NormalizeRole maps a role claim onto one of the three platform roles. Anything
+// unrecognised — including Supabase's own `authenticated` role, which means
+// "signed in" rather than a platform role — becomes `user`, so an unexpected
+// value can never widen access.
+func NormalizeRole(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case RoleAdmin:
+		return RoleAdmin
+	case RoleModerator:
+		return RoleModerator
+	default:
+		return RoleUser
+	}
 }
 
 // IsAdmin reports whether the identity may use the admin API.

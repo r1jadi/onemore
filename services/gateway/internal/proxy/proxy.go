@@ -39,6 +39,18 @@ var hopByHopHeaders = []string{
 	"Te", "Trailer", "Transfer-Encoding", "Upgrade",
 }
 
+// corsResponseHeaders belong to the gateway's own CORS middleware. A service
+// that sets them too (it is allowed to: it may be reached directly) would
+// otherwise contribute a second value, and a response carrying
+// `Access-Control-Allow-Origin: a, a` is rejected by every browser. The origin
+// the browser is speaking to is the gateway's, so only the gateway may answer
+// for it.
+var corsResponseHeaders = []string{
+	"Access-Control-Allow-Origin", "Access-Control-Allow-Credentials",
+	"Access-Control-Allow-Headers", "Access-Control-Allow-Methods",
+	"Access-Control-Expose-Headers", "Access-Control-Max-Age",
+}
+
 // gatewayOwnedPaths are answered by the gateway's own router and are never
 // proxied. They have to keep working in every environment, including the
 // default one where no upstream is configured, because they are what a
@@ -90,8 +102,14 @@ func New(cfg *config.Config, logger *slog.Logger) *Proxy {
 				}
 				stripHeaders(pr.Out.Header)
 			},
-			Transport:     newTransport(),
-			ErrorHandler:  p.errorHandler(group.Service),
+			Transport:    newTransport(),
+			ErrorHandler: p.errorHandler(group.Service),
+			ModifyResponse: func(response *http.Response) error {
+				for _, name := range corsResponseHeaders {
+					response.Header.Del(name)
+				}
+				return nil
+			},
 			FlushInterval: time.Duration(0),
 		}
 

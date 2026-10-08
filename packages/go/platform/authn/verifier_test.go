@@ -179,6 +179,17 @@ func TestVerifyRejectsServiceRoleToken(t *testing.T) {
 	}
 }
 
+func TestVerifyRejectsAnonKeyToken(t *testing.T) {
+	verifier, sign := newTestVerifier(t)
+
+	claims := validClaims()
+	claims["role"] = anonRoleClaim
+
+	if _, err := verifier.Verify(context.Background(), sign(claims)); err == nil {
+		t.Fatal("the public anon key must never be accepted as a signed-in user")
+	}
+}
+
 func TestVerifyRejectsUnsignedToken(t *testing.T) {
 	_, sign := newTestVerifier(t)
 	verifier, _ := newTestVerifier(t)

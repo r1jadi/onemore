@@ -5,6 +5,7 @@ import { AuthLayout, Field, SocialButtons } from "@/components/auth/AuthLayout";
 import { LegalBody, privacy, terms } from "@/components/legal";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { authErrorMessage, signUp } from "@/lib/auth/session";
 import { seo } from "@/lib/seo";
 import { cn } from "@/lib/utils";
 
@@ -25,18 +26,66 @@ function Signup() {
   const [accept, setAccept] = useState({ terms: false, privacy: false, marketing: false });
   const [doc, setDoc] = useState<"terms" | "privacy" | null>(null);
   const [username, setUsername] = useState("");
+  const [creds, setCreds] = useState<{ email: string; password: string }>();
+  const [err, setErr] = useState<string>();
+  const [busy, setBusy] = useState(false);
   const taken = username === "nora.k";
+
+  // The credential is collected in step 1 and held until the account is created
+  // in step 3, because the account itself is only made once the terms are
+  // accepted. It is forwarded to Supabase by the auth service and never stored.
+  async function createAccount() {
+    if (!creds) return setErr("Enter your email and password to start again.");
+    setErr(undefined);
+    setBusy(true);
+    try {
+      const result = await signUp(creds.email, creds.password);
+      // Tokens mean the account is ready to use. Without them Supabase requires
+      // email confirmation, which is the step the app already asks the user for.
+      nav({ to: result.tokens ? "/" : "/verify-email" });
+    } catch (error) {
+      setErr(authErrorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <AuthLayout title={titles[step][0]} subtitle={titles[step][1]} footer={step === 0 && <>Already have an account? <Link to="/login" className="font-medium text-foreground">Log in</Link></>}>
       <div className="mb-6 flex gap-1.5" aria-hidden>{[0, 1, 2].map((i) => <span key={i} className={cn("h-1 flex-1 rounded-full", i <= step ? "bg-primary" : "bg-surface-2")} />)}</div>
 
       {step === 0 && (
-        <form className="flex flex-1 flex-col" onSubmit={(e) => { e.preventDefault(); setStep(1); }}>
+        <form
+          className="flex flex-1 flex-col"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const f = new FormData(e.currentTarget);
+            setCreds({
+              email: String(f.get("email") ?? "").trim(),
+              password: String(f.get("password") ?? ""),
+            });
+            setStep(1);
+          }}
+        >
           <SocialButtons />
           <div className="space-y-4">
-            <Field id="email" type="email" label="Email" required autoComplete="email" />
-            <Field id="password" type="password" label="Password" required minLength={8} autoComplete="new-password" />
+            <Field
+              id="email"
+              name="email"
+              type="email"
+              label="Email"
+              required
+              autoComplete="email"
+            />
+            <Field
+              id="password"
+              name="password"
+              type="password"
+              label="Password"
+              required
+              minLength={8}
+              autoComplete="new-password"
+            />
             <p className="text-xs text-muted-foreground">At least 8 characters, with a number.</p>
           </div>
           <Button type="submit" variant="play" size="xl" className="mt-auto w-full lg:mt-6">Continue</Button>
@@ -76,8 +125,23 @@ function Signup() {
               );
             })}
           </div>
-          <p className="mt-4 text-xs text-muted-foreground">You must be 13 or older to use onemore.</p>
-          <Button variant="play" size="xl" className="mt-auto w-full lg:mt-6" disabled={!accept.terms || !accept.privacy} onClick={() => nav({ to: "/verify-email" })}>Agree and create account</Button>
+          {err && (
+            <p className="mt-4 text-sm text-destructive" role="alert">
+              {err}
+            </p>
+          )}
+          <p className="mt-4 text-xs text-muted-foreground">
+            You must be 13 or older to use onemore.
+          </p>
+          <Button
+            variant="play"
+            size="xl"
+            className="mt-auto w-full lg:mt-6"
+            disabled={!accept.terms || !accept.privacy || busy}
+            onClick={createAccount}
+          >
+            Agree and create account
+          </Button>
         </div>
       )}
 

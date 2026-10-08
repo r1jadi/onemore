@@ -49,8 +49,10 @@ Rules that hold everywhere:
 * the user id comes from the token — a body or query field naming a user is
   either ignored or rejected, never trusted;
 * an unauthenticated request to a protected route is `401`, not `404`;
-* a `service_role` token is rejected on every user-facing route, even when its
-  signature is valid;
+* a Supabase *project key* token (`service_role`, `anon`) is rejected on every
+  user-facing route, even when its signature is valid: the service role key
+  bypasses Row Level Security and the anon key is published in every bundle, so
+  neither is a signed-in user;
 * when a service has no auth material configured, protected routes answer `503`
   (fail closed) rather than allowing anonymous access.
 
@@ -93,7 +95,7 @@ deployment would report a healthy gateway as down.
   "error": {
     "code": "forbidden",
     "message": "This area requires an administrator account.",
-    "requestId": "9f2c1ab3d4e5",
+    "request_id": "9f2c1ab3d4e5",
     "details": [{ "field": "role", "rule": "admin" }]
   }
 }
@@ -103,9 +105,11 @@ deployment would report a healthy gateway as down.
   `apierr.Status`.
 * `message` is safe to display. It never contains an internal error, a stack
   trace, a SQL fragment or a token.
-* An unexpected error becomes `500 internal` with a generic message; the real
-  error is logged with the same `requestId`.
-* `requestId` is echoed in the `X-Request-ID` header and appears in logs.
+* An unexpected error becomes `500 internal_error` with a generic message; the
+  real error is logged with the same `request_id`.
+* `request_id` is echoed in the `X-Request-ID` header and appears in logs. The
+  envelope's field is snake_case, like the rest of the JSON; the header keeps its
+  conventional spelling.
 
 ## Conventions
 
@@ -122,8 +126,10 @@ deployment would report a healthy gateway as down.
 ## The contract
 
 `packages/api-contracts/openapi-v1.yaml` is the published contract. Operations
-carry `x-status: planned | available`; `planned` means the route exists, is
+carry `x-status: planned | available`; `available` means the behaviour is
+implemented and matches the document, and `planned` means the route exists, is
 authorized and is rate limited, and answers `501` until the feature task lands.
+The auth group is the first `available` group that is not the gateway itself.
 
 CI verifies the contract twice: `redocly lint` for structural validity, and the
 drift check that every routed group appears in it (and that nothing documented is

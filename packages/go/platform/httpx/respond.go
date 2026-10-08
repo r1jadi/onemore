@@ -113,12 +113,30 @@ func DecodeJSON(w http.ResponseWriter, r *http.Request, limit int64, dst any) er
 		if errors.As(err, &maxBytes) {
 			return NewError(CodePayloadTooBig, "The request body is larger than the allowed limit.")
 		}
+		// encoding/json reports an unknown field as an untyped error, so a strict
+		// decode has to translate it here. A caller mistake must be a 400, never
+		// an internal 500 that hides the real problem from the client.
+		if field, ok := unknownField(err); ok {
+			return NewError(CodeBadRequest, "The request body contains a field this endpoint does not accept.", apierr.Detail{Field: field, Rule: "unknown"})
+		}
 		return err
 	}
 	if decoder.More() {
 		return NewError(CodeBadRequest, "The request body must contain exactly one JSON object.")
 	}
 	return nil
+}
+
+// unknownField reports the field name of an encoding/json unknown-field error.
+// The package exposes no typed error for this case, so the documented message
+// prefix is the only stable way to recognise it.
+func unknownField(err error) (string, bool) {
+	const prefix = "json: unknown field "
+	message := err.Error()
+	if !strings.HasPrefix(message, prefix) {
+		return "", false
+	}
+	return strings.Trim(message[len(prefix):], `"`), true
 }
 
 // RequireQuery rejects a request missing a required, non-empty query value.

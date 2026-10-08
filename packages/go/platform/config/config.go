@@ -58,6 +58,12 @@ type Supabase struct {
 	JWTAudience string
 	JWTIssuer   string
 	JWTSecret   string // legacy HS256 projects only, server-side
+	// PublishableKey is the project's publishable key (`sb_publishable_…`, the
+	// legacy anon key). It is not a secret — Supabase designs it to be readable
+	// by anyone — but a service needs it as the `apikey` header when it calls
+	// Supabase Auth on a caller's behalf (services/auth). The secret key is never
+	// read into a service's configuration: nothing here bypasses RLS.
+	PublishableKey string
 }
 
 // Logging holds structured logging settings.
@@ -120,11 +126,12 @@ func Load(service string) (*Config, error) {
 			},
 		},
 		Supabase: Supabase{
-			ProjectURL:  strings.TrimRight(Getenv("SUPABASE_URL"), "/"),
-			JWKSURL:     Getenv("SUPABASE_JWKS_URL"),
-			JWTAudience: Getenv("SUPABASE_JWT_AUDIENCE"),
-			JWTIssuer:   Getenv("SUPABASE_JWT_ISSUER"),
-			JWTSecret:   Getenv("SUPABASE_JWT_SECRET"),
+			ProjectURL:     strings.TrimRight(Getenv("SUPABASE_URL"), "/"),
+			JWKSURL:        Getenv("SUPABASE_JWKS_URL"),
+			JWTAudience:    Getenv("SUPABASE_JWT_AUDIENCE"),
+			JWTIssuer:      Getenv("SUPABASE_JWT_ISSUER"),
+			JWTSecret:      Getenv("SUPABASE_JWT_SECRET"),
+			PublishableKey: Getenv("SUPABASE_PUBLISHABLE_KEY", "SUPABASE_ANON_KEY"),
 		},
 		Logging: Logging{
 			Level:  defaultString(Getenv("LOG_LEVEL"), "info"),
@@ -220,6 +227,14 @@ func (c *Config) Validate() error {
 // HasAuthMaterial reports whether tokens can be verified.
 func (c *Config) HasAuthMaterial() bool {
 	return c.Supabase.JWKSURL != "" || c.Supabase.JWTSecret != ""
+}
+
+// HasAuthAPI reports whether the service can call Supabase's hosted Auth API on
+// a caller's behalf. Verification needs only the JWKS; the auth service
+// additionally needs the project URL and the publishable key, and answers 503 on
+// its credential endpoints until both are set.
+func (c *Config) HasAuthAPI() bool {
+	return c.Supabase.ProjectURL != "" && c.Supabase.PublishableKey != ""
 }
 
 func parseEnvironment(raw string) (Environment, error) {

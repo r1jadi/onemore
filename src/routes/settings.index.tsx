@@ -16,6 +16,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { buttonVariants } from "@/components/ui/button";
+import { signOut } from "@/lib/auth/session";
 import { me } from "@/lib/mock";
 import { seo } from "@/lib/seo";
 
@@ -110,7 +111,21 @@ function Settings() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => nav({ to: "/welcome" })}>Log out</AlertDialogAction>
+            <AlertDialogAction
+              onClick={async () => {
+                // The local session is cleared before the revoke is sent, so a
+                // failed call cannot leave the user inside a signed-in shell.
+                try {
+                  await signOut();
+                } catch {
+                  // Nothing left to do here: the session is already gone locally
+                  // and the access token stops being accepted when it expires.
+                }
+                nav({ to: "/welcome" });
+              }}
+            >
+              Log out
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
