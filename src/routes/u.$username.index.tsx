@@ -7,7 +7,24 @@ export const Route = createFileRoute("/u/$username/")({
   component: UserProfile,
 });
 
+/**
+ * Another player's profile. The data is still the prototype's: there is no
+ * public profile endpoint yet, and this page is not the signed-in identity —
+ * `GET /api/v1/users/me` is, which is what `/profile` reads.
+ */
 function UserProfile() {
   const { username } = Route.useParams();
-  return <ProfileView user={getUser(username)} />;
+  const user = getUser(username);
+  return (
+    <ProfileView
+      user={{
+        username: user.username,
+        name: user.name,
+        bio: user.bio,
+        verified: user.verified,
+        isFollowing: user.isFollowing,
+        stats: { followers: user.followers, following: user.following, played: user.played },
+      }}
+    />
+  );
 }

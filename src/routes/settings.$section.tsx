@@ -2,15 +2,13 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Check, ChevronDown, Laptop, Smartphone } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
-import { Field } from "@/components/auth/AuthLayout";
 import { Avatar, EmptyState, Page, PageHeader } from "@/components/common";
 import { LegalBody, privacy, terms } from "@/components/legal";
 import { allSettings } from "@/components/settings/config";
+import { ProfileForm } from "@/components/settings/ProfileForm";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
-import { me } from "@/lib/mock";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/settings/$section")({
@@ -69,15 +67,8 @@ function Body({ section }: { section: string }) {
     case "account":
       return (<><Group title="Login"><Row label="Email" value="r•••@mail.com" action={<Button size="sm" variant="ghost">Change</Button>} /><Row label="Phone" value="Not added" action={<Button size="sm" variant="ghost">Add</Button>} /><Row label="Password" value="Updated 3 months ago" action={<Button asChild size="sm" variant="ghost"><Link to="/reset-password">Change</Link></Button>} /></Group><Group title="Data"><Row label="Download your data" action={<Button size="sm" variant="secondary" onClick={() => toast("We'll email you a download link")}>Request</Button>} /></Group></>);
     case "profile":
-      return (
-        <form className="space-y-4 px-4 md:px-0" onSubmit={(e) => { e.preventDefault(); toast.success("Profile saved"); }}>
-          <div className="flex items-center gap-4"><Avatar name={me.username} size="xl" /><Button type="button" variant="secondary">Change photo</Button></div>
-          <Field id="name" label="Display name" defaultValue={me.name} />
-          <Field id="username" label="Username" defaultValue={me.username} />
-          <div className="space-y-1.5"><Label htmlFor="bio">Bio</Label><Textarea id="bio" defaultValue={me.bio} maxLength={120} className="bg-surface" /><p className="text-xs text-muted-foreground">Up to 120 characters.</p></div>
-          <Button type="submit" size="lg" className="w-full md:w-auto">Save changes</Button>
-        </form>
-      );
+      // The real editor: reads and writes the account's own profile row.
+      return <ProfileForm />;
     case "privacy":
       return (<><Group title="Visibility"><Toggle id="p1" label="Private account" desc="Only approved followers see your activity" /><Toggle id="p2" label="Show on leaderboards" initial /><Toggle id="p3" label="Show recently played" initial /></Group><Group title="Interactions"><Toggle id="p4" label="Allow comments on my scores" initial /><Toggle id="p5" label="Allow mentions" initial /><Toggle id="p6" label="Personalised recommendations" initial /></Group></>);
     case "notifications":

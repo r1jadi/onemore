@@ -1,26 +1,25 @@
-// Command api is the Vercel entrypoint for the API gateway.
+// Command api is the Vercel entrypoint for the Users service.
 //
-// Vercel's Go runtime does not keep a container with a fixed `:8080` listener
-// alive: it builds one package of the service and runs the resulting binary as
-// the deployment's server, handing it the port to bind in `PORT` (Vercel routes
-// every request of the service to that process). `config.Load` honours `PORT`,
-// and `HTTP_ADDR` stays the explicit override, so the same binary serves a local
-// shell, a container and Vercel without a deployment-specific file.
+// The name is not a description: Vercel's Go framework preset detects exactly
+// three entrypoints at a service root — `main.go`, `cmd/api/main.go` and
+// `cmd/server/main.go` — and a service that wants the preset has to live in one
+// of them. `cmd/server` is the auth service's, and the gateway needs no preset
+// entrypoint because it deploys as a container image (see Dockerfile.vercel), so
+// the third slot is the one the Users service takes.
 //
-// The path is not arbitrary: Vercel detects `main.go`, `cmd/api/main.go` or
-// `cmd/server/main.go` at the service root, and `vercel.json` names this one.
-// The service wiring is shared with cmd/gateway (see services/gateway), so the
-// two entrypoints cannot drift into different security postures.
+// This is not a second implementation of anything: the body is the same one line
+// `services/users/cmd/users` runs, so `go run ./users/cmd/users`, the local
+// binary and the deployment all call `servicekit.MustRun(users.Options())`.
 //
-// See docs/deployment/vercel.md for the routing, the required environment
-// variables and what has to be verified after a deployment.
+// See docs/deployment/vercel.md for the routing and services/users/README.md for
+// the endpoints.
 package main
 
 import (
-	"github.com/r1jadi/onemore/services/gateway"
 	"github.com/r1jadi/onemore/services/internal/servicekit"
+	"github.com/r1jadi/onemore/services/users"
 )
 
 func main() {
-	servicekit.MustRun(gateway.Options())
+	servicekit.MustRun(users.Options())
 }

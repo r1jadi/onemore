@@ -16,17 +16,74 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { buttonVariants } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { signOut } from "@/lib/auth/session";
-import { me } from "@/lib/mock";
 import { seo } from "@/lib/seo";
+import { avatarUrl, useProfile, type ProfileState } from "@/lib/users/profile";
 
 export const Route = createFileRoute("/settings/")({
   head: () => seo("Settings", "Manage your onemore account, privacy and preferences."),
   component: Settings,
 });
 
+/**
+ * The account row: the real identity from `services/users`, or an honest account
+ * of why it cannot be shown. It never falls back to a placeholder name.
+ */
+function Identity({ state }: { state: ProfileState }) {
+  if (state.status === "ready") {
+    const { profile } = state;
+    return (
+      <>
+        <Avatar name={profile.username} src={avatarUrl(profile)} size="lg" />
+        <div className="flex-1">
+          <p className="font-medium">{profile.displayName}</p>
+          <p className="text-sm text-muted-foreground">@{profile.username}</p>
+        </div>
+      </>
+    );
+  }
+  if (state.status === "idle" || state.status === "loading") {
+    return (
+      <>
+        <Skeleton className="size-14 rounded-full" />
+        <div className="flex-1 space-y-2">
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-3 w-24" />
+        </div>
+      </>
+    );
+  }
+  if (state.status === "error") {
+    // The row links to the profile screen, which is where the retry lives.
+    return (
+      <>
+        <Avatar name="" size="lg" />
+        <div className="flex-1">
+          <p className="font-medium">Couldn't load your profile</p>
+          <p className="text-sm text-muted-foreground">Open to try again</p>
+        </div>
+      </>
+    );
+  }
+  return (
+    <>
+      <Avatar name="" size="lg" />
+      <div className="flex-1">
+        <p className="font-medium">
+          {state.status === "anonymous" ? "Sign in to view your profile" : "No profile yet"}
+        </p>
+        <p className="text-sm text-muted-foreground">
+          {state.status === "anonymous" ? "Your identity comes from your account" : "Open to try again"}
+        </p>
+      </div>
+    </>
+  );
+}
+
 function Settings() {
   const nav = useNavigate();
+  const profile = useProfile();
   const [logout, setLogout] = useState(false);
   const [del, setDel] = useState(false);
   const [confirm, setConfirm] = useState("");
@@ -37,11 +94,7 @@ function Settings() {
         to="/profile"
         className="press mx-4 flex items-center gap-3 rounded-xl bg-surface p-3 md:mx-0"
       >
-        <Avatar name={me.username} size="lg" />
-        <div className="flex-1">
-          <p className="font-medium">{me.name}</p>
-          <p className="text-sm text-muted-foreground">@{me.username}</p>
-        </div>
+        <Identity state={profile} />
         <ChevronRight className="size-4 text-muted-foreground" />
       </Link>
       {settingsGroups.map((g) => (

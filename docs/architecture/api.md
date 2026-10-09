@@ -62,8 +62,8 @@ Rules that hold everywhere:
 
 | Prefix | Service | Notes |
 | --- | --- | --- |
-| `/api/v1/auth` | auth | sessions on top of Supabase Auth |
-| `/api/v1/users` | users | profiles |
+| `/api/v1/auth` | auth | sessions on top of Supabase Auth — **implemented** |
+| `/api/v1/users` | users | the caller's own profile — **implemented** (`GET`/`PATCH /users/me`) |
 | `/api/v1/games` | games | catalogue |
 | `/api/v1/sessions` | game-sessions | play sessions; the only door to a score |
 | `/api/v1/scores` | scores | read-only to clients |
@@ -129,7 +129,9 @@ deployment would report a healthy gateway as down.
 carry `x-status: planned | available`; `available` means the behaviour is
 implemented and matches the document, and `planned` means the route exists, is
 authorized and is rate limited, and answers `501` until the feature task lands.
-The auth group is the first `available` group that is not the gateway itself.
+Two groups are `available`: `auth` (the session lifecycle) and `users` (`/users/me`,
+the signed-in user's own profile). Ten operations are `available` today; the rest
+of the document is the route table the remaining services will fill in.
 
 CI verifies the contract twice: `redocly lint` for structural validity, and the
 drift check that every routed group appears in it (and that nothing documented is
@@ -137,8 +139,10 @@ unroutable).
 
 ## Adding an endpoint
 
-1. Add the handler to the owning service in `services/<service>/cmd/<service>/main.go`,
-   registering it on the correct tier.
+1. Add the handler to the owning service package (`services/<service>/<service>.go`,
+   as `auth` and `users` do), registering it on the correct tier. `cmd/<service>`
+   is a local entrypoint and a deployment entrypoint only ever calls
+   `servicekit.MustRun(<service>.Options())`; no handler belongs in either.
 2. Document it in `packages/api-contracts/openapi-v1.yaml` with `x-status`.
 3. Return `httpx.WriteError(w, r, err)` for failures and `httpx.WriteJSON` for
    success; typed errors keep their code, everything else becomes `500`.

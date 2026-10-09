@@ -16,6 +16,7 @@ not edit history.
 | [0008](0008-browser-data-access.md) | The browser talks to `/api/v1` for domain data; Supabase directly only for auth and storage | Accepted |
 | [0009](0009-vercel-deployment-topology.md) | The Go gateway deploys as a service of the existing Vercel project, on the platform's port | Accepted (amended by 0010) |
 | [0010](0010-auth-service-deployment-topology.md) | The auth service deploys as a private Vercel service, reached by a binding from a container gateway | Accepted |
+| [0011](0011-users-service-and-real-profile.md) | The users service serves the real profile, deployed privately beside auth | Accepted |
 
 ## Template
 

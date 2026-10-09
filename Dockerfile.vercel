@@ -1,4 +1,4 @@
-# Vercel container image for the API gateway (services/cmd/api).
+# Vercel container image for the API gateway (services/gateway/cmd/gateway).
 #
 # Why a container at all: the gateway declares a service binding to the Auth
 # service, and Vercel service bindings are not available to a service on the Go
@@ -15,9 +15,11 @@
 # the platform module with a relative path (../packages/go/platform): the image has
 # to carry both modules, so the context has to be the whole repository.
 #
-# The build is a plain `go build` of the same entrypoint Vercel's Go runtime would
-# have built (services/cmd/api), so the runtime behaviour is identical to the
-# previous Go-preset deployment: same wiring, same PORT handling, same routes.
+# The build is a plain `go build` of the gateway's own command, so the runtime
+# behaviour is identical to the Go-preset deployment this replaced: same wiring,
+# same PORT handling, same routes. It is not `services/cmd/api` because that slot
+# belongs to the Users service — Vercel's Go preset requires one of three fixed
+# entrypoint names and a container build has no such requirement.
 FROM golang:1.23-bookworm AS build
 
 WORKDIR /src
@@ -31,8 +33,12 @@ COPY services ./services
 # CGO is off so the binary is fully static and can run in an empty filesystem.
 # -trimpath and -s -w keep the image small and avoid embedding build paths.
 WORKDIR /src/services
+# The gateway builds from its own command, not from services/cmd/api: that slot
+# belongs to the Users service, because Vercel's Go preset needs it and the
+# gateway (a container) does not. Both files run the same
+# `servicekit.MustRun(gateway.Options())`.
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -trimpath -ldflags "-s -w" -o /out/gateway ./cmd/api
+    go build -trimpath -ldflags "-s -w" -o /out/gateway ./gateway/cmd/gateway
 
 # An empty filesystem with one static binary: no shell, no package manager, no
 # userland to abuse. The CA bundle is copied in because the gateway verifies

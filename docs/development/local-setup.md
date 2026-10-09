@@ -95,9 +95,12 @@ curl -s localhost:8080/readyz         # readiness, runs dependency checks
 curl -s localhost:8080/api/v1         # version discovery
 ```
 
-`services/cmd/api` is the entrypoint Vercel detects (`go run ./cmd/api` uses
-`PORT` when it is set, `:8080` otherwise). It runs the same wiring; the routing
-and environment variables the deployment needs are in
+`go run ./gateway/cmd/gateway` uses `HTTP_ADDR` when it is set, then `PORT_HTTP`,
+then `PORT`, then `:8080`. In a deployment the same wiring runs from the container
+image; `services/cmd/api` is **not** an alias for the gateway — that file is the
+users service's Vercel entrypoint, because the Go preset has three fixed slot names
+and the gateway (a container image) needs none of them. The routing and the
+environment variables the deployment needs are in
 [deployment/vercel.md](../deployment/vercel.md).
 
 Run one service:

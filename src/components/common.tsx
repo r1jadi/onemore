@@ -30,8 +30,18 @@ export function Page({ children, className }: { children: ReactNode; className?:
   return <div className={cn("mx-auto w-full max-w-3xl pb-28 md:px-8 md:pb-12", className)}>{children}</div>;
 }
 
-export function Avatar({ name, size = "md", className }: { name: string; size?: "sm" | "md" | "lg" | "xl"; className?: string }) {
+/**
+ * A profile picture, falling back to the account's initials.
+ *
+ * `src` is the public URL of the stored picture (see `avatarUrl`); a profile
+ * without one renders exactly the initials circle it always has, so the box the
+ * avatar occupies never changes size.
+ */
+export function Avatar({ name, src, size = "md", className }: { name: string; src?: string; size?: "sm" | "md" | "lg" | "xl"; className?: string }) {
   const s = { sm: "size-8 text-xs", md: "size-10 text-sm", lg: "size-14 text-base", xl: "size-24 text-2xl" }[size];
+  if (src) {
+    return <img src={src} alt="" aria-hidden className={cn("inline-block shrink-0 rounded-full bg-surface-2 object-cover ring-1 ring-glass-border", s, className)} />;
+  }
   return (
     <span className={cn("inline-flex shrink-0 items-center justify-center rounded-full bg-surface-2 font-semibold text-foreground/90 ring-1 ring-glass-border", s, className)} aria-hidden>
       {name.replace(/[^a-z]/gi, "").slice(0, 2).toUpperCase()}
@@ -82,12 +92,17 @@ export function EmptyState({ icon: Icon = Inbox, title, body, action }: { icon?:
   );
 }
 
-export function ErrorState({ onRetry, title = "Couldn't load this" }: { onRetry?: () => void; title?: string }) {
+/**
+ * A failed load. `body` carries the API's own message when there is one — it is
+ * written to be shown to a person and says more than a guess about the cause —
+ * and falls back to the connection advice used across the prototype screens.
+ */
+export function ErrorState({ onRetry, title = "Couldn't load this", body }: { onRetry?: () => void; title?: string; body?: string }) {
   return (
     <div className="enter flex flex-col items-center px-6 py-16 text-center">
       <div className="mb-4 flex size-12 items-center justify-center rounded-full bg-destructive/15"><AlertTriangle className="size-5 text-destructive" /></div>
       <p className="font-medium">{title}</p>
-      <p className="mt-1 text-sm text-muted-foreground">Check your connection and try again.</p>
+      <p className="mt-1 text-sm text-muted-foreground">{body ?? "Check your connection and try again."}</p>
       <Button variant="secondary" className="mt-5" onClick={onRetry}><RotateCw /> Retry</Button>
     </div>
   );

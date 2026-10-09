@@ -78,7 +78,7 @@ where they will attach is described in
 | `scripts/` | Operational helpers: `test-rls.sh`, `generate-sitemap.mjs`, `check-api-contract.mjs`. |
 | `.github/workflows/` | CI: web, go, database, api-contract, security. |
 | `infrastructure/` | Placeholders for container, CDN, monitoring and Terraform work. |
-| `vercel.json`, `Dockerfile.vercel` | The deployment: three services (`web`, the container-image Go gateway `api`, and the internal Go `auth` service), the rewrites that route `/api/v1/*` to the gateway, and the service binding that gives the gateway a private route to `auth`. See [deployment/vercel.md](../deployment/vercel.md) and [0010](../decisions/0010-auth-service-deployment-topology.md). |
+| `vercel.json`, `Dockerfile.vercel` | The deployment: four services (`web`, the container-image Go gateway `api`, and the internal Go `auth` and `users` services), the rewrites that route `/api/v1/*` to the gateway, and the two service bindings that give the gateway a private route to `auth` and to `users`. See [deployment/vercel.md](../deployment/vercel.md), [0010](../decisions/0010-auth-service-deployment-topology.md) and [0011](../decisions/0011-users-service-and-real-profile.md). |
 
 ## Two modules, one workspace
 
@@ -102,10 +102,14 @@ relying on the API column: see [deployment/vercel.md](../deployment/vercel.md).
 
 ## What this foundation deliberately does not do
 
-* No product feature is implemented: every service exposes its contract and
-  answers `501`.
+* Most product features are not implemented: apart from the session lifecycle
+  (`auth`) and the caller's own profile (`users`), every service exposes its
+  contract and answers `501`.
 * No Redis, no queue, no CDN, no autoscaling: the API runs as a single instance
   until load justifies more.
 * No payments: the RaiAccept integration is designed, not built.
-* No data is migrated from the mock layer: `src/lib/mock.ts` stays the UI's data
-  source until the features that replace it are implemented.
+* The **signed-in identity is no longer mock data**: the UI reads it from
+  `GET /api/v1/users/me`, and an edit writes the real `public.profiles` row. The
+  rest of `src/lib/mock.ts` — games, scores, leaderboards, comments and
+  notifications — is still the UI's data source until those services exist, and
+  it is never used as a fallback for the signed-in user.

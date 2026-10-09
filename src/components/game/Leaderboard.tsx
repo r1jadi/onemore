@@ -1,9 +1,14 @@
 import { Link } from "@tanstack/react-router";
 import { Avatar, ListSkeleton } from "@/components/common";
-import { fmt, leaderboard, me } from "@/lib/mock";
+import { fmt, leaderboard } from "@/lib/mock";
+import { avatarUrl, useProfile } from "@/lib/users/profile";
 import { cn } from "@/lib/utils";
 
 export function LeaderboardList({ limit, friends, loading, showMe = false }: { limit?: number; friends?: boolean; loading?: boolean; showMe?: boolean }) {
+  // The signed-in row shows the caller's real identity. It carries no rank or
+  // score: no scores service exists yet, so any number here would be invented.
+  const state = useProfile();
+  const profile = state.status === "ready" ? state.profile : undefined;
   if (loading) return <ListSkeleton rows={limit ?? 7} />;
   const rows = (friends ? leaderboard.filter((_, i) => i % 2 === 0).map((r, i) => ({ ...r, rank: i + 1 })) : leaderboard).slice(0, limit);
   return (
@@ -20,12 +25,10 @@ export function LeaderboardList({ limit, friends, loading, showMe = false }: { l
           </li>
         ))}
       </ol>
-      {showMe && (
+      {showMe && profile && (
         <div className="sticky bottom-16 mt-2 flex items-center gap-3 border-y border-primary/30 bg-surface px-4 py-3 md:bottom-0 md:rounded-lg md:border md:px-2">
-          <span className="w-6 text-center font-mono text-sm text-primary tabular">212</span>
-          <Avatar name={me.username} size="sm" />
+          <Avatar name={profile.username} src={avatarUrl(profile)} size="sm" />
           <span className="flex-1 text-sm font-medium">You</span>
-          <span className="font-mono text-sm font-semibold tabular">2,140</span>
         </div>
       )}
     </div>

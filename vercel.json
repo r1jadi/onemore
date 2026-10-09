@@ -15,6 +15,12 @@
           "service": "auth",
           "format": "url",
           "env": "UPSTREAM_AUTH_URL"
+        },
+        {
+          "type": "service",
+          "service": "users",
+          "format": "url",
+          "env": "UPSTREAM_USERS_URL"
         }
       ]
     },
@@ -22,6 +28,11 @@
       "root": "services/",
       "framework": "go",
       "entrypoint": "cmd/server/main.go"
+    },
+    "users": {
+      "root": "services/",
+      "framework": "go",
+      "entrypoint": "cmd/api/main.go"
     }
   },
   "rewrites": [

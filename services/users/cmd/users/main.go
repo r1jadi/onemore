@@ -1,33 +1,23 @@
-// Command users owns player profiles.
+// Command users runs the Users service locally.
 //
-// The authenticated user id always comes from the verified token, never from
-// the request body or path: `/me` routes are the only way to address "yourself".
+// It is the developer's entrypoint — `go run ./users/cmd/users` from `services/`
+// — and the deployment entrypoint is services/cmd/api, because Vercel's Go
+// framework preset only recognises `main.go`, `cmd/api/main.go` and
+// `cmd/server/main.go` at the service root, and the other two names are already
+// spoken for (auth owns `cmd/server`; the gateway deploys as a container image
+// and so needs no preset entrypoint at all). Both files are one line of
+// `servicekit.MustRun(users.Options())`, so the local binary and the deployment
+// cannot drift into different wiring.
+//
+// See services/users/users.go for the routes and docs/deployment/vercel.md for
+// the topology.
 package main
 
 import (
-	"github.com/r1jadi/onemore/packages/go/platform/httpx"
 	"github.com/r1jadi/onemore/services/internal/servicekit"
+	"github.com/r1jadi/onemore/services/users"
 )
 
-const serviceName = "users"
-
 func main() {
-	servicekit.MustRun(servicekit.Options{
-		Name: serviceName,
-		Register: func(router *httpx.Router) {
-			router.AuthenticatedFunc("GET /api/v1/users/me",
-				httpx.NotImplemented(serviceName, "Reading the signed-in profile"))
-
-			router.AuthenticatedFunc("PATCH /api/v1/users/me",
-				httpx.NotImplemented(serviceName, "Updating the signed-in profile"))
-
-			router.AuthenticatedFunc("POST /api/v1/users/me/onboarding",
-				httpx.NotImplemented(serviceName, "Saving onboarding preferences"))
-
-			// Public profiles expose only published fields — the handler must
-			// never serialise the full row.
-			router.PublicFunc("GET /api/v1/users/{userID}",
-				httpx.NotImplemented(serviceName, "Reading a public profile"))
-		},
-	})
+	servicekit.MustRun(users.Options())
 }

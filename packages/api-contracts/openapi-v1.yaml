@@ -339,7 +339,12 @@ paths:
       operationId: getMyProfile
       tags: [users]
       summary: Read the signed-in profile
-      x-status: planned
+      description: |
+        The profile of the caller, resolved from the verified token. There is no
+        parameter that addresses anyone else: the identity is never read from the
+        body, a query value or a header. `role` comes from the same verified token
+        `/auth/session` reports, so the two endpoints cannot disagree.
+      x-status: available
       responses:
         "200":
           description: The profile of the caller.
@@ -347,15 +352,33 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Profile" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "501": { $ref: "#/components/responses/NotImplemented" }
+        "404":
+          description: |
+            The account has no profile row. Every account gets one from the
+            `handle_new_user` trigger, so this is a genuinely missing profile
+            rather than an empty state.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503": { $ref: "#/components/responses/Unavailable" }
     patch:
       operationId: updateMyProfile
       tags: [users]
       summary: Update the signed-in profile
       description: |
-        Only presentation fields are writable: `username`, `role` and
-        `is_suspended` are rejected, not ignored.
-      x-status: planned
+        Only presentation fields are writable: `username`, `role`,
+        `is_suspended` and the timestamps are **rejected**, not ignored — the
+        refusal names the field. The database enforces the same rule a second
+        time: the UPDATE grant on `profiles` covers `display_name`, `bio`,
+        `avatar_path` and `onboarded_at` only, so a request that got past this
+        service still could not write a role.
+
+        Concurrency is opt-in. Send back the `updatedAt` you read and the write
+        applies only if the row still holds that value; otherwise it is refused
+        with `409 conflict` rather than overwriting a change you never saw.
+        Omitting `expectedUpdatedAt` accepts last-write-wins, which is why a
+        client that cares about concurrent edits should always send it.
+      x-status: available
       requestBody:
         required: true
         content:
@@ -365,8 +388,23 @@ paths:
               additionalProperties: false
               properties:
                 displayName: { type: string, minLength: 1, maxLength: 60 }
-                bio: { type: string, maxLength: 300 }
-                avatarPath: { type: string, maxLength: 160 }
+                bio:
+                  type: [string, "null"]
+                  maxLength: 300
+                  description: A null clears the field; omitting it leaves it.
+                avatarPath:
+                  type: [string, "null"]
+                  maxLength: 160
+                  description: |
+                    `"<account id>/<file name>"`, the object path inside the
+                    caller's own storage prefix. A null (or an empty string)
+                    clears it; omitting it leaves it.
+                expectedUpdatedAt:
+                  type: string
+                  format: date-time
+                  description: |
+                    The `updatedAt` of the profile this edit is based on. Omit it
+                    to accept last-write-wins.
       responses:
         "200":
           description: The updated profile.
@@ -375,8 +413,27 @@ paths:
               schema: { $ref: "#/components/schemas/Profile" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: >-
+            The database refused the write: the caller tried to change a column
+            the UPDATE grant excludes, or Row Level Security refused the row.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: The account has no profile row to update.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: >-
+            The profile changed since the caller read it, so `expectedUpdatedAt`
+            no longer matches. The body still exists; reload and retry.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "422": { $ref: "#/components/responses/Unprocessable" }
-        "501": { $ref: "#/components/responses/NotImplemented" }
+        "503": { $ref: "#/components/responses/Unavailable" }
 
   /users/{userID}:
     parameters:
@@ -1153,7 +1210,7 @@ components:
         createdAt: { type: string, format: date-time }
     Profile:
       type: object
-      required: [id, username, displayName]
+      required: [id, username, displayName, role, createdAt, updatedAt]
       properties:
         id: { type: string, format: uuid }
         username: { type: string, pattern: "^[a-z0-9_]{3,24}$" }
@@ -1161,7 +1218,19 @@ components:
         bio: { type: [string, "null"] }
         avatarPath: { type: [string, "null"] }
         role: { type: string, enum: [user, moderator, admin] }
+        onboardedAt:
+          type: [string, "null"]
+          format: date-time
+          description: Null until the user finishes onboarding.
         createdAt: { type: string, format: date-time }
+        updatedAt:
+          type: string
+          format: date-time
+          description: >-
+            Changes on every write. Send it back as `expectedUpdatedAt` to make
+            a PATCH conditional on this exact version. The projection
+            deliberately omits `is_suspended`: the SELECT grant excludes it, so
+            no response can carry it.
     PublicProfile:
       type: object
       required: [id, username, displayName]
