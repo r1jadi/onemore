@@ -21,6 +21,12 @@
           "service": "users",
           "format": "url",
           "env": "UPSTREAM_USERS_URL"
+        },
+        {
+          "type": "service",
+          "service": "games",
+          "format": "url",
+          "env": "UPSTREAM_GAMES_URL"
         }
       ]
     },
@@ -33,6 +39,11 @@
       "root": "services/",
       "framework": "go",
       "entrypoint": "cmd/api/main.go"
+    },
+    "games": {
+      "root": "services/",
+      "framework": "go",
+      "entrypoint": "main.go"
     }
   },
   "rewrites": [

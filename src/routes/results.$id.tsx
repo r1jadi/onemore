@@ -1,37 +1,35 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowRight, RotateCcw, Share2, Trophy, X } from "lucide-react";
-import { useState } from "react";
-import * as z from "zod";
-import { GameArt } from "@/components/game/GameArt";
-import { LeaderboardList } from "@/components/game/Leaderboard";
-import { ShareSheet } from "@/components/social/Sheets";
+import { Clock, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { fmt, games, getGame } from "@/lib/mock";
+import { titleFromSlug, useGame } from "@/lib/games/catalog";
 
 export const Route = createFileRoute("/results/$id")({
-  validateSearch: z.object({ score: z.number().optional() }),
   head: ({ params }) => {
-    const g = getGame(params.id);
+    const title = titleFromSlug(params.id);
     return {
       meta: [
-        { title: `${g.title} results — onemore` },
-        { name: "description", content: `Your run on ${g.title}.` },
-        { property: "og:title", content: `${g.title} results — onemore` },
-        { property: "og:description", content: `Can you beat this score on ${g.title}?` },
+        { title: `${title} results — onemore` },
+        { name: "description", content: `${title} on onemore.` },
+        { property: "og:title", content: `${title} results — onemore` },
       ],
     };
   },
   component: Results,
 });
 
+/**
+ * The end-of-run screen.
+ *
+ * Nothing reaches it yet: a run needs a runtime, and a score needs a session and a
+ * scores service. The prototype showed a "global rank", a "friends" position and a
+ * top-percentile figure computed from nothing, next to a personal best that was
+ * never stored. Real ranks and personal bests arrive with the scoring engine; until
+ * then this screen says so instead of inventing a number.
+ */
 function Results() {
   const { id } = Route.useParams();
-  const { score = 1840 } = Route.useSearch();
-  const g = getGame(id);
-  const best = g.yourBest ?? 0;
-  const isBest = score > best;
-  const next = games[(games.findIndex((x) => x.id === g.id) + 1) % games.length];
-  const [share, setShare] = useState(false);
+  const state = useGame(id);
+  const title = state.status === "ready" ? state.game.title : titleFromSlug(id);
 
   return (
     <div className="min-h-dvh bg-background">
@@ -43,84 +41,22 @@ function Results() {
             </Link>
           </Button>
         </div>
-        <div className="enter mt-4 text-center">
-          <p className="text-sm text-muted-foreground">{g.title}</p>
-          <p className="mt-2 font-mono text-6xl font-semibold tabular">{fmt(score)}</p>
-          {isBest ? (
-            <p className="mt-3 inline-flex rounded-full bg-primary/15 px-3 py-1 text-sm font-medium text-primary">
-              New personal best
-            </p>
-          ) : (
-            <p className="mt-3 text-sm text-muted-foreground">
-              Best <span className="font-mono text-foreground tabular">{fmt(best)}</span> ·{" "}
-              {fmt(best - score)} to go
-            </p>
-          )}
-        </div>
-        <dl className="mt-8 grid grid-cols-3 divide-x divide-border rounded-xl bg-surface py-3 text-center">
-          {[
-            ["Global rank", "#212"],
-            ["Friends", "3rd"],
-            ["Top", "8%"],
-          ].map(([k, v]) => (
-            <div key={k}>
-              <dt className="text-xs text-muted-foreground">{k}</dt>
-              <dd className="mt-0.5 font-semibold tabular">{v}</dd>
-            </div>
-          ))}
-        </dl>
-        <div className="mt-6">
-          <div className="mb-1 flex items-center justify-between">
-            <h2 className="text-sm font-semibold">Friends</h2>
-            <Link
-              to="/leaderboards/$id"
-              params={{ id }}
-              className="flex items-center gap-1 text-sm text-muted-foreground"
-            >
-              <Trophy className="size-4" />
-              Leaderboard
-            </Link>
+        <div className="enter mt-10 flex flex-1 flex-col items-center justify-center gap-4 text-center">
+          <div className="flex size-12 items-center justify-center rounded-full bg-surface-2">
+            <Clock className="size-5 text-muted-foreground" />
           </div>
-          <LeaderboardList friends limit={3} />
-        </div>
-        <div className="mt-auto space-y-2 pt-8">
-          <Button asChild variant="play" size="xl" className="w-full">
-            <Link to="/play/$id" params={{ id }}>
-              <RotateCcw />
-              One more
+          <h1 className="text-xl font-semibold">No run to show</h1>
+          <p className="max-w-sm text-sm text-muted-foreground">
+            {title} is not playable yet, so no score was recorded. Ranks and personal bests arrive
+            with the scoring engine.
+          </p>
+          <Button asChild variant="play" size="lg" className="mt-2">
+            <Link to="/games/$id" params={{ id }}>
+              Back to the game
             </Link>
           </Button>
-          <div className="grid grid-cols-2 gap-2">
-            <Button variant="secondary" size="lg" onClick={() => setShare(true)}>
-              <Share2 />
-              Share score
-            </Button>
-            <Button asChild variant="secondary" size="lg">
-              <Link to="/games/$id" params={{ id: next.id }}>
-                Next game
-                <ArrowRight />
-              </Link>
-            </Button>
-          </div>
-          <Link
-            to="/games/$id"
-            params={{ id: next.id }}
-            className="press mt-3 flex items-center gap-3 rounded-xl border border-border p-2"
-          >
-            <span className="relative block size-12 shrink-0 overflow-hidden rounded-lg">
-              <GameArt
-                id={next.id}
-                className="absolute top-0 left-0 size-40 origin-top-left scale-[0.3]"
-              />
-            </span>
-            <span className="text-sm">
-              <span className="block text-xs text-muted-foreground">Up next</span>
-              {next.title}
-            </span>
-          </Link>
         </div>
       </div>
-      <ShareSheet open={share} onOpenChange={setShare} title={`my ${fmt(score)} on ${g.title}`} />
     </div>
   );
 }

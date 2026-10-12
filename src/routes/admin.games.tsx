@@ -36,7 +36,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { featuredGames } from "@/lib/admin-mock";
-import { fmt, games, type Game, type GameId } from "@/lib/mock";
+import { fmt } from "@/lib/format";
+import { games, type Game, type GameId } from "@/lib/admin-mock";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/admin/games")({

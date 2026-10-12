@@ -1,5 +1,4 @@
 import { cn } from "@/lib/utils";
-import type { GameId } from "@/lib/mock";
 
 const hueBg: Record<string, string> = {
   "game-1": "bg-game-1",
@@ -10,15 +9,28 @@ const hueBg: Record<string, string> = {
   "game-6": "bg-game-6",
   "game-7": "bg-game-7",
 };
+
+/** A hue token by name, with the brand colour as the fallback. */
 export const hueClass = (hue: string) => hueBg[hue] ?? "bg-primary";
 
-/** Static, purely visual representation of each game's board. No game logic. */
+/**
+ * The generated artwork for a game.
+ *
+ * `id` is the catalogue slug. It is a plain `string` rather than a union of known
+ * games, because the catalogue is data: a game published tomorrow must render
+ * *something* today, and a closed union would make that a type error. Each
+ * known slug has its own board below; anything else falls through to a pattern
+ * derived from the slug, so a new game is never a blank box and never a borrowed
+ * game's art.
+ *
+ * Purely visual: no game logic runs here.
+ */
 export function GameArt({
   id,
   className,
   live = false,
 }: {
-  id: GameId;
+  id: string;
   className?: string;
   live?: boolean;
 }) {
@@ -37,6 +49,51 @@ export function GameArt({
       {id === "dont-break-the-chain" && <Chain />}
       {id === "memory-flash" && <MemoryFlash />}
       {id === "7-second" && <Seven />}
+      {!KNOWN.has(id) && <Generated seed={id} />}
+    </div>
+  );
+}
+
+/** The slugs with bespoke art. Anything else gets the generated pattern. */
+const KNOWN = new Set([
+  "stack-10",
+  "color-merge",
+  "dont-touch-the-black",
+  "one-move",
+  "dont-break-the-chain",
+  "memory-flash",
+  "7-second",
+]);
+
+/**
+ * A stable pattern derived from the slug.
+ *
+ * Deterministic on purpose: the same game renders the same art on every screen
+ * and across reloads, so it reads as identity rather than as noise.
+ */
+function Generated({ seed }: { seed: string }) {
+  let hash = 2166136261;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  const cells = Array.from({ length: 16 }, (_, i) => {
+    const bits = (hash >>> (i % 8)) & 0xff;
+    return (bits + i * 37) % 3;
+  });
+  return (
+    <div className="grid w-2/3 max-w-72 grid-cols-4 gap-2">
+      {cells.map((shade, i) => (
+        <div
+          key={i}
+          className={cn(
+            "aspect-square rounded-md",
+            shade === 0 && "bg-surface-2",
+            shade === 1 && "bg-primary/40",
+            shade === 2 && "bg-primary/80",
+          )}
+        />
+      ))}
     </div>
   );
 }

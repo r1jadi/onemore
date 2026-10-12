@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { fmt } from "@/lib/mock";
+import { fmt } from "@/lib/format";
 
 export function PageHeader({
   title,

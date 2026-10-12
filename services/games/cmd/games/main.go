@@ -1,35 +1,22 @@
-// Command games owns the game catalogue and game metadata.
+// Command games runs the Games service locally.
 //
-// Published game metadata is public; anything a creator sends is validated
-// against the same schema the database enforces, and the owner id comes from the
-// token, never from the payload (no mass assignment).
+// It is the developer's entrypoint — `go run ./games/cmd/games` from
+// `services/` — and the deployment entrypoint is services/main.go, because
+// Vercel's Go framework preset only recognises `main.go`, `cmd/api/main.go` and
+// `cmd/server/main.go` at the service root, and the latter two are already spoken
+// for (auth owns `cmd/server`, users owns `cmd/api`). Both files are one line of
+// `servicekit.MustRun(games.Options())`, so the local binary and the deployment
+// cannot drift into different wiring.
+//
+// See services/games/games.go for the routes and docs/deployment/vercel.md for
+// the topology.
 package main
 
 import (
-	"github.com/r1jadi/onemore/packages/go/platform/httpx"
+	"github.com/r1jadi/onemore/services/games"
 	"github.com/r1jadi/onemore/services/internal/servicekit"
 )
 
-const serviceName = "games"
-
 func main() {
-	servicekit.MustRun(servicekit.Options{
-		Name: serviceName,
-		Register: func(router *httpx.Router) {
-			router.PublicFunc("GET /api/v1/games",
-				httpx.NotImplemented(serviceName, "Browsing the catalogue"))
-
-			router.PublicFunc("GET /api/v1/games/{gameID}",
-				httpx.NotImplemented(serviceName, "Reading a game"))
-
-			router.AuthenticatedFunc("POST /api/v1/games",
-				httpx.NotImplemented(serviceName, "Creating a game"))
-
-			router.AuthenticatedFunc("PATCH /api/v1/games/{gameID}",
-				httpx.NotImplemented(serviceName, "Updating an owned game"))
-
-			router.AuthenticatedFunc("POST /api/v1/games/{gameID}/publish",
-				httpx.NotImplemented(serviceName, "Submitting a game for review"))
-		},
-	})
+	servicekit.MustRun(games.Options())
 }

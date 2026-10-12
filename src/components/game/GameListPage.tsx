@@ -1,79 +1,96 @@
-import { useState } from "react";
-import {
-  EmptyState,
-  ErrorState,
-  GridSkeleton,
-  Page,
-  PageHeader,
-  StateSwitcher,
-  useMockLoad,
-} from "@/components/common";
+import type { ReactNode } from "react";
+import { EmptyState, ErrorState, GridSkeleton, Page, PageHeader } from "@/components/common";
 import { GameCard } from "./GameCard";
-import type { Game } from "@/lib/mock";
-import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { catalogErrorMessage, useGames, type GameQuery } from "@/lib/games/catalog";
 
+/**
+ * A grid of catalogue games.
+ *
+ * Two deliberate removals from the prototype's version:
+ *
+ *   - the **filter chips** ("Today", "This week", "All time") never filtered
+ *     anything — they were local state with no query behind them. The API has no
+ *     date window (nothing records when a game was played), so a control that
+ *     looks like it filters is worse than no control.
+ *   - the **preview-state switcher**, which let a developer force the loading,
+ *     empty and error screens. The states are real now: they follow the request.
+ */
 export function GameListPage({
   title,
   subtitle,
-  items,
-  filters = ["Today", "This week", "All time"],
+  query,
   ranked,
+  empty = { title: "Nothing here yet", body: "Check back soon — new games are added every week." },
+  children,
+  action,
 }: {
   title: string;
   subtitle?: string;
-  items: Game[];
-  filters?: string[];
+  /** The catalogue query this page lists. Omit it when `children` supplies the body. */
+  query?: GameQuery;
   ranked?: boolean;
+  empty?: { title: string; body?: string };
+  /** Rendered instead of a list, for a page whose data does not exist yet. */
+  children?: ReactNode;
+  action?: ReactNode;
 }) {
-  const loading = useMockLoad();
-  const [filter, setFilter] = useState(filters[0]);
-  const [state, setState] = useState("ready");
-  const s = loading ? "loading" : state;
   return (
     <Page className="max-w-5xl">
-      <PageHeader
-        back
-        title={title}
-        subtitle={subtitle}
-        actions={
-          <div className="hidden md:block">
-            <StateSwitcher value={state} onChange={setState} />
-          </div>
-        }
-      />
-      <div className="no-scrollbar mb-4 flex gap-2 overflow-x-auto px-4 md:px-0" role="tablist">
-        {filters.map((f) => (
-          <button
-            key={f}
-            role="tab"
-            aria-selected={filter === f}
-            onClick={() => setFilter(f)}
-            className={cn(
-              "press shrink-0 rounded-full px-3.5 py-1.5 text-sm",
-              filter === f
-                ? "bg-foreground text-background font-medium"
-                : "bg-surface text-muted-foreground",
-            )}
-          >
-            {f}
-          </button>
-        ))}
-      </div>
-      {s === "loading" && <GridSkeleton />}
-      {s === "error" && <ErrorState onRetry={() => setState("ready")} />}
-      {s === "empty" && (
-        <EmptyState
-          title="Nothing here yet"
-          body="Check back soon — new games are added every week."
-        />
-      )}
-      {s === "ready" && (
-        <div className="grid grid-cols-2 gap-x-3 gap-y-5 px-4 md:grid-cols-3 md:px-0 lg:grid-cols-4">
-          {items.map((g, i) => (
-            <GameCard key={g.id} game={g} rank={ranked ? i + 1 : undefined} />
-          ))}
-        </div>
+      <PageHeader back title={title} subtitle={subtitle} actions={action} />
+      {query ? (
+        <CatalogueList query={query} ranked={ranked} empty={empty} />
+      ) : (
+        <div className="px-4 md:px-0">{children}</div>
       )}
     </Page>
+  );
+}
+
+/** The list itself. A separate component so `useGames` is never called conditionally. */
+function CatalogueList({
+  query,
+  ranked,
+  empty,
+}: {
+  query: GameQuery;
+  ranked?: boolean;
+  empty: { title: string; body?: string };
+}) {
+  const { status, items, nextCursor, loadingMore, error, loadMoreError, retry, loadMore } =
+    useGames(query);
+
+  if (status === "loading") return <GridSkeleton />;
+
+  if (status === "error") {
+    return (
+      <ErrorState title="Couldn't load games" body={catalogErrorMessage(error)} onRetry={retry} />
+    );
+  }
+
+  if (items.length === 0) {
+    return <EmptyState title={empty.title} body={empty.body} />;
+  }
+
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-5 px-4 md:grid-cols-3 md:px-0 lg:grid-cols-4">
+        {items.map((game, i) => (
+          <GameCard key={game.slug} game={game} rank={ranked ? i + 1 : undefined} />
+        ))}
+      </div>
+      {loadMoreError && (
+        <p className="mt-4 px-4 text-sm text-destructive md:px-0">
+          {catalogErrorMessage(loadMoreError)}
+        </p>
+      )}
+      {nextCursor && (
+        <div className="mt-6 flex justify-center">
+          <Button variant="secondary" onClick={loadMore} disabled={loadingMore}>
+            {loadingMore ? "Loading…" : "Load more"}
+          </Button>
+        </div>
+      )}
+    </>
   );
 }

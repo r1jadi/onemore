@@ -50,7 +50,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { adminReports, adminUsers, type AdminUser } from "@/lib/admin-mock";
-import { fmt } from "@/lib/mock";
+import { fmt } from "@/lib/format";
 
 export const Route = createFileRoute("/admin/users")({
   head: () => ({

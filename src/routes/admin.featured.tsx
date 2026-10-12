@@ -7,7 +7,7 @@ import { ErrorState, ListSkeleton, StateSwitcher, useMockLoad } from "@/componen
 import { GameArt } from "@/components/game/GameArt";
 import { Button } from "@/components/ui/button";
 import { featureableGames, featuredGames, type FeaturedSlot } from "@/lib/admin-mock";
-import { fmt } from "@/lib/mock";
+import { fmt } from "@/lib/format";
 
 export const Route = createFileRoute("/admin/featured")({
   head: () => ({

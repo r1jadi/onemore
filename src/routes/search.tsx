@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   Avatar,
   EmptyState,
+  ErrorState,
   FollowButton,
   ListSkeleton,
   Page,
@@ -11,7 +12,8 @@ import {
 } from "@/components/common";
 import { GameRow } from "@/components/game/GameCard";
 import { Label } from "@/components/ui/label";
-import { games, users } from "@/lib/mock";
+import { catalogErrorMessage, useGames } from "@/lib/games/catalog";
+import { users } from "@/lib/mock";
 import { seo } from "@/lib/seo";
 import { cn } from "@/lib/utils";
 
@@ -20,24 +22,26 @@ export const Route = createFileRoute("/search")({
   component: SearchPage,
 });
 
+/** Delays a value until typing settles, so a search box is one request, not one per key. */
+function useDebounced<T>(value: T, ms = 250): T {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(value), ms);
+    return () => clearTimeout(timer);
+  }, [value, ms]);
+  return settled;
+}
+
 function SearchPage() {
   const [q, setQ] = useState("");
   const [tab, setTab] = useState<"top" | "games" | "people">("top");
-  const [loading, setLoading] = useState(false);
   const [recent, setRecent] = useState(["stack 10", "memory", "nora.k"]);
-
-  useEffect(() => {
-    if (!q) return;
-    setLoading(true);
-    const t = setTimeout(() => setLoading(false), 350);
-    return () => clearTimeout(t);
-  }, [q]);
-
-  const term = q.toLowerCase();
-  const g = games.filter(
-    (x) => x.title.toLowerCase().includes(term) || x.category.toLowerCase().includes(term),
+  const term = useDebounced(q.trim());
+  const people = users.filter(
+    (u) =>
+      u.username.includes(q.trim().toLowerCase()) ||
+      u.name.toLowerCase().includes(q.trim().toLowerCase()),
   );
-  const u = users.filter((x) => x.username.includes(term) || x.name.toLowerCase().includes(term));
 
   return (
     <Page>
@@ -119,7 +123,7 @@ function SearchPage() {
           )}
           <h2 className="mt-6 text-sm font-semibold">Popular searches</h2>
           <div className="mt-3 flex flex-wrap gap-2">
-            {["daily", "puzzle", "reaction", "lumen.studio", "color merge"].map((s) => (
+            {["daily", "puzzle", "reaction", "color merge"].map((s) => (
               <button
                 key={s}
                 onClick={() => setQ(s)}
@@ -132,19 +136,20 @@ function SearchPage() {
         </div>
       )}
 
-      {q && loading && <ListSkeleton rows={5} />}
-      {q && !loading && g.length + u.length === 0 && (
-        <EmptyState
-          icon={SearchIcon}
-          title={`No results for "${q}"`}
-          body="Try a different spelling or a category name."
-        />
-      )}
-      {q && !loading && (
-        <div>
-          {tab !== "people" && g.map((x) => <GameRow key={x.id} game={x} />)}
-          {tab !== "games" &&
-            u.map((x) => (
+      {q && tab !== "people" && <GameResults term={term} />}
+      {q &&
+        tab !== "games" &&
+        (people.length === 0 ? (
+          tab === "people" ? (
+            <EmptyState
+              icon={SearchIcon}
+              title={`No people for "${q}"`}
+              body="Try a different spelling."
+            />
+          ) : null
+        ) : (
+          <div>
+            {people.map((x) => (
               <div key={x.username} className="enter flex items-center gap-3 px-4 py-3 md:px-0">
                 <Link
                   to="/u/$username"
@@ -160,8 +165,42 @@ function SearchPage() {
                 <FollowButton initial={x.isFollowing} />
               </div>
             ))}
-        </div>
-      )}
+          </div>
+        ))}
     </Page>
+  );
+}
+
+/**
+ * Game results from the catalogue.
+ *
+ * It is mounted only once there is a term, so an empty search box never causes a
+ * request for the whole catalogue. There is no fallback list: a failed search
+ * offers a retry, not a different set of games under the visitor's query.
+ */
+function GameResults({ term }: { term: string }) {
+  const { status, items, error, retry } = useGames({ q: term });
+
+  if (status === "loading") return <ListSkeleton rows={5} />;
+  if (status === "error") {
+    return (
+      <ErrorState title="Couldn't search games" body={catalogErrorMessage(error)} onRetry={retry} />
+    );
+  }
+  if (items.length === 0) {
+    return (
+      <EmptyState
+        icon={SearchIcon}
+        title={`No games for "${term}"`}
+        body="Try a different spelling or a category name."
+      />
+    );
+  }
+  return (
+    <div>
+      {items.map((game) => (
+        <GameRow key={game.slug} game={game} />
+      ))}
+    </div>
   );
 }

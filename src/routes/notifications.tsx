@@ -13,7 +13,7 @@ import {
   useMockLoad,
 } from "@/components/common";
 import { Button } from "@/components/ui/button";
-import { getGame, notifications, type Notification } from "@/lib/mock";
+import { notifications, type Notification } from "@/lib/mock";
 import { seo } from "@/lib/seo";
 import { cn } from "@/lib/utils";
 
@@ -142,11 +142,15 @@ function Notifications() {
                 ) : (
                   n.game && (
                     <Button asChild size="sm" variant={n.type === "beat" ? "default" : "secondary"}>
+                      // The slug is the catalogue's own identifier, so the link // resolves against
+                      the real API on the game page. The // label is generic: a notification carries
+                      a slug, not a // title, and looking one up from a fixture would be reading //
+                      catalogue data from a placeholder.
                       <Link
                         to={n.type === "beat" ? "/play/$id" : "/games/$id"}
                         params={{ id: n.game }}
                       >
-                        {n.type === "beat" ? "Beat it" : getGame(n.game).title.split(" ")[0]}
+                        {n.type === "beat" ? "Beat it" : "Open"}
                       </Link>
                     </Button>
                   )

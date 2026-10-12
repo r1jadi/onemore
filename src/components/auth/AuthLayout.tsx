@@ -6,9 +6,10 @@ import { Logo } from "@/components/layout/Logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { GameId } from "@/lib/mock";
 
-const collage: GameId[] = ["stack-10", "memory-flash", "color-merge", "dont-break-the-chain"];
+// Catalogue slugs, drawn as a decorative collage. They are plain strings because
+// the artwork component keys on the slug the catalogue serves.
+const collage: string[] = ["stack-10", "memory-flash", "color-merge", "dont-break-the-chain"];
 
 export function AuthLayout({
   title,

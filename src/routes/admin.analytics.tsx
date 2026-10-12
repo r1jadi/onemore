@@ -12,7 +12,7 @@ import {
   popularGames,
   retention,
 } from "@/lib/admin-mock";
-import { fmt } from "@/lib/mock";
+import { fmt } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/admin/analytics")({

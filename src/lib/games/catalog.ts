@@ -1,0 +1,405 @@
+/**
+ * The game catalogue, as `services/games` defines it.
+ *
+ * The app reads the catalogue from `/api/v1/games`, `/api/v1/games/{slug}` and
+ * `/api/v1/categories` (see packages/api-contracts/openapi-v1.yaml). Three
+ * properties of that API shape everything here:
+ *
+ *   - **A slug is the identifier.** Routes and links use it (`/games/stack-10`),
+ *     so a catalogue link survives a redeploy and matches the API's own path
+ *     parameter.
+ *   - **There are no activity metrics.** The API returns no play count, like
+ *     total, comment total, rating, average session or ranking, because none of
+ *     them can be derived from stored activity yet. Nothing in this module
+ *     invents, defaults or estimates one — a screen renders nothing for a metric
+ *     it does not have, which is the only honest empty state.
+ *   - **An unpublished game is a 404.** The API answers the same way for an
+ *     unknown slug and a draft, so a failed detail read is reported as "missing"
+ *     rather than as an error to retry.
+ *
+ * Storage rule: nothing here is cached across a session. The catalogue lives in
+ * React state for the lifetime of the screen that asked for it, so a signed-out
+ * visitor and a signed-in one cannot be shown each other's results, and a
+ * deployment that changes the catalogue cannot serve a stale page from disk.
+ */
+
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import { ApiError, apiFetch, type ApiRequestOptions } from "@/lib/api/client";
+import { publicConfig } from "@/lib/config";
+
+/** Routes implemented by `services/games`. Kept together so they cannot drift. */
+const Routes = {
+  games: "/games",
+  categories: "/categories",
+} as const;
+
+/** The bucket the storage migration creates for game artwork. */
+const GAME_ASSET_BUCKET = "game-assets";
+
+/** The contract's default and maximum page size. */
+export const DEFAULT_PAGE_SIZE = 20;
+export const MAX_PAGE_SIZE = 100;
+
+/** The only order the catalogue can compute from real data. */
+export type GameSort = "latest";
+
+/** A game's category, as a game embeds it. */
+export type GameCategory = {
+  slug: string;
+  name: string;
+};
+
+/**
+ * One published game.
+ *
+ * Every optional field is optional because the database column is nullable, not
+ * because a screen may substitute a default: `tagline: undefined` means the game
+ * has no tagline, and the UI omits the line rather than inventing copy.
+ */
+export type Game = {
+  slug: string;
+  title: string;
+  tagline?: string | null;
+  description?: string | null;
+  /** How to play. Absent while a game has no written rules. */
+  instructions?: string | null;
+  category?: GameCategory | null;
+  /**
+   * The client runtime that plays this game, or null when none exists.
+   * `playable` is false for every game until a runtime ships.
+   */
+  runtime?: string | null;
+  /**
+   * True only when a runtime genuinely exists. A published but unplayable game
+   * is listed, not playable — no screen may offer to start it.
+   */
+  playable: boolean;
+  /** First-party OneMore content, as opposed to a creator's. */
+  isOfficial: boolean;
+  /** Storage object path (`<slug>/<file>`), not a URL. See `coverUrl`. */
+  coverPath?: string | null;
+  publishedAt?: string | null;
+  updatedAt: string;
+};
+
+/** A catalogue category with its real published-game count. */
+export type Category = GameCategory & {
+  description?: string | null;
+  gameCount: number;
+};
+
+export type GameList = {
+  items: Game[];
+  /** Null on the last page. Opaque — pass it back as `cursor`. */
+  nextCursor: string | null;
+};
+
+export type CategoryList = {
+  items: Category[];
+};
+
+export type GameQuery = {
+  limit?: number;
+  cursor?: string;
+  /** A category slug, as returned by `fetchCategories`. */
+  category?: string;
+  /** Case-insensitive substring match over title, tagline and description. */
+  q?: string;
+  sort?: GameSort;
+};
+
+type RequestOptions = { signal?: AbortSignal };
+
+// ── Requests ────────────────────────────────────────────────────────────────
+
+/** Reads a page of published games. Public: no token. */
+export function fetchGames(query: GameQuery = {}, options: RequestOptions = {}): Promise<GameList> {
+  return apiFetch<GameList>(Routes.games, {
+    query: {
+      limit: query.limit,
+      cursor: query.cursor,
+      category: query.category,
+      q: query.q,
+      sort: query.sort,
+    },
+    signal: options.signal,
+  });
+}
+
+/**
+ * Reads one published game by slug.
+ *
+ * An unpublished game and an unknown one both answer 404, which is why the
+ * caller must treat them identically: `useGame` reports `missing` for both.
+ */
+export function fetchGame(slug: string, options: RequestOptions = {}): Promise<Game> {
+  return apiFetch<Game>(`${Routes.games}/${encodeURIComponent(slug)}`, { signal: options.signal });
+}
+
+/** Reads every category with its real published-game count. Public. */
+export function fetchCategories(options: RequestOptions = {}): Promise<CategoryList> {
+  return apiFetch<CategoryList>(Routes.categories, { signal: options.signal });
+}
+
+// ── Presentation helpers ────────────────────────────────────────────────────
+
+/**
+ * The public URL of a game's cover art, or `undefined` when there is none — in
+ * which case the generated `GameArt` stands in, as it always has.
+ *
+ * The `game-assets` bucket is public by design (artwork is public on the web),
+ * so this is a plain object URL and not a signed one.
+ */
+export function coverUrl(game: Pick<Game, "coverPath"> | undefined): string | undefined {
+  const path = game?.coverPath;
+  if (!path) return undefined;
+  const baseUrl = publicConfig.supabase.url.replace(/\/+$/, "");
+  if (baseUrl === "") return undefined;
+  return `${baseUrl}/storage/v1/object/public/${GAME_ASSET_BUCKET}/${path}`;
+}
+
+/**
+ * Whether a game is in the "daily" category, which is what the Daily badge and
+ * the Explore challenge card key on.
+ *
+ * It is derived from the category rather than a flag, because that is what the
+ * catalogue actually models: there is no `isDaily` column, and inferring one
+ * from a published date would be a guess.
+ */
+export function isDaily(game: Pick<Game, "category">): boolean {
+  return game.category?.slug === "daily";
+}
+
+/** The category's display name, or `undefined` when the game has none. */
+export function categoryName(game: Pick<Game, "category">): string | undefined {
+  return game.category?.name;
+}
+
+/** A path to a category page, or `undefined` when the game has no category. */
+export function categoryPath(game: Pick<Game, "category">): string | undefined {
+  return game.category ? `/categories/${game.category.slug}` : undefined;
+}
+
+/**
+ * A readable title for a slug.
+ *
+ * Used only where a page needs a heading before its data has arrived — document
+ * metadata, and the heading of a category or game that turns out not to exist. It
+ * is a rendering of the URL, never a substitute for the real title, which always
+ * comes from the API.
+ */
+export function titleFromSlug(slug: string): string {
+  return slug
+    .split("-")
+    .filter(Boolean)
+    .map((word) => word[0].toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+/**
+ * The message to show a person when a catalogue call fails.
+ *
+ * The API writes messages that are safe to display ("The game catalogue is not
+ * available right now."), so they are passed through rather than re-worded here.
+ * Anything else is a bug or a transport failure and gets a generic message
+ * instead of an internal detail.
+ */
+export function catalogErrorMessage(error: unknown): string {
+  return error instanceof ApiError ? error.message : "Something went wrong. Please try again.";
+}
+
+function asApiError(error: unknown): ApiError {
+  return error instanceof ApiError
+    ? error
+    : new ApiError("Something went wrong. Please try again.");
+}
+
+// ── React bindings ──────────────────────────────────────────────────────────
+//
+// There is no global store. A catalogue page is public and read-only, so the
+// only state that matters is the screen's own: which page it has loaded, and
+// whether that read failed. Mounting a screen is what triggers the read, and
+// leaving it abandons the request.
+
+export type GameListState = {
+  status: "loading" | "ready" | "error";
+  items: Game[];
+  nextCursor: string | null;
+  /** A continuation is in flight; the list stays on screen while it is. */
+  loadingMore: boolean;
+  /** The first page failed. The screen shows an error state with a retry. */
+  error?: ApiError;
+  /**
+   * A continuation failed. Kept apart from `error` on purpose: the items that
+   * did load must stay on screen, so a failed "load more" is a note under the
+   * grid rather than a screen that throws away what it already had.
+   */
+  loadMoreError?: ApiError;
+};
+
+export type GameListResult = GameListState & {
+  retry: () => void;
+  loadMore: () => void;
+};
+
+/**
+ * Reads a page of the catalogue, loading it on first use and reloading it when
+ * the query changes.
+ *
+ * `retry` is what every error affordance calls, and it is deliberately a re-read
+ * rather than a fallback: there is no cached or hardcoded catalogue to fall back
+ * to, so a failed request shows a failure.
+ */
+export function useGames(query: GameQuery = {}): GameListResult {
+  const limit = query.limit ?? DEFAULT_PAGE_SIZE;
+  const category = query.category;
+  const q = query.q;
+  const sort = query.sort ?? "latest";
+
+  const [attempt, setAttempt] = useState(0);
+  const [state, setState] = useState<GameListState>({
+    status: "loading",
+    items: [],
+    nextCursor: null,
+    loadingMore: false,
+  });
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    // A new query starts from nothing: showing the previous filter's results
+    // under a new heading is how a screen ends up lying about what it lists.
+    const controller = new AbortController();
+    setState({ status: "loading", items: [], nextCursor: null, loadingMore: false });
+
+    fetchGames({ limit, category, q, sort }, { signal: controller.signal })
+      .then((page) => {
+        if (controller.signal.aborted) return;
+        setState({
+          status: "ready",
+          items: page.items,
+          nextCursor: page.nextCursor,
+          loadingMore: false,
+        });
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setState({
+          status: "error",
+          items: [],
+          nextCursor: null,
+          loadingMore: false,
+          error: asApiError(error),
+        });
+      });
+
+    return () => controller.abort();
+  }, [limit, category, q, sort, attempt]);
+
+  const loadMore = useCallback(() => {
+    const cursor = state.nextCursor;
+    if (!cursor || state.loadingMore) return;
+
+    setState((current) => ({ ...current, loadingMore: true, loadMoreError: undefined }));
+    fetchGames({ limit, category, q, sort, cursor })
+      .then((page) => {
+        if (!mounted.current) return;
+        setState((current) => ({
+          ...current,
+          items: [...current.items, ...page.items],
+          nextCursor: page.nextCursor,
+          loadingMore: false,
+        }));
+      })
+      .catch((error: unknown) => {
+        if (!mounted.current) return;
+        setState((current) => ({
+          ...current,
+          loadingMore: false,
+          loadMoreError: asApiError(error),
+        }));
+      });
+  }, [limit, category, q, sort, state.nextCursor, state.loadingMore]);
+
+  const retry = useCallback(() => setAttempt((n) => n + 1), []);
+
+  return { ...state, retry, loadMore };
+}
+
+/**
+ * What the app knows about one catalogue game.
+ *
+ * `missing` is not an error: an unknown slug and an unpublished game are the
+ * same 404 by design, so retrying could not help and a "game not found" screen is
+ * the answer.
+ */
+export type GameState =
+  | { status: "loading" }
+  | { status: "ready"; game: Game }
+  | { status: "missing" }
+  | { status: "error"; error: ApiError };
+
+export function useGame(slug: string): GameState & { retry: () => void } {
+  const [attempt, setAttempt] = useState(0);
+  const [state, setState] = useState<GameState>({ status: "loading" });
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setState({ status: "loading" });
+
+    fetchGame(slug, { signal: controller.signal })
+      .then((game) => {
+        if (controller.signal.aborted) return;
+        setState({ status: "ready", game });
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        const apiError = asApiError(error);
+        setState(
+          apiError.status === 404 ? { status: "missing" } : { status: "error", error: apiError },
+        );
+      });
+
+    return () => controller.abort();
+  }, [slug, attempt]);
+
+  return { ...state, retry: useCallback(() => setAttempt((n) => n + 1), []) };
+}
+
+export type CategoryState =
+  | { status: "loading" }
+  | { status: "ready"; items: Category[] }
+  | { status: "error"; error: ApiError };
+
+export function useCategories(): CategoryState & { retry: () => void } {
+  const [attempt, setAttempt] = useState(0);
+  const [state, setState] = useState<CategoryState>({ status: "loading" });
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setState({ status: "loading" });
+
+    fetchCategories({ signal: controller.signal })
+      .then((page) => {
+        if (controller.signal.aborted) return;
+        setState({ status: "ready", items: page.items });
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setState({ status: "error", error: asApiError(error) });
+      });
+
+    return () => controller.abort();
+  }, [attempt]);
+
+  return { ...state, retry: useCallback(() => setAttempt((n) => n + 1), []) };
+}
+
+/** Re-exported so a caller building a custom request keeps the same header rules. */
+export type { ApiRequestOptions };

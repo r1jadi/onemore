@@ -1,5 +1,129 @@
 // Static mock data for the admin dashboard. UI prototype only — replace with API calls later.
-import { categories as publicCategories, games, type GameId } from "./mock";
+//
+// Everything the admin console draws lives in this file: users, reports,
+// comments, analytics, leaderboards and the demo catalogue below. None of it is
+// real and none of it leaves `/admin`.
+//
+// The demo catalogue is deliberately *not* the product catalogue. The real one is
+// served by `services/games` and read through `@/lib/games/catalog`; nothing here
+// may be imported by a public screen, and the slugs below exist only so a link
+// into `/games/<slug>` resolves against the real API.
+
+export type GameId = string;
+
+export type Game = {
+  id: GameId;
+  title: string;
+  tagline: string;
+  category: string;
+  creator: string;
+  plays: number;
+  likes: number;
+  comments: number;
+  saves: number;
+  bestScore: number;
+};
+
+/** Demo rows for the console's tables. Not the product catalogue. */
+export const games: Game[] = [
+  {
+    id: "stack-10",
+    title: "Stack 10",
+    tagline: "Make every column add up to ten.",
+    category: "Puzzle",
+    creator: "quiet.games",
+    plays: 1284000,
+    likes: 98400,
+    comments: 2310,
+    saves: 14200,
+    bestScore: 4820,
+  },
+  {
+    id: "color-merge",
+    title: "Color Merge",
+    tagline: "Merge matching tiles. Fill nothing.",
+    category: "Puzzle",
+    creator: "quiet.games",
+    plays: 942000,
+    likes: 71200,
+    comments: 1840,
+    saves: 9800,
+    bestScore: 12960,
+  },
+  {
+    id: "dont-touch-the-black",
+    title: "Don't Touch the Black",
+    tagline: "Tap white. Only white.",
+    category: "Arcade",
+    creator: "quiet.games",
+    plays: 2310000,
+    likes: 184000,
+    comments: 5120,
+    saves: 22100,
+    bestScore: 312,
+  },
+  {
+    id: "one-move",
+    title: "One Move",
+    tagline: "One move. One solution.",
+    category: "Logic",
+    creator: "quiet.games",
+    plays: 512000,
+    likes: 40100,
+    comments: 1290,
+    saves: 7600,
+    bestScore: 240,
+  },
+  {
+    id: "dont-break-the-chain",
+    title: "Don't Break the Chain",
+    tagline: "Repeat the chain. Add one more.",
+    category: "Reaction",
+    creator: "quiet.games",
+    plays: 688000,
+    likes: 52300,
+    comments: 1630,
+    saves: 8100,
+    bestScore: 41,
+  },
+  {
+    id: "memory-flash",
+    title: "Memory Flash",
+    tagline: "See it once. Rebuild it.",
+    category: "Memory",
+    creator: "quiet.games",
+    plays: 803000,
+    likes: 60900,
+    comments: 1420,
+    saves: 11300,
+    bestScore: 28,
+  },
+  {
+    id: "7-second",
+    title: "7 Second",
+    tagline: "Today's challenge. Seven seconds.",
+    category: "Daily",
+    creator: "quiet.games",
+    plays: 1560000,
+    likes: 132000,
+    comments: 4380,
+    saves: 18700,
+    bestScore: 999,
+  },
+];
+
+export const getGame = (id: string) => games.find((g) => g.id === id) ?? games[0];
+
+export const categories = [
+  { slug: "puzzle", name: "Puzzle", count: 142 },
+  { slug: "arcade", name: "Arcade", count: 98 },
+  { slug: "logic", name: "Logic", count: 64 },
+  { slug: "reaction", name: "Reaction", count: 57 },
+  { slug: "memory", name: "Memory", count: 41 },
+  { slug: "daily", name: "Daily", count: 12 },
+  { slug: "word", name: "Word", count: 38 },
+  { slug: "strategy", name: "Strategy", count: 29 },
+];
 
 /* ------------------------------------------------------------------ users */
 
@@ -829,7 +953,7 @@ export type AdminCategory = {
   hue?: string;
 };
 
-export const adminCategories: AdminCategory[] = publicCategories.map((c, i) => ({
+export const adminCategories: AdminCategory[] = categories.map((c, i) => ({
   id: `cat-${i + 1}`,
   slug: c.slug,
   name: c.name,

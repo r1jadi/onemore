@@ -17,25 +17,34 @@ will be built on is in place: one public gateway, a middleware chain every servi
 inherits, a published API contract, an RLS-governed database with a live security
 suite, and five CI workflows.
 
-Two slices are implemented end to end; the rest are contract-only.
+Three slices are implemented end to end; the rest are contract-only.
 
-| Area                                                                                                                                        | State                                                                   |
-| ------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| Web app (routing, SEO, PWA, design system)                                                                                                  | Complete, served from the production domain                             |
-| Session lifecycle (`auth`)                                                                                                                  | **Implemented** — sign-up, sign-in, refresh, session exchange, sign-out |
-| The caller's own profile (`users`)                                                                                                          | **Implemented** — read and update the signed-in `public.profiles` row   |
-| Everything else (games, sessions, scores, leaderboards, feed, recommendations, social, notifications, search, moderation, analytics, admin) | Scaffolded: each has a published contract and answers `501`             |
-| Payments (RaiAccept)                                                                                                                        | Designed, not built — see [0005](docs/decisions/0005-payments.md)       |
+| Area                                                                                                                                 | State                                                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
+| Web app (routing, SEO, PWA, design system)                                                                                           | Complete, served from the production domain                             |
+| Session lifecycle (`auth`)                                                                                                           | **Implemented** — sign-up, sign-in, refresh, session exchange, sign-out |
+| The caller's own profile (`users`)                                                                                                   | **Implemented** — read and update the signed-in `public.profiles` row   |
+| The game catalogue (`games`)                                                                                                         | **Implemented** — published games, search, categories with real counts  |
+| Everything else (sessions, scores, leaderboards, feed, recommendations, social, notifications, search, moderation, analytics, admin) | Scaffolded: each has a published contract and answers `501`             |
+| Payments (RaiAccept)                                                                                                                 | Designed, not built — see [0005](docs/decisions/0005-payments.md)       |
 
 A scaffolded endpoint is deliberate, not missing: the route exists, authenticates,
 is rate limited and is documented, so a client fails predictably (`501`) instead of
 hitting a `404`. The per-operation truth is the `x-status` field in
 [`packages/api-contracts/openapi-v1.yaml`](packages/api-contracts/openapi-v1.yaml).
 
-Most of the UI still reads from [`src/lib/mock.ts`](src/lib/mock.ts) — games,
-scores, leaderboards, comments, notifications. The one exception is the signed-in
-identity: it reads from `GET /api/v1/users/me` and writes the real profile row.
-Mock data is never used as a fallback for the authenticated user.
+The web app's catalogue screens read the real API
+([`src/lib/games/catalog.ts`](src/lib/games/catalog.ts)): browse, search,
+categories, and the game detail page. Nothing falls back to a hardcoded game — a
+failed request shows a failure, and a screen renders nothing for a metric the API
+does not return.
+
+What remains on fixtures is what has no backend yet, and it is now empty states
+rather than invented content: [`src/lib/mock.ts`](src/lib/mock.ts) holds only the
+unimplemented features (public profiles, comments, notifications, achievements,
+and the internal admin console's demo tables). Screens whose data would be a
+personal history — liked, saved, recently played, activity, leaderboards — say they
+are unavailable instead of showing fabricated rows.
 
 ## Architecture
 
@@ -155,7 +164,7 @@ shutdown with readiness draining.
 | `gateway`         | The only public entry point; owns `/api/v1` and proxies by prefix | Implemented                   |
 | `auth`            | Session lifecycle on top of Supabase Auth                         | **Implemented**               |
 | `users`           | Profiles                                                          | **Implemented** (own profile) |
-| `games`           | Catalogue and game metadata                                       | Scaffolded                    |
+| `games`           | Catalogue and game metadata                                       | **Implemented** (read-only)   |
 | `game-sessions`   | Play sessions; the only path to a score                           | Scaffolded                    |
 | `scores`          | Score records (read-only to clients)                              | Scaffolded                    |
 | `leaderboards`    | Global and friends boards                                         | Scaffolded                    |
@@ -248,17 +257,23 @@ Five workflows, all read-only with respect to the repository:
 
 ## Deployment
 
-One Vercel project serves four services from one domain, declared in
+One Vercel project serves five services from one domain, declared in
 [`vercel.json`](vercel.json):
 
 - **`web`** — the TanStack Start app, at `/`.
 - **`api`** — the Go gateway, built from [`Dockerfile.vercel`](Dockerfile.vercel)
   as a container image because it needs service bindings, which the Go runtime
   cannot express.
-- **`auth`** and **`users`** — Go runtime services. The gateway reaches them over
-  service bindings that inject `UPSTREAM_AUTH_URL` and `UPSTREAM_USERS_URL` at
-  runtime, and the rewrite table sends no path directly to either, so `/api/v1` is
-  the only way in. Those two variables must never be set by hand in the dashboard.
+- **`auth`**, **`users`** and **`games`** — Go runtime services. The gateway
+  reaches them over service bindings that inject `UPSTREAM_AUTH_URL`,
+  `UPSTREAM_USERS_URL` and `UPSTREAM_GAMES_URL` at runtime, and the rewrite table
+  sends no path directly to any of them, so `/api/v1` is the only way in. Those
+  three variables must never be set by hand in the dashboard.
+
+  The `games` service deploys from [`services/main.go`](services/main.go): Vercel's
+  Go preset recognises exactly three entrypoint names and the other two are taken
+  by `auth` and `users`. The file is a slot name, not a description — it runs the
+  same one line as the local binary.
 
 Deploys come from Git. Environment variables are scoped per environment in the
 Vercel project; the API needs `ENVIRONMENT=production`, the Supabase URL and the

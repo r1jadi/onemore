@@ -180,10 +180,48 @@ on conflict (slug) do nothing;
 \set draft_game     'aaaaaaaa-2222-4222-8222-aaaaaaaaaaaa'
 \set bob_game       'aaaaaaaa-3333-4333-8333-aaaaaaaaaaaa'
 
-insert into public.games (id, owner_id, slug, title, status, published_at) values
-  (:'published_game', :'alice', 'stack-10', 'Stack 10', 'published', now()),
-  (:'draft_game',     :'alice', 'draft-game', 'Draft Game', 'draft', null),
-  (:'bob_game',       :'bob',   'bob-game', 'Bob Game', 'published', now());
+-- The slugs are prefixed `fixture-` on purpose. The catalogue migration ships
+-- the real first-party games (including `stack-10`), and the unique index on
+-- `slug` would reject a fixture that reused one of them.
+--
+-- The categories are load-bearing for the count assertions further down:
+-- `puzzle` holds a published fixture and `word` holds only a draft, so a real
+-- published-game count must be non-zero for one and exactly zero for the other.
+insert into public.games (id, owner_id, slug, title, status, published_at, category_id) values
+  (:'published_game', :'alice', 'fixture-stack', 'Fixture Stack', 'published', now(),
+   (select id from public.categories where slug = 'puzzle')),
+  (:'draft_game',     :'alice', 'fixture-draft', 'Fixture Draft', 'draft', null,
+   (select id from public.categories where slug = 'word')),
+  (:'bob_game',       :'bob',   'fixture-bob',   'Fixture Bob',   'published', now(),
+   (select id from public.categories where slug = 'arcade'));
+
+-- Integrity rules added with the catalogue. These are asserted here, outside any
+-- role switch, because they must hold for every writer including the database
+-- owner — a policy can only constrain the roles it names.
+select rls_test.rejected(
+  $$insert into public.games (owner_id, slug, title, playable) values ('11111111-1111-4111-8111-111111111111', 'fixture-playable', 'Claimed Playable', true)$$,
+  'a game cannot be playable without a runtime'
+);
+select rls_test.rejected(
+  $$insert into public.games (slug, title, status) values ('fixture-orphan', 'Orphan', 'published')$$,
+  'a game is either owned by an account or explicitly first-party'
+);
+select rls_test.rejected(
+  $$insert into public.games (owner_id, slug, title, runtime) values ('11111111-1111-4111-8111-111111111111', 'fixture-runtime', 'Runtime', 'Not A Runtime')$$,
+  'a runtime identifier must look like a slug'
+);
+select rls_test.rejected(
+  $$insert into public.games (owner_id, slug, title, cover_path) values ('11111111-1111-4111-8111-111111111111', 'fixture-cover', 'Cover', 'no-folder-here')$$,
+  'a cover path must live under a folder'
+);
+select rls_test.rejected(
+  $$insert into public.games (owner_id, slug, title, instructions) values ('11111111-1111-4111-8111-111111111111', 'fixture-instructions', 'Instructions', '')$$,
+  'instructions are either written or absent, never empty'
+);
+select rls_test.ok(
+  rls_test.count_rows($$select 1 from public.games where is_official and owner_id is not null$$) = 0,
+  'a first-party game carries no account as its owner'
+);
 
 \set alice_comment 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb'
 \set hidden_comment 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb'
@@ -210,11 +248,42 @@ insert into public.game_sessions (game_id, user_id) values (:'published_game', :
 select set_config('request.jwt.claims', '{"role":"anon"}', true);
 set local role anon;
 
-select rls_test.visible($$select id from public.games$$, 2, 'anon sees only published games');
+-- Absolute row counts are deliberately not asserted for the whole table: the
+-- catalogue migration ships the real first-party games, so how many rows exist
+-- is content, not a rule. The rule is asserted directly — one global statement
+-- that must hold whatever the catalogue holds, plus per-fixture visibility.
+select rls_test.visible($$select id from public.games where status <> 'published'$$, 0,
+  'no unpublished game is visible to an anonymous caller');
+select rls_test.visible($$select id from public.games where id = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa'$$, 1,
+  'anon sees a published game');
+select rls_test.visible($$select id from public.games where id = 'aaaaaaaa-3333-4333-8333-aaaaaaaaaaaa'$$, 1,
+  'anon sees another creator''s published game');
 select rls_test.visible($$select id from public.games where id = 'aaaaaaaa-2222-4222-8222-aaaaaaaaaaaa'$$, 0, 'anon cannot see a draft');
+select rls_test.ok(
+  rls_test.count_rows($$select 1 from public.games where slug = 'stack-10'$$) = 1,
+  'the real first-party catalogue is readable by an anonymous caller'
+);
+select rls_test.ok(
+  rls_test.count_rows($$select 1 from public.games where playable and runtime is null$$) = 0,
+  'nothing is presented as playable without a runtime'
+);
 select rls_test.ok(
   rls_test.count_rows($$select id from public.categories$$) >= 2,
   'anon reads reference data'
+);
+
+-- Real published-game counts, as the categories endpoint reads them.
+select rls_test.ok(
+  (select game_count from public.category_game_counts where slug = 'puzzle') >= 1,
+  'a category with a published game reports a non-zero count'
+);
+select rls_test.ok(
+  (select game_count from public.category_game_counts where slug = 'word') = 0,
+  'a category whose only game is a draft reports zero'
+);
+select rls_test.ok(
+  (select count(*) from public.category_game_counts) = (select count(*) from public.categories),
+  'every category is counted, including the empty ones'
 );
 
 select rls_test.denied($$insert into public.games (owner_id, slug, title) values ('11111111-1111-4111-8111-111111111111', 'x-game', 'X')$$,
@@ -245,8 +314,8 @@ set local role authenticated;
 
 select rls_test.ok(auth.uid() = :'alice'::uuid, 'auth.uid() resolves from the verified claims');
 
--- Visibility
-select rls_test.visible($$select id from public.games$$, 3, 'a creator sees published games plus own drafts');
+-- Visibility. Scoped to the fixture ids for the same reason as above.
+select rls_test.visible($$select id from public.games where id in ('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', 'aaaaaaaa-2222-4222-8222-aaaaaaaaaaaa', 'aaaaaaaa-3333-4333-8333-aaaaaaaaaaaa')$$, 3, 'a creator sees published games plus own drafts');
 select rls_test.visible($$select id from public.game_sessions$$, 1, 'a player sees own sessions');
 select rls_test.visible($$select id from public.notifications$$, 1, 'a player sees only own notifications');
 select rls_test.visible($$select user_id from public.user_roles$$, 1, 'a player sees only own role row');
@@ -341,6 +410,21 @@ select rls_test.rejected(
   $$insert into public.games (owner_id, slug, title) values ('11111111-1111-4111-8111-111111111111', 'Stack 10', 'Bad Slug')$$,
   'invalid game slugs are rejected before they reach the catalogue'
 );
+select rls_test.allow(
+  $$update public.games set instructions = 'Tap a column to drop a tile.' where id = 'aaaaaaaa-2222-4222-8222-aaaaaaaaaaaa'$$,
+  'a creator can write instructions on an own draft'
+);
+
+-- First-party content is not something a user can mint, and the badge is not a
+-- field any client may flip.
+select rls_test.denied(
+  $$insert into public.games (owner_id, slug, title, is_official) values ('11111111-1111-4111-8111-111111111111', 'fixture-official', 'Fake Official', true)$$,
+  'a creator cannot mint first-party content'
+);
+select rls_test.denied(
+  $$update public.games set is_official = true where id = 'aaaaaaaa-2222-4222-8222-aaaaaaaaaaaa'$$,
+  'the first-party flag is not writable through the Data API'
+);
 
 -- Sessions
 select rls_test.visible(
@@ -433,6 +517,10 @@ select rls_test.ok(
 select rls_test.allow(
   $$update public.games set status = 'published' where id = 'aaaaaaaa-2222-4222-8222-aaaaaaaaaaaa'$$,
   'a moderator can publish a game'
+);
+select rls_test.denied(
+  $$update public.games set is_official = true where id = 'aaaaaaaa-2222-4222-8222-aaaaaaaaaaaa'$$,
+  'even staff cannot flip the first-party flag through the Data API'
 );
 select rls_test.ok(
   (select published_at is not null from public.games where id = 'aaaaaaaa-2222-4222-8222-aaaaaaaaaaaa'),

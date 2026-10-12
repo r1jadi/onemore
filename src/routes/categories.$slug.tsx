@@ -1,37 +1,61 @@
-import { createFileRoute, notFound } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { GameListPage } from "@/components/game/GameListPage";
+import { EmptyState } from "@/components/common";
+import { DEFAULT_PAGE_SIZE, titleFromSlug, useCategories } from "@/lib/games/catalog";
 import { breadcrumbJsonLd, seo } from "@/lib/seo";
-import { categories, games } from "@/lib/mock";
 
 export const Route = createFileRoute("/categories/$slug")({
-  // Unknown slugs must 404 rather than fall back to the full catalogue, which
-  // would publish the same content under unlimited URLs.
-  beforeLoad: ({ params }) => {
-    if (!categories.some((c) => c.slug === params.slug)) throw notFound();
-  },
   head: ({ params }) => {
-    const c = categories.find((x) => x.slug === params.slug);
-    const title = c?.name ?? "Category";
-    const description = `Play the best ${title.toLowerCase()} games on onemore.`;
-    return seo(title, description, {
+    const title = titleFromSlug(params.slug);
+    return seo(title, `Play the best ${title.toLowerCase()} games on onemore.`, {
       jsonLd: breadcrumbJsonLd([
         { name: "Categories", path: "/categories" },
         { name: title, path: `/categories/${params.slug}` },
       ]),
     });
   },
-  component: Cat,
+  component: CategoryPage,
 });
 
-function Cat() {
+/**
+ * One category's games.
+ *
+ * The heading uses the API's own name once it has loaded, and falls back to a
+ * rendering of the slug before then — never to a hard-coded list of category
+ * names.
+ *
+ * A slug that names no category shows an explicit "not found" state rather than
+ * the whole catalogue. The prototype did the opposite (it fell back to every
+ * game), which publishes the same content under unlimited URLs.
+ */
+function CategoryPage() {
   const { slug } = Route.useParams();
-  const c = categories.find((x) => x.slug === slug);
-  const list = games.filter((g) => g.category.toLowerCase() === slug);
+  const categories = useCategories();
+  const known =
+    categories.status === "ready" ? categories.items.find((c) => c.slug === slug) : undefined;
+
+  // Only decide once the category list has arrived: before that, "unknown" would
+  // just mean "not loaded".
+  if (categories.status === "ready" && !known) {
+    return (
+      <GameListPage title={titleFromSlug(slug)} subtitle="No such category.">
+        <EmptyState
+          title="Category not found"
+          body="That category does not exist. Browse every category from the Categories page."
+        />
+      </GameListPage>
+    );
+  }
+
   return (
     <GameListPage
-      title={c?.name ?? "Category"}
-      subtitle="Browse games in this category."
-      items={list.length ? list : games}
+      title={known?.name ?? titleFromSlug(slug)}
+      subtitle={known?.description ?? "Browse games in this category."}
+      query={{ category: slug, limit: DEFAULT_PAGE_SIZE }}
+      empty={{
+        title: "Nothing in this category yet",
+        body: "No game has been published here yet.",
+      }}
       ranked
     />
   );

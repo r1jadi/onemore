@@ -24,6 +24,10 @@ func Groups() []Group {
 		{Prefix: BasePath + "/auth", Service: "auth"},
 		{Prefix: BasePath + "/users", Service: "users"},
 		{Prefix: BasePath + "/games", Service: "games"},
+		// Categories are the catalogue's own reference data, served by the games
+		// service so a category page and its game list come from one place (and
+		// one database query for the counts).
+		{Prefix: BasePath + "/categories", Service: "games"},
 		{Prefix: BasePath + "/sessions", Service: "game-sessions"},
 		{Prefix: BasePath + "/scores", Service: "scores"},
 		{Prefix: BasePath + "/leaderboards", Service: "leaderboards"},

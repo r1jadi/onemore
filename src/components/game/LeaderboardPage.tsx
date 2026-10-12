@@ -1,25 +1,26 @@
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { LeaderboardList } from "./Leaderboard";
-import {
-  ErrorState,
-  Page,
-  PageHeader,
-  StateSwitcher,
-  useMockLoad,
-  EmptyState,
-} from "@/components/common";
+import { Page, PageHeader } from "@/components/common";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { games, type GameId } from "@/lib/mock";
+import { DEFAULT_PAGE_SIZE, useGames } from "@/lib/games/catalog";
 import { cn } from "@/lib/utils";
-import { Trophy } from "lucide-react";
 
-export function LeaderboardPage({ gameId }: { gameId?: GameId }) {
-  const loading = useMockLoad();
+/**
+ * The leaderboard screen.
+ *
+ * The game strip is real: it lists published games from the catalogue, so a game
+ * published tomorrow appears here without a code change. The board under it is
+ * empty and says so — nothing records scores yet, and a ranking is the last place
+ * a plausible number should appear.
+ *
+ * `gameId` is a catalogue slug, matching the URL the game pages use.
+ */
+export function LeaderboardPage({ gameId }: { gameId?: string }) {
   const [scope, setScope] = useState("global");
   const [period, setPeriod] = useState("week");
-  const [state, setState] = useState("ready");
-  const game = games.find((g) => g.id === gameId);
+  const { status, items } = useGames({ limit: DEFAULT_PAGE_SIZE });
+  const game = items.find((g) => g.slug === gameId);
 
   return (
     <Page>
@@ -27,11 +28,6 @@ export function LeaderboardPage({ gameId }: { gameId?: GameId }) {
         back={!!gameId}
         title={game ? `${game.title} leaderboard` : "Leaderboards"}
         subtitle="Updated every few minutes."
-        actions={
-          <div className="hidden md:block">
-            <StateSwitcher value={state} onChange={setState} />
-          </div>
-        }
       />
       <div className="no-scrollbar flex gap-2 overflow-x-auto px-4 pb-3 md:px-0">
         <Link
@@ -45,14 +41,14 @@ export function LeaderboardPage({ gameId }: { gameId?: GameId }) {
         >
           All games
         </Link>
-        {games.map((g) => (
+        {items.map((g) => (
           <Link
-            key={g.id}
+            key={g.slug}
             to="/leaderboards/$id"
-            params={{ id: g.id }}
+            params={{ id: g.slug }}
             className={cn(
               "press shrink-0 rounded-full px-3.5 py-1.5 text-sm",
-              gameId === g.id
+              gameId === g.slug
                 ? "bg-foreground font-medium text-background"
                 : "bg-surface text-muted-foreground",
             )}
@@ -60,6 +56,11 @@ export function LeaderboardPage({ gameId }: { gameId?: GameId }) {
             {g.title}
           </Link>
         ))}
+        {status === "error" && (
+          <span className="self-center text-sm text-muted-foreground">
+            The catalogue is unavailable, so the game list is empty.
+          </span>
+        )}
       </div>
       <div className="flex items-center justify-between gap-3 px-4 pb-2 md:px-0">
         <Tabs value={scope} onValueChange={setScope}>
@@ -79,21 +80,7 @@ export function LeaderboardPage({ gameId }: { gameId?: GameId }) {
           <option value="all">All time</option>
         </select>
       </div>
-      {state === "error" ? (
-        <ErrorState onRetry={() => setState("ready")} />
-      ) : state === "empty" ? (
-        <EmptyState
-          icon={Trophy}
-          title="No scores yet"
-          body="Be the first to set a score this week."
-        />
-      ) : (
-        <LeaderboardList
-          friends={scope === "friends"}
-          loading={loading || state === "loading"}
-          showMe
-        />
-      )}
+      <LeaderboardList friends={scope === "friends"} showMe />
     </Page>
   );
 }

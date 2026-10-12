@@ -1,37 +1,37 @@
-import { createFileRoute, Link, notFound } from "@tanstack/react-router";
-import { Bookmark, Heart, MessageCircle, Play, Share2 } from "lucide-react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { Bookmark, Clock, Heart, MessageCircle, Play, Share2 } from "lucide-react";
 import { useState } from "react";
-import { Avatar, FollowButton, Page, PageHeader, Section, useMockLoad } from "@/components/common";
+import { EmptyState, ErrorState, Page, PageHeader, Section } from "@/components/common";
 import { GameArt } from "@/components/game/GameArt";
 import { GameCard } from "@/components/game/GameCard";
 import { LeaderboardList } from "@/components/game/Leaderboard";
 import { CommentsSheet, ShareSheet } from "@/components/social/Sheets";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { fmt, games, getGame } from "@/lib/mock";
+import { fmtDate } from "@/lib/format";
+import {
+  categoryName,
+  catalogErrorMessage,
+  titleFromSlug,
+  useGame,
+  useGames,
+  type Game,
+} from "@/lib/games/catalog";
 import { breadcrumbJsonLd, seo, videoGameJsonLd } from "@/lib/seo";
 
 export const Route = createFileRoute("/games/$id")({
-  // An unknown id must not render another game's page: that would create an
-  // unlimited number of duplicate URLs for search engines to index.
-  beforeLoad: ({ params }) => {
-    if (!games.some((g) => g.id === params.id)) throw notFound();
-  },
+  // Document metadata is built before the record arrives, so the title comes from
+  // the URL. It is the same title the API will report, and nothing is claimed
+  // that is not known: no description, no category, no metrics.
   head: ({ params }) => {
-    const g = getGame(params.id);
-    return seo(g.title, g.description, {
+    const title = titleFromSlug(params.id);
+    return seo(title, `${title} on onemore.`, {
       type: "video.other",
       jsonLd: [
-        videoGameJsonLd({
-          id: g.id,
-          title: g.title,
-          description: g.description,
-          category: g.category,
-        }),
+        videoGameJsonLd({ id: params.id, title }),
         breadcrumbJsonLd([
           { name: "Explore", path: "/explore" },
-          { name: g.category, path: `/categories/${g.category.toLowerCase()}` },
-          { name: g.title, path: `/games/${g.id}` },
+          { name: title, path: `/games/${params.id}` },
         ]),
       ],
     });
@@ -41,50 +41,100 @@ export const Route = createFileRoute("/games/$id")({
 
 function GameDetails() {
   const { id } = Route.useParams();
-  const g = getGame(id);
-  const loading = useMockLoad();
+  const state = useGame(id);
+
+  if (state.status === "loading") {
+    return (
+      <Page className="max-w-5xl pb-40 md:pb-12">
+        <PageHeader back title={titleFromSlug(id)} />
+        <Skeleton className="aspect-square w-full md:rounded-2xl" />
+      </Page>
+    );
+  }
+
+  if (state.status === "missing") {
+    return (
+      <Page className="max-w-5xl">
+        <PageHeader back title="Game not found" />
+        <EmptyState
+          title="No such game"
+          body="This game is not in the catalogue. It may not be published, or the link may be wrong."
+          action={
+            <Button asChild variant="secondary">
+              <Link to="/explore">Browse games</Link>
+            </Button>
+          }
+        />
+      </Page>
+    );
+  }
+
+  if (state.status === "error") {
+    return (
+      <Page className="max-w-5xl">
+        <PageHeader back title={titleFromSlug(id)} />
+        <ErrorState
+          title="Couldn't load this game"
+          body={catalogErrorMessage(state.error)}
+          onRetry={state.retry}
+        />
+      </Page>
+    );
+  }
+
+  return <Detail game={state.game} />;
+}
+
+function Detail({ game }: { game: Game }) {
   const [liked, setLiked] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [c, setC] = useState(false);
-  const [s, setS] = useState(false);
+  const [comments, setComments] = useState(false);
+  const [share, setShare] = useState(false);
+
+  const category = categoryName(game);
+  const published = fmtDate(game.publishedAt);
 
   return (
     <Page className="max-w-5xl pb-40 md:pb-12">
-      <PageHeader back title={g.title} />
+      <PageHeader back title={game.title} />
       <div className="md:grid md:grid-cols-[minmax(0,1fr)_340px] md:gap-8">
         <div>
-          {loading ? (
-            <Skeleton className="aspect-square w-full md:rounded-2xl" />
-          ) : (
-            <GameArt
-              id={g.id}
-              className="aspect-square w-full border-glass-border md:rounded-2xl md:border"
-            />
-          )}
+          <GameArt
+            id={game.slug}
+            className="aspect-square w-full border-glass-border md:rounded-2xl md:border"
+          />
           <div className="px-4 pt-4 md:px-0">
-            <div className="flex items-center gap-2">
-              <Link
-                to="/u/$username"
-                params={{ username: g.creator }}
-                className="flex items-center gap-2 text-sm font-medium"
-              >
-                <Avatar name={g.creator} size="sm" />@{g.creator}
-              </Link>
-              <FollowButton />
-            </div>
-            <p className="mt-3 text-muted-foreground">{g.description}</p>
+            {game.isOfficial && (
+              <p className="text-sm font-medium text-muted-foreground">OneMore</p>
+            )}
+            {game.tagline && <p className="mt-1 text-lg font-medium">{game.tagline}</p>}
+            {game.description && <p className="mt-3 text-muted-foreground">{game.description}</p>}
+
+            {/* The three cells the API can actually fill. The prototype's "Plays"
+                and "Avg session" came from fixtures and are gone rather than
+                zeroed: a zero is a measurement, and nothing was measured. */}
             <dl className="mt-4 grid grid-cols-3 gap-2 rounded-xl bg-surface p-3 text-center">
-              {[
-                ["Plays", fmt(g.plays)],
-                ["Avg session", g.avgSession],
-                ["Category", g.category],
-              ].map(([k, v]) => (
-                <div key={k}>
-                  <dt className="text-xs text-muted-foreground">{k}</dt>
-                  <dd className="mt-0.5 text-sm font-semibold tabular">{v}</dd>
+              {(
+                [
+                  ["Category", category ?? "—"],
+                  ["Status", game.playable ? "Playable" : "Not playable yet"],
+                  ["Published", published ?? "—"],
+                ] as const
+              ).map(([label, value]) => (
+                <div key={label}>
+                  <dt className="text-xs text-muted-foreground">{label}</dt>
+                  <dd className="mt-0.5 text-sm font-semibold tabular">{value}</dd>
                 </div>
               ))}
             </dl>
+
+            {game.instructions && (
+              <section className="mt-4 rounded-xl border border-border p-4">
+                <h2 className="text-sm font-semibold">How to play</h2>
+                <p className="mt-1 text-sm text-muted-foreground">{game.instructions}</p>
+              </section>
+            )}
+
             <div className="mt-4 flex gap-2">
               <Button
                 variant="secondary"
@@ -93,11 +143,11 @@ function GameDetails() {
                 onClick={() => setLiked(!liked)}
               >
                 <Heart className={liked ? "fill-primary text-primary" : ""} />
-                {fmt(g.likes + (liked ? 1 : 0))}
+                Like
               </Button>
-              <Button variant="secondary" className="flex-1" onClick={() => setC(true)}>
+              <Button variant="secondary" className="flex-1" onClick={() => setComments(true)}>
                 <MessageCircle />
-                {fmt(g.comments)}
+                Comments
               </Button>
               <Button
                 variant="secondary"
@@ -108,31 +158,50 @@ function GameDetails() {
               >
                 <Bookmark className={saved ? "fill-primary text-primary" : ""} />
               </Button>
-              <Button variant="secondary" size="icon" aria-label="Share" onClick={() => setS(true)}>
+              <Button
+                variant="secondary"
+                size="icon"
+                aria-label="Share"
+                onClick={() => setShare(true)}
+              >
                 <Share2 />
               </Button>
             </div>
           </div>
         </div>
+
         <aside className="md:sticky md:top-8 md:self-start">
           <div className="hidden rounded-2xl border border-border bg-surface p-4 md:block">
-            <p className="text-xs text-muted-foreground">Your best</p>
-            <p className="font-mono text-3xl font-semibold tabular">
-              {g.yourBest ? fmt(g.yourBest) : "—"}
+            <p className="text-xs text-muted-foreground">Availability</p>
+            <p className="flex items-center gap-2 text-lg font-semibold">
+              {game.playable ? (
+                "Playable"
+              ) : (
+                <>
+                  <Clock className="size-4" /> Not playable yet
+                </>
+              )}
             </p>
-            <Button asChild variant="play" size="xl" className="mt-4 w-full">
-              <Link to="/play/$id" params={{ id: g.id }}>
-                <Play className="fill-current" />
-                Play
-              </Link>
-            </Button>
+            {game.playable ? (
+              <Button asChild variant="play" size="xl" className="mt-4 w-full">
+                <Link to="/play/$id" params={{ id: game.slug }}>
+                  <Play className="fill-current" />
+                  Play
+                </Link>
+              </Button>
+            ) : (
+              <p className="mt-3 text-xs text-muted-foreground">
+                This game has no runtime yet, so there is nothing to start. It is listed because it
+                is part of the catalogue.
+              </p>
+            )}
           </div>
           <Section
             title="Top scores"
             action={
               <Link
                 to="/leaderboards/$id"
-                params={{ id: g.id }}
+                params={{ id: game.slug }}
                 className="text-sm text-muted-foreground hover:text-foreground"
               >
                 Full board
@@ -143,26 +212,68 @@ function GameDetails() {
           </Section>
         </aside>
       </div>
-      <Section title="More like this">
-        <div className="no-scrollbar flex gap-3 overflow-x-auto px-4 md:grid md:grid-cols-4 md:px-0">
-          {games
-            .filter((x) => x.id !== g.id)
-            .slice(0, 4)
-            .map((x) => (
-              <GameCard key={x.id} game={x} className="w-36 shrink-0 md:w-auto" />
-            ))}
-        </div>
-      </Section>
+
+      <MoreLikeThis game={game} />
+
       <div className="fixed inset-x-0 bottom-16 z-30 glass border-x-0 border-b-0 p-3 md:hidden">
-        <Button asChild variant="play" size="lg" className="w-full">
-          <Link to="/play/$id" params={{ id: g.id }}>
-            <Play className="fill-current" />
-            Play {g.title}
-          </Link>
-        </Button>
+        {game.playable ? (
+          <Button asChild variant="play" size="lg" className="w-full">
+            <Link to="/play/$id" params={{ id: game.slug }}>
+              <Play className="fill-current" />
+              Play {game.title}
+            </Link>
+          </Button>
+        ) : (
+          <Button variant="secondary" size="lg" className="w-full" disabled>
+            <Clock />
+            Not playable yet
+          </Button>
+        )}
       </div>
-      <CommentsSheet open={c} onOpenChange={setC} count={g.comments} />
-      <ShareSheet open={s} onOpenChange={setS} title={g.title} />
+
+      <CommentsSheet open={comments} onOpenChange={setComments} />
+      <ShareSheet open={share} onOpenChange={setShare} title={game.title} />
     </Page>
+  );
+}
+
+/**
+ * Other games in the same category.
+ *
+ * It comes from the catalogue rather than the page's own game list, so it is
+ * genuinely "more like this" — same category — and not simply whichever four
+ * games happened to follow in a fixture array. A separate component so its
+ * request is only made once a category is known.
+ */
+function MoreLikeThis({ game }: { game: Game }) {
+  const category = game.category?.slug;
+
+  if (!category) return null;
+  return <SameCategory category={category} exclude={game.slug} />;
+}
+
+function SameCategory({ category, exclude }: { category: string; exclude: string }) {
+  const { status, items } = useGames({ category, limit: 5 });
+  const related = items.filter((g) => g.slug !== exclude).slice(0, 4);
+
+  if (status !== "ready") return null;
+
+  return (
+    <Section title="More like this">
+      {related.length === 0 ? (
+        <div className="px-4 md:px-0">
+          <EmptyState
+            title="Nothing else here yet"
+            body="This is the only game in its category so far."
+          />
+        </div>
+      ) : (
+        <div className="no-scrollbar flex gap-3 overflow-x-auto px-4 md:grid md:grid-cols-4 md:px-0">
+          {related.map((other) => (
+            <GameCard key={other.slug} game={other} className="w-36 shrink-0 md:w-auto" />
+          ))}
+        </div>
+      )}
+    </Section>
   );
 }

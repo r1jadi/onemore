@@ -44,7 +44,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { adminNotifications, type AdminNotification } from "@/lib/admin-mock";
-import { fmt } from "@/lib/mock";
+import { fmt } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/admin/notifications")({

@@ -41,7 +41,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { adminComments, type AdminComment } from "@/lib/admin-mock";
-import { fmt, getGame, users } from "@/lib/mock";
+import { fmt } from "@/lib/format";
+import { getGame } from "@/lib/admin-mock";
+import { users } from "@/lib/mock";
 
 export const Route = createFileRoute("/admin/comments")({
   head: () => ({

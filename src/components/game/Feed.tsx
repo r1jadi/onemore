@@ -1,13 +1,38 @@
 import { Link } from "@tanstack/react-router";
 import { Search } from "lucide-react";
 import { FeedItem, FeedSkeleton } from "./FeedItem";
-import { useMockLoad } from "@/components/common";
+import { EmptyState, ErrorState } from "@/components/common";
 import { LogoMark } from "@/components/layout/Logo";
-import type { Game } from "@/lib/mock";
+import { catalogErrorMessage, type Game } from "@/lib/games/catalog";
 import { cn } from "@/lib/utils";
 
-export function Feed({ tab, items }: { tab: "for-you" | "following"; items: Game[] }) {
-  const loading = useMockLoad(600);
+/**
+ * The swipeable feed.
+ *
+ * It takes the games it should show rather than reaching for them itself, so the
+ * screen that owns a query decides what "For You" and "Following" mean. Each state
+ * is drawn explicitly: there is no fallback list, because a feed that quietly
+ * shows something else when the API fails is a feed that lies about what is
+ * popular.
+ */
+export function Feed({
+  tab,
+  items,
+  loading = false,
+  error,
+  onRetry,
+  empty = {
+    title: "Nothing here yet",
+    body: "As soon as games are published they show up in this feed.",
+  },
+}: {
+  tab: "for-you" | "following";
+  items: Game[];
+  loading?: boolean;
+  error?: unknown;
+  onRetry?: () => void;
+  empty?: { title: string; body?: string };
+}) {
   return (
     <div className="relative">
       <div className="pointer-events-none fixed inset-x-0 top-0 z-20 md:left-60 lg:left-64">
@@ -44,7 +69,23 @@ export function Feed({ tab, items }: { tab: "for-you" | "following"; items: Game
         </div>
       </div>
       <div className="no-scrollbar h-dvh snap-y snap-mandatory overflow-y-auto overscroll-contain">
-        {loading ? <FeedSkeleton /> : items.map((g) => <FeedItem key={g.id} game={g} />)}
+        {loading ? (
+          <FeedSkeleton />
+        ) : error ? (
+          <div className="flex h-dvh items-center justify-center">
+            <ErrorState
+              title="Couldn't load the feed"
+              body={catalogErrorMessage(error)}
+              onRetry={onRetry}
+            />
+          </div>
+        ) : items.length === 0 ? (
+          <div className="flex h-dvh items-center justify-center">
+            <EmptyState title={empty.title} body={empty.body} />
+          </div>
+        ) : (
+          items.map((game) => <FeedItem key={game.slug} game={game} />)
+        )}
       </div>
     </div>
   );

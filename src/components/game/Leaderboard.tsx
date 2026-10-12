@@ -1,9 +1,20 @@
-import { Link } from "@tanstack/react-router";
-import { Avatar, ListSkeleton } from "@/components/common";
-import { fmt, leaderboard } from "@/lib/mock";
+import { CircleSlash } from "lucide-react";
+import { Avatar, EmptyState, ListSkeleton } from "@/components/common";
 import { avatarUrl, useProfile } from "@/lib/users/profile";
-import { cn } from "@/lib/utils";
 
+/**
+ * A leaderboard.
+ *
+ * There is no board to draw. A ranking needs recorded scores, and nothing in the
+ * product stores one yet — the sessions and scores services are not implemented,
+ * so `public.scores` is empty. The prototype filled this list with seven invented
+ * players and scores; showing a fabricated ranking is the single most misleading
+ * thing this app could do, because a rank looks like a measurement.
+ *
+ * The row shape is kept so the real board can slot in, and the signed-in row stays
+ * available for it — but it is only drawn when the caller has something real to be
+ * ranked against.
+ */
 export function LeaderboardList({
   limit,
   friends,
@@ -15,38 +26,38 @@ export function LeaderboardList({
   loading?: boolean;
   showMe?: boolean;
 }) {
-  // The signed-in row shows the caller's real identity. It carries no rank or
-  // score: no scores service exists yet, so any number here would be invented.
   const state = useProfile();
   const profile = state.status === "ready" ? state.profile : undefined;
+
   if (loading) return <ListSkeleton rows={limit ?? 7} />;
-  const rows = (
-    friends
-      ? leaderboard.filter((_, i) => i % 2 === 0).map((r, i) => ({ ...r, rank: i + 1 }))
-      : leaderboard
-  ).slice(0, limit);
+
+  // No rows exist yet, so the signed-in row is never drawn: a "You" pinned under
+  // an empty board implies a position that was not computed.
+  const ranks: Array<{ rank: number; username: string }> = [];
+
+  if (ranks.length === 0) {
+    return (
+      <EmptyState
+        icon={CircleSlash}
+        title={friends ? "No scores from people you follow" : "No scores yet"}
+        body="Scores are not recorded yet, so there is no board to rank. This is an empty board, not an empty week."
+      />
+    );
+  }
+
   return (
     <div>
       <ol className="divide-y divide-border">
-        {rows.map((r) => (
-          <li key={r.user} className="enter">
-            <Link
-              to="/u/$username"
-              params={{ username: r.user }}
-              className="flex items-center gap-3 px-4 py-2.5 hover:bg-surface md:rounded-lg md:px-2"
-            >
-              <span
-                className={cn(
-                  "w-6 text-center font-mono text-sm tabular",
-                  r.rank <= 3 ? "font-semibold text-foreground" : "text-muted-foreground",
-                )}
-              >
-                {r.rank}
-              </span>
-              <Avatar name={r.user} size="sm" />
-              <span className="flex-1 truncate text-sm">@{r.user}</span>
-              <span className="font-mono text-sm font-semibold tabular">{fmt(r.score)}</span>
-            </Link>
+        {ranks.slice(0, limit).map((row) => (
+          <li
+            key={row.username}
+            className="enter flex items-center gap-3 px-4 py-2.5 md:rounded-lg md:px-2"
+          >
+            <span className="w-6 text-center font-mono text-sm tabular text-muted-foreground">
+              {row.rank}
+            </span>
+            <Avatar name={row.username} size="sm" />
+            <span className="flex-1 truncate text-sm">@{row.username}</span>
           </li>
         ))}
       </ol>

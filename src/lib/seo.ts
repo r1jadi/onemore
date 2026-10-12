@@ -195,18 +195,25 @@ export function organizationJsonLd() {
   };
 }
 
-/** Structured data for a game detail page. */
+/**
+ * Structured data for a game detail page.
+ *
+ * `description` and `category` are optional because they come from the catalogue
+ * API, which document metadata is built before: a route's `head` has the URL, not
+ * the record. An omitted property is better than a guessed one — schema.org reads
+ * a description as the game's own text.
+ */
 export function videoGameJsonLd(game: {
   id: string;
   title: string;
-  description: string;
+  description?: string;
   category?: string;
 }) {
   return {
     "@context": "https://schema.org",
     "@type": "VideoGame",
     name: game.title,
-    description: game.description,
+    ...(game.description ? { description: game.description } : {}),
     url: absoluteUrl(`/games/${game.id}`),
     applicationCategory: "Game",
     gamePlatform: "Web browser",

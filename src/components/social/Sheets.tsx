@@ -12,7 +12,8 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
-import { comments as seed, fmt, users, type Comment } from "@/lib/mock";
+import { fmt } from "@/lib/format";
+import { comments as seed, users, type Comment } from "@/lib/mock";
 import { cn } from "@/lib/utils";
 
 function CommentRow({
@@ -86,7 +87,12 @@ export function CommentsSheet({
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
-  count: number;
+  /**
+   * The number of comments, when something real can say. Omitted by every
+   * catalogue screen: no service stores comments yet, so the header falls back to
+   * the bare word rather than a count nobody measured.
+   */
+  count?: number;
 }) {
   const [list, setList] = useState(seed);
   const [text, setText] = useState("");
@@ -125,7 +131,9 @@ export function CommentsSheet({
         className="mx-auto flex h-[78dvh] max-w-xl flex-col rounded-t-2xl border-glass-border p-0"
       >
         <SheetHeader className="border-b border-border px-4 py-3 text-center">
-          <SheetTitle className="text-sm">{fmt(count)} comments</SheetTitle>
+          <SheetTitle className="text-sm">
+            {count === undefined ? "Comments" : `${fmt(count)} comments`}
+          </SheetTitle>
           <SheetDescription className="sr-only">Comments on this game</SheetDescription>
         </SheetHeader>
         <div className="flex-1 overflow-y-auto px-4">

@@ -2,12 +2,12 @@
 
 ## The four environments
 
-| Environment | Purpose | Web | API | Database |
-| --- | --- | --- | --- | --- |
-| **development** | a developer's machine | `npm run dev` on `:8081` | `go run ./gateway/cmd/gateway` on `:8080` | local Supabase (`supabase start`) or the Docker harness |
-| **preview** | one per pull request | Vercel preview | Vercel preview (same deployment, `development`-like config) | staging project (read-only data) |
-| **staging** | pre-production verification | Vercel preview of `main` | same deployment as production, separate config | separate Supabase project |
-| **production** | users | `https://onemorestartup.vercel.app` | `https://onemorestartup.vercel.app/api/v1` (a service of the same Vercel project) | hosted Supabase project |
+| Environment     | Purpose                     | Web                                 | API                                                                               | Database                                                |
+| --------------- | --------------------------- | ----------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| **development** | a developer's machine       | `npm run dev` on `:8081`            | `go run ./gateway/cmd/gateway` on `:8080`                                         | local Supabase (`supabase start`) or the Docker harness |
+| **preview**     | one per pull request        | Vercel preview                      | Vercel preview (same deployment, `development`-like config)                       | staging project (read-only data)                        |
+| **staging**     | pre-production verification | Vercel preview of `main`            | same deployment as production, separate config                                    | separate Supabase project                               |
+| **production**  | users                       | `https://onemorestartup.vercel.app` | `https://onemorestartup.vercel.app/api/v1` (a service of the same Vercel project) | hosted Supabase project                                 |
 
 `ENVIRONMENT` drives the hardening rules: a wildcard CORS origin, an empty CORS
 allowlist, missing auth material, a non-HTTPS JWKS URL and a disabled rate limiter
@@ -19,12 +19,12 @@ Two classes, and a value never moves between them.
 
 ### Public — safe in the browser bundle
 
-| Variable | Meaning |
-| --- | --- |
-| `VITE_SUPABASE_URL` | Supabase project URL |
+| Variable                        | Meaning                                                                                                             |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `VITE_SUPABASE_URL`             | Supabase project URL                                                                                                |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | Publishable key (`sb_publishable_…`), the current name for the anon key. RLS is the security boundary, not secrecy. |
-| `VITE_PUBLIC_SITE_URL` | Canonical origin for SEO |
-| `VITE_API_BASE_URL` | API base, empty means same-origin `/api/v1` |
+| `VITE_PUBLIC_SITE_URL`          | Canonical origin for SEO                                                                                            |
+| `VITE_API_BASE_URL`             | API base, empty means same-origin `/api/v1`                                                                         |
 
 Supabase is retiring the legacy `anon` and `service_role` keys in favour of
 **publishable** (`sb_publishable_…`) and **secret** (`sb_secret_…`) keys — see
@@ -35,15 +35,15 @@ is updated before another. `VITE_SUPABASE_ANON_KEY` is still read as a fallback 
 
 ### Server-only — never in a `VITE_` variable
 
-| Variable | Read by | Why it is secret |
-| --- | --- | --- |
-| `SUPABASE_SECRET_KEY` | web SSR, Go services (reserved — no code reads it yet) | bypasses RLS; the current name for the service role key |
-| `SUPABASE_JWT_SECRET` | Go services | forges tokens in legacy HS256 projects |
-| `SUPABASE_JWKS_URL`, `SUPABASE_URL`, `SUPABASE_JWT_AUDIENCE`, `SUPABASE_JWT_ISSUER` | Go services | project metadata, not secret, but server-side |
-| `SUPABASE_PUBLISHABLE_KEY` | the auth and users services | the browser is given the same value, so it is not secret — but only the server needs to make Auth API and Data API calls |
-| `CORS_ALLOWED_ORIGINS`, `RATE_LIMIT_*`, `LOG_*`, `HTTP_ADDR`, `ENVIRONMENT`, `SERVICE_NAME` | Go services | service configuration |
-| `UPSTREAM_*_URL` | gateway | internal addresses |
-| `RAIACCEPT_*` | payments service (later) | payment credentials |
+| Variable                                                                                    | Read by                                                | Why it is secret                                                                                                         |
+| ------------------------------------------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `SUPABASE_SECRET_KEY`                                                                       | web SSR, Go services (reserved — no code reads it yet) | bypasses RLS; the current name for the service role key                                                                  |
+| `SUPABASE_JWT_SECRET`                                                                       | Go services                                            | forges tokens in legacy HS256 projects                                                                                   |
+| `SUPABASE_JWKS_URL`, `SUPABASE_URL`, `SUPABASE_JWT_AUDIENCE`, `SUPABASE_JWT_ISSUER`         | Go services                                            | project metadata, not secret, but server-side                                                                            |
+| `SUPABASE_PUBLISHABLE_KEY`                                                                  | the auth and users services                            | the browser is given the same value, so it is not secret — but only the server needs to make Auth API and Data API calls |
+| `CORS_ALLOWED_ORIGINS`, `RATE_LIMIT_*`, `LOG_*`, `HTTP_ADDR`, `ENVIRONMENT`, `SERVICE_NAME` | Go services                                            | service configuration                                                                                                    |
+| `UPSTREAM_*_URL`                                                                            | gateway                                                | internal addresses                                                                                                       |
+| `RAIACCEPT_*`                                                                               | payments service (later)                               | payment credentials                                                                                                      |
 
 `Vite` inlines every `VITE_`-prefixed value into the client bundle. If a secret
 ever needs a `VITE_` name, the design is wrong — put it behind the API instead.
@@ -55,11 +55,11 @@ leaked — see [security/env-and-secrets.md](../security/env-and-secrets.md).
 
 ## Where values are set
 
-| Environment | Mechanism |
-| --- | --- |
-| development | `.env.local` (web), shell environment or a `direnv`-style loader (Go) |
+| Environment                        | Mechanism                                                                                                                                                                                                                                                                                                    |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| development                        | `.env.local` (web), shell environment or a `direnv`-style loader (Go)                                                                                                                                                                                                                                        |
 | preview / production (web and API) | Vercel → Project → Settings → Environment Variables, scoped per environment. Variables are project-scoped, so the web service and the API service read the same set; only `VITE_*` names reach the browser bundle. The required set and exact values are in [deployment/vercel.md](../deployment/vercel.md). |
-| any other API host | the platform's secret store (e.g. a mounted env file or container secrets) — never a committed file |
+| any other API host                 | the platform's secret store (e.g. a mounted env file or container secrets) — never a committed file                                                                                                                                                                                                          |
 
 Vercel scoping matters: a preview deployment must not receive production
 secrets. Set public values for all environments and secrets only for Production.
@@ -67,21 +67,21 @@ secrets. Set public values for all environments and secrets only for Production.
 ## How to find each value
 
 The dashboard paths below are the ones that exist today; Supabase has moved keys
-from *Settings → API* to *Settings → API Keys*, and both the Connect dialog and
+from _Settings → API_ to _Settings → API Keys_, and both the Connect dialog and
 the API Keys page show the same values.
 
 ### Supabase — the same source for both the web and the API
 
-| Value | Where a human gets it |
-| --- | --- |
-| `VITE_SUPABASE_URL` / `SUPABASE_URL` | Dashboard → **Project Settings → API Keys → Project URL**, or the project's **Connect** dialog. Self-hosted or local: `supabase status` → *APIs* → Project URL. |
-| `VITE_SUPABASE_PUBLISHABLE_KEY` | Dashboard → **Project Settings → API Keys → Publishable and secret API keys** tab → the publishable key (`sb_publishable_…`). If the tab offers *Create new API keys*, create them; the anon key keeps working meanwhile. Local: `supabase status` → *Authentication Keys* → **Publishable**. |
-| `SUPABASE_SECRET_KEY` | Same tab → **secret** key (`sb_secret_…`); create one per backend component so a leak forces a single rotation. Local: `supabase status` → *Authentication Keys* → **Secret**. |
-| `SUPABASE_PUBLISHABLE_KEY` | The same publishable key as `VITE_SUPABASE_PUBLISHABLE_KEY` — one value, two names, because the browser reads the `VITE_` copy and the auth service reads this one. |
-| `SUPABASE_JWKS_URL` | Leave empty. `config.go` derives `<SUPABASE_URL>/auth/v1/.well-known/jwks.json`, which is public — paste it into a browser to confirm it returns JSON. |
-| `SUPABASE_JWT_ISSUER` | Leave empty; derived as `<SUPABASE_URL>/auth/v1`. |
-| `SUPABASE_JWT_AUDIENCE` | Fixed: `authenticated`. |
-| `SUPABASE_JWT_SECRET` | **Legacy only.** Dashboard → **Project Settings → API Keys → JWT signing keys**; *Migrate JWT secret* imports the old secret into the signing-keys system and creates a rotatable ES256 key. `supabase gen signing-key --algorithm ES256` generates a key you can import instead. |
+| Value                                | Where a human gets it                                                                                                                                                                                                                                                                         |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `VITE_SUPABASE_URL` / `SUPABASE_URL` | Dashboard → **Project Settings → API Keys → Project URL**, or the project's **Connect** dialog. Self-hosted or local: `supabase status` → _APIs_ → Project URL.                                                                                                                               |
+| `VITE_SUPABASE_PUBLISHABLE_KEY`      | Dashboard → **Project Settings → API Keys → Publishable and secret API keys** tab → the publishable key (`sb_publishable_…`). If the tab offers _Create new API keys_, create them; the anon key keeps working meanwhile. Local: `supabase status` → _Authentication Keys_ → **Publishable**. |
+| `SUPABASE_SECRET_KEY`                | Same tab → **secret** key (`sb_secret_…`); create one per backend component so a leak forces a single rotation. Local: `supabase status` → _Authentication Keys_ → **Secret**.                                                                                                                |
+| `SUPABASE_PUBLISHABLE_KEY`           | The same publishable key as `VITE_SUPABASE_PUBLISHABLE_KEY` — one value, two names, because the browser reads the `VITE_` copy and the auth service reads this one.                                                                                                                           |
+| `SUPABASE_JWKS_URL`                  | Leave empty. `config.go` derives `<SUPABASE_URL>/auth/v1/.well-known/jwks.json`, which is public — paste it into a browser to confirm it returns JSON.                                                                                                                                        |
+| `SUPABASE_JWT_ISSUER`                | Leave empty; derived as `<SUPABASE_URL>/auth/v1`.                                                                                                                                                                                                                                             |
+| `SUPABASE_JWT_AUDIENCE`              | Fixed: `authenticated`.                                                                                                                                                                                                                                                                       |
+| `SUPABASE_JWT_SECRET`                | **Legacy only.** Dashboard → **Project Settings → API Keys → JWT signing keys**; _Migrate JWT secret_ imports the old secret into the signing-keys system and creates a rotatable ES256 key. `supabase gen signing-key --algorithm ES256` generates a key you can import instead.             |
 
 `supabase status -o env` prints the local values as `KEY=value` lines
 (`PUBLISHABLE_KEY`, `SECRET_KEY`, `API_URL`, `DB_URL`); `npm run env:supabase`
@@ -90,20 +90,20 @@ onto the names in this repository.
 
 ### Everything else
 
-| Value | Where a human gets it |
-| --- | --- |
-| `VITE_PUBLIC_SITE_URL` | The origin the app is actually served from: the custom domain, otherwise the Vercel production domain. |
-| `VITE_API_BASE_URL` | The deployed gateway's origin: `https://onemorestartup.vercel.app/api/v1` in production, `http://localhost:8080/api/v1` locally. Empty means same-origin `/api/v1`, which is also correct in production now that the gateway is part of the same deployment. |
-| `ENVIRONMENT` | Chosen, not found: `development` locally, `production` on Vercel, `staging` on a staging host. It selects the hardening rules in `config.Validate`. |
-| `SERVICE_NAME` | Chosen: the service being run (`gateway`, `auth`, …), used in logs. |
-| `HTTP_ADDR` | Chosen: the port the service listens on. Set `:8080` locally; on Vercel leave it unset, because the platform injects `PORT` and `config.Load` prefers `HTTP_ADDR`, then `PORT_HTTP`, then `PORT`. |
-| `LOG_LEVEL`, `LOG_FORMAT` | Chosen: `debug`/`info`/`warn`/`error` and `json`/`text`. |
-| `CORS_ALLOWED_ORIGINS` | The exact browser origins the web app is served from — dev server, Vercel production and preview domains. Comma-separated, no wildcard outside development. |
-| `RATE_LIMIT_*` | Tuned from observed traffic, not discovered. Defaults suit a single instance; raise them deliberately. |
-| `AUTH_RATE_LIMIT_*` | The credential budget for the auth endpoints, metered per client and per account. Defaults to 10/minute with a burst of 5, deliberately far tighter than `RATE_LIMIT_*` because every attempt can verify a password. |
-| `UPSTREAM_*_URL` | The private address of each deployed service. Unset means the gateway answers `503` for that route group, which is the intended state before an API host exists. `UPSTREAM_AUTH_URL` is the exception on Vercel: a service binding generates it into the running gateway, so it is read but never set — see [deployment/vercel.md](../deployment/vercel.md). |
-| `RAIACCEPT_*` | The RaiAccept merchant dashboard, once payments start. Not read by any service today. |
-| Database password / connection string | Supabase dashboard → **Project Settings → Database → Connection string** (or `supabase status` → *Database* → URL locally). Nothing in this repository stores it: migrations run through the CLI, which keeps its own session. |
+| Value                                 | Where a human gets it                                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `VITE_PUBLIC_SITE_URL`                | The origin the app is actually served from: the custom domain, otherwise the Vercel production domain.                                                                                                                                                                                                                                                                                                             |
+| `VITE_API_BASE_URL`                   | The deployed gateway's origin: `https://onemorestartup.vercel.app/api/v1` in production, `http://localhost:8080/api/v1` locally. Empty means same-origin `/api/v1`, which is also correct in production now that the gateway is part of the same deployment.                                                                                                                                                       |
+| `ENVIRONMENT`                         | Chosen, not found: `development` locally, `production` on Vercel, `staging` on a staging host. It selects the hardening rules in `config.Validate`.                                                                                                                                                                                                                                                                |
+| `SERVICE_NAME`                        | Chosen: the service being run (`gateway`, `auth`, …), used in logs.                                                                                                                                                                                                                                                                                                                                                |
+| `HTTP_ADDR`                           | Chosen: the port the service listens on. Set `:8080` locally; on Vercel leave it unset, because the platform injects `PORT` and `config.Load` prefers `HTTP_ADDR`, then `PORT_HTTP`, then `PORT`.                                                                                                                                                                                                                  |
+| `LOG_LEVEL`, `LOG_FORMAT`             | Chosen: `debug`/`info`/`warn`/`error` and `json`/`text`.                                                                                                                                                                                                                                                                                                                                                           |
+| `CORS_ALLOWED_ORIGINS`                | The exact browser origins the web app is served from — dev server, Vercel production and preview domains. Comma-separated, no wildcard outside development.                                                                                                                                                                                                                                                        |
+| `RATE_LIMIT_*`                        | Tuned from observed traffic, not discovered. Defaults suit a single instance; raise them deliberately.                                                                                                                                                                                                                                                                                                             |
+| `AUTH_RATE_LIMIT_*`                   | The credential budget for the auth endpoints, metered per client and per account. Defaults to 10/minute with a burst of 5, deliberately far tighter than `RATE_LIMIT_*` because every attempt can verify a password.                                                                                                                                                                                               |
+| `UPSTREAM_*_URL`                      | The private address of each deployed service. Unset means the gateway answers `503` for that route group, which is the intended state before an API host exists. On Vercel, `UPSTREAM_AUTH_URL`, `UPSTREAM_USERS_URL` and `UPSTREAM_GAMES_URL` are the exception: a service binding generates each into the running gateway, so they are read but never set — see [deployment/vercel.md](../deployment/vercel.md). |
+| `RAIACCEPT_*`                         | The RaiAccept merchant dashboard, once payments start. Not read by any service today.                                                                                                                                                                                                                                                                                                                              |
+| Database password / connection string | Supabase dashboard → **Project Settings → Database → Connection string** (or `supabase status` → _Database_ → URL locally). Nothing in this repository stores it: migrations run through the CLI, which keeps its own session.                                                                                                                                                                                     |
 
 ## Local API configuration
 
@@ -134,11 +134,13 @@ the services themselves:
 SERVICE_NAME=auth  HTTP_ADDR=:8082 go run ./auth/cmd/auth
 SERVICE_NAME=users HTTP_ADDR=:8083 go run ./users/cmd/users
 UPSTREAM_AUTH_URL=http://localhost:8082 UPSTREAM_USERS_URL=http://localhost:8083 \
+UPSTREAM_GAMES_URL=http://localhost:8084 \
   SERVICE_NAME=gateway HTTP_ADDR=:8080 go run ./gateway/cmd/gateway
 ```
 
-The gateway proxies `/api/v1/auth/*` to `UPSTREAM_AUTH_URL` and `/api/v1/users/*`
-to `UPSTREAM_USERS_URL`. Locally those values are set by hand; on Vercel the same
+The gateway proxies `/api/v1/auth/*` to `UPSTREAM_AUTH_URL`, `/api/v1/users/*` to
+`UPSTREAM_USERS_URL` and `/api/v1/games/*` (plus `/api/v1/categories`) to
+`UPSTREAM_GAMES_URL`. Locally those values are set by hand; on Vercel the same
 variables are generated by the service bindings in `vercel.json`, so the deployed
 gateway reaches the deployed services with no fixed address. `services/auth/README.md`
 and `services/users/README.md` list the endpoints and what each one calls at
@@ -205,8 +207,8 @@ dashboard access:
    outstanding is `SUPABASE_PUBLISHABLE_KEY` next to `SUPABASE_URL`, set for
    whichever environment is being tested so `auth` can reach Supabase Auth and
    `users` can reach the Data API. Until they are set each group answers `503`
-   **from its own service** — *"This API is not available in this environment
-   yet."* is the different fault of a missing binding — and the web app reports the
+   **from its own service** — _"This API is not available in this environment
+   yet."_ is the different fault of a missing binding — and the web app reports the
    failure instead of pretending to sign anyone in.
 6. **Avatar uploads depend on browser-visible Supabase configuration.** A profile
    picture is uploaded from the browser straight to the `avatars` bucket with the

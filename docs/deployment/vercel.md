@@ -4,29 +4,29 @@ One Vercel project serves the whole product on one domain: the TanStack Start we
 app, the Go API gateway, the Go auth service and the Go users service. There is no
 second host and no `api.` subdomain.
 
-| | |
-| --- | --- |
-| Project | `onemorestartup` → `https://onemorestartup.vercel.app` |
-| Configuration | [`vercel.json`](../../vercel.json) (services + rewrites + two service bindings) |
-| Web service | `web` — repository root, framework `tanstack-start-lovable` (TanStack Start + Vite, SSR through Nitro) |
-| API service | `api` — **container image**, `Dockerfile.vercel` at the repository root; this is the Go gateway |
-| Auth service | `auth` — `services/`, framework `go`, entrypoint `services/cmd/server/main.go` |
-| Users service | `users` — `services/`, framework `go`, entrypoint `services/cmd/api/main.go` |
-| Reachability | `auth` and `users` are internal: no rewrite targets either, so only the gateway can reach them |
-| Local API | `http://localhost:8080/api/v1` (`go run ./gateway/cmd/gateway`, `HTTP_ADDR=:8080`) |
-| Production API | `https://onemorestartup.vercel.app/api/v1` |
-| Production auth | `https://onemorestartup.vercel.app/api/v1/auth/*` |
-| Production profile | `https://onemorestartup.vercel.app/api/v1/users/me` |
-| Health | `https://onemorestartup.vercel.app/api/v1/health` |
+|                    |                                                                                                        |
+| ------------------ | ------------------------------------------------------------------------------------------------------ |
+| Project            | `onemorestartup` → `https://onemorestartup.vercel.app`                                                 |
+| Configuration      | [`vercel.json`](../../vercel.json) (services + rewrites + two service bindings)                        |
+| Web service        | `web` — repository root, framework `tanstack-start-lovable` (TanStack Start + Vite, SSR through Nitro) |
+| API service        | `api` — **container image**, `Dockerfile.vercel` at the repository root; this is the Go gateway        |
+| Auth service       | `auth` — `services/`, framework `go`, entrypoint `services/cmd/server/main.go`                         |
+| Users service      | `users` — `services/`, framework `go`, entrypoint `services/cmd/api/main.go`                           |
+| Reachability       | `auth` and `users` are internal: no rewrite targets either, so only the gateway can reach them         |
+| Local API          | `http://localhost:8080/api/v1` (`go run ./gateway/cmd/gateway`, `HTTP_ADDR=:8080`)                     |
+| Production API     | `https://onemorestartup.vercel.app/api/v1`                                                             |
+| Production auth    | `https://onemorestartup.vercel.app/api/v1/auth/*`                                                      |
+| Production profile | `https://onemorestartup.vercel.app/api/v1/users/me`                                                    |
+| Health             | `https://onemorestartup.vercel.app/api/v1/health`                                                      |
 
 ## The four services
 
-| Service | Root | Built as | Public? |
-| --- | --- | --- | --- |
-| `web` | `./` | Node (TanStack Start preset) | **Yes** — the catch-all rewrite |
-| `api` | `./` | Custom container image (`Dockerfile.vercel`) | **Yes** — `/api/v1`, `/healthz`, `/readyz` |
-| `auth` | `services/` | Vercel Go framework preset | **No** — internal only |
-| `users` | `services/` | Vercel Go framework preset | **No** — internal only |
+| Service | Root        | Built as                                     | Public?                                    |
+| ------- | ----------- | -------------------------------------------- | ------------------------------------------ |
+| `web`   | `./`        | Node (TanStack Start preset)                 | **Yes** — the catch-all rewrite            |
+| `api`   | `./`        | Custom container image (`Dockerfile.vercel`) | **Yes** — `/api/v1`, `/healthz`, `/readyz` |
+| `auth`  | `services/` | Vercel Go framework preset                   | **No** — internal only                     |
+| `users` | `services/` | Vercel Go framework preset                   | **No** — internal only                     |
 
 A service is internal by default and only becomes routable if a top-level rewrite
 targets it. `web` and `api` have rewrites; `auth` and `users` do not, and that is
@@ -42,20 +42,20 @@ the preset's fixed entrypoint names they occupy — see
 ## Why Vercel Services
 
 Vercel builds one project as **services** when the project's framework preset is
-*Services* **and** `vercel.json` contains a `services` key. All four services
+_Services_ **and** `vercel.json` contains a `services` key. All four services
 share one domain, one firewall, one set of environment variables and one public
 routing table.
 
 The alternatives were rejected on purpose:
 
-* **A second Vercel project** (or Fly/Render/Railway) for the API would create a
+- **A second Vercel project** (or Fly/Render/Railway) for the API would create a
   second public surface, a second CORS problem and a second thing to keep in
   sync with this repository.
-* **`api/*.go` serverless functions** are Vercel's other Go path. They expect a
+- **`api/*.go` serverless functions** are Vercel's other Go path. They expect a
   `go.mod` at the project root and one `http.HandlerFunc` per file, which would
   mean a shim around the router instead of the gateway that already exists — and
   they are not part of what a Nitro build emits.
-* **A public rewrite into `auth`.** Routing `/api/v1/auth/*` straight at the auth
+- **A public rewrite into `auth`.** Routing `/api/v1/auth/*` straight at the auth
   service would bypass the gateway's CORS and rate-limiting layer and duplicate
   the public API surface across two services. It is also unnecessary: the binding
   exists so the gateway can reach `auth` without either of them being public.
@@ -79,13 +79,13 @@ the caller, so a callee needs no binding of its own.
 
 Two details about that container are load-bearing and were measured, not assumed:
 
-* **The file name must be exactly `Dockerfile.vercel`.** Vercel auto-detects
+- **The file name must be exactly `Dockerfile.vercel`.** Vercel auto-detects
   `Dockerfile.vercel` or `Containerfile.vercel` at the service root. A
   second, explicitly named entrypoint file (`Dockerfile.api.vercel`) was not
   detected at all in testing — the container service silently disappeared from
   the detected topology — so there is one container and one
   `Dockerfile.vercel`.
-* **The build context is the service root**, which is why `api` has
+- **The build context is the service root**, which is why `api` has
   `"root": "./"`. `services/go.mod` replaces the platform module with a relative
   path (`../packages/go/platform`), so the image has to carry both Go modules and
   the context has to be the whole repository. `.dockerignore` keeps that context
@@ -101,12 +101,13 @@ port.
 
 ## How the gateway finds the auth and users services
 
-`api` declares two service bindings, one per callee:
+`api` declares one service binding per callee:
 
 ```json
 "bindings": [
   { "type": "service", "service": "auth",  "format": "url", "env": "UPSTREAM_AUTH_URL" },
-  { "type": "service", "service": "users", "format": "url", "env": "UPSTREAM_USERS_URL" }
+  { "type": "service", "service": "users", "format": "url", "env": "UPSTREAM_USERS_URL" },
+  { "type": "service", "service": "games", "format": "url", "env": "UPSTREAM_GAMES_URL" }
 ]
 ```
 
@@ -114,17 +115,18 @@ Vercel generates the value of each variable and injects it into the `api` servic
 at runtime. They are **deployment-aware**: a preview deployment's gateway reaches
 that same preview deployment's services, so no fixed hostname is ever referenced.
 `config.loadUpstreams` then reads them like any other upstream
-(`UPSTREAM_AUTH_URL`, `UPSTREAM_USERS_URL`), trims a trailing slash, and the proxy
-replaces the scheme and host while keeping the original request path.
+(`UPSTREAM_AUTH_URL`, `UPSTREAM_USERS_URL`, `UPSTREAM_GAMES_URL`), trims a trailing
+slash, and the proxy replaces the scheme and host while keeping the original
+request path.
 
 Two consequences worth stating plainly:
 
-* **Do not set `UPSTREAM_AUTH_URL` or `UPSTREAM_USERS_URL` in the dashboard.** A
-  project-level value is not deployment-aware and would be the value the gateway
-  actually used instead of the binding's. The variables are listed in
-  `.env.example` because a local shell sets them, not because a deployment sets
-  them.
-* **A binding grants reachability, not authorization.** Vercel's documentation is
+- **Do not set `UPSTREAM_AUTH_URL`, `UPSTREAM_USERS_URL` or `UPSTREAM_GAMES_URL`
+  in the dashboard.** A project-level value is not deployment-aware and would be
+  the value the gateway actually used instead of the binding's. The variables are
+  listed in `.env.example` because a local shell sets them, not because a
+  deployment sets them.
+- **A binding grants reachability, not authorization.** Vercel's documentation is
   explicit that a binding "does not authenticate or authorize the call". Both
   services verify the caller's access token themselves, against the project's
   JWKS, for every authenticated endpoint.
@@ -158,16 +160,17 @@ That is the only reason the users service is reached through a file called
 `cmd/api`: the slot name is Vercel's fixed list, not a description of what the
 service does. The mapping follows what each service needs:
 
-| Service | Entrypoint | Why that one |
-| --- | --- | --- |
-| `auth` | `services/cmd/server/main.go` | Built by the Go preset, so it needs one of the three names |
-| `users` | `services/cmd/api/main.go` | Also built by the Go preset, so it takes the remaining name |
-| The gateway | `services/gateway/cmd/gateway` | Built by `Dockerfile.vercel`, which has no naming rule to satisfy, so its own command is used |
+| Service     | Entrypoint                     | Why that one                                                                                                                                  |
+| ----------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auth`      | `services/cmd/server/main.go`  | Built by the Go preset, so it needs one of the three names                                                                                    |
+| `users`     | `services/cmd/api/main.go`     | Also built by the Go preset, so it takes the remaining name                                                                                   |
+| `games`     | `services/main.go`             | The Go preset's third and last name. It sits at the module root because that is where the preset looks; the file is a slot, not a description |
+| The gateway | `services/gateway/cmd/gateway` | Built by `Dockerfile.vercel`, which has no naming rule to satisfy, so its own command is used                                                 |
 
-All three run the same `servicekit.MustRun(<service>.Options())` as their local
+All four run the same `servicekit.MustRun(<service>.Options())` as their local
 `cmd/<name>` binary, so no entrypoint is a second implementation:
-`services/users/cmd/users`, `services/auth/cmd/auth` and
-`services/gateway/cmd/gateway` are the local shells for the same wiring.
+`services/users/cmd/users`, `services/auth/cmd/auth`, `services/games/cmd/games`
+and `services/gateway/cmd/gateway` are the local shells for the same wiring.
 
 ## Routing
 
@@ -175,15 +178,16 @@ All three run the same `servicekit.MustRun(<service>.Options())` as their local
 order, and routing into a service is final: a request routed to the API service
 never falls back to the web app, whatever path it is.
 
-| Request | Service | Notes |
-| --- | --- | --- |
-| `/api/v1/health` | `api` | Liveness of the gateway; no auth, no dependency checks |
-| `/api/v1` | `api` | Version discovery |
-| `/api/v1/auth/…` | `api` → `auth` | The gateway proxies it over the binding to the deployed auth service |
-| `/api/v1/users/…` | `api` → `users` | The same, over the users binding — `/api/v1/users/me` is the profile |
-| `/api/v1/<other group>/…` | `api` | The gateway proxies a group only when its `UPSTREAM_<SERVICE>_URL` is set; otherwise `503` |
-| `/healthz`, `/readyz` | `api` | The Go probes, so they stay usable in production |
-| everything else | `web` | `/`, `/explore`, `/games/…`, `/categories/…`, `/profile/…`, `/settings`, assets, sitemap |
+| Request                                 | Service         | Notes                                                                                      |
+| --------------------------------------- | --------------- | ------------------------------------------------------------------------------------------ |
+| `/api/v1/health`                        | `api`           | Liveness of the gateway; no auth, no dependency checks                                     |
+| `/api/v1`                               | `api`           | Version discovery                                                                          |
+| `/api/v1/auth/…`                        | `api` → `auth`  | The gateway proxies it over the binding to the deployed auth service                       |
+| `/api/v1/users/…`                       | `api` → `users` | The same, over the users binding — `/api/v1/users/me` is the profile                       |
+| `/api/v1/games/…`, `/api/v1/categories` | `api` → `games` | The same, over the games binding — the public catalogue                                    |
+| `/api/v1/<other group>/…`               | `api`           | The gateway proxies a group only when its `UPSTREAM_<SERVICE>_URL` is set; otherwise `503` |
+| `/healthz`, `/readyz`                   | `api`           | The Go probes, so they stay usable in production                                           |
+| everything else                         | `web`           | `/`, `/explore`, `/games/…`, `/categories/…`, `/profile/…`, `/settings`, assets, sitemap   |
 
 A service receives the **original** request path (`/api/v1/auth/sign-in`, not
 `/auth/sign-in`), which is why both the gateway's own routes and the auth
@@ -194,11 +198,11 @@ Go.
 
 Three routes, two purposes, and none of them needs Supabase:
 
-| Route | Purpose | Answers |
-| --- | --- | --- |
-| `GET /api/v1/health` | The published liveness probe, for deployments and uptime checks | `200 {"status":"ok","version":"…"}`; `503 {"status":"draining"}` while shutting down |
-| `GET /healthz` | The same liveness signal for orchestrators, unversioned, plain text | `200 ok` |
-| `GET /readyz` | **Readiness**: runs the registered dependency checks | `200 {"status":"ready","checks":…}` or `503 {"status":"not_ready",…}` |
+| Route                | Purpose                                                             | Answers                                                                              |
+| -------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `GET /api/v1/health` | The published liveness probe, for deployments and uptime checks     | `200 {"status":"ok","version":"…"}`; `503 {"status":"draining"}` while shutting down |
+| `GET /healthz`       | The same liveness signal for orchestrators, unversioned, plain text | `200 ok`                                                                             |
+| `GET /readyz`        | **Readiness**: runs the registered dependency checks                | `200 {"status":"ready","checks":…}` or `503 {"status":"not_ready",…}`                |
 
 `/api/v1/health` verifies no token, opens no database connection and calls no
 upstream, so it stays `200` while every backend service is still unimplemented —
@@ -218,12 +222,12 @@ scopes variables per environment; the values below are for **Production**.
 
 ### Public — compiled into the browser bundle (`VITE_` prefix)
 
-| Name | Production value |
-| --- | --- |
-| `VITE_SUPABASE_URL` | `https://<project-ref>.supabase.co` |
-| `VITE_SUPABASE_PUBLISHABLE_KEY` | the publishable key (`sb_publishable_…`) |
-| `VITE_PUBLIC_SITE_URL` | `https://onemorestartup.vercel.app` |
-| `VITE_API_BASE_URL` | `https://onemorestartup.vercel.app/api/v1` |
+| Name                            | Production value                           |
+| ------------------------------- | ------------------------------------------ |
+| `VITE_SUPABASE_URL`             | `https://<project-ref>.supabase.co`        |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | the publishable key (`sb_publishable_…`)   |
+| `VITE_PUBLIC_SITE_URL`          | `https://onemorestartup.vercel.app`        |
+| `VITE_API_BASE_URL`             | `https://onemorestartup.vercel.app/api/v1` |
 
 `VITE_API_BASE_URL` is the gateway's origin. It is the same origin as the app, so
 the browser calls it without CORS preflights; the absolute value is used so the
@@ -234,16 +238,16 @@ reads the variable and falls back to same-origin `/api/v1`.
 
 ### Server-only — never a `VITE_` name
 
-| Name | Production value | Why |
-| --- | --- | --- |
-| `ENVIRONMENT` | `production` | Selects `config.Validate`'s hardening rules |
-| `NITRO_PRESET` | `vercel` | The web service: `@lovable.dev/vite-tanstack-config` defaults Nitro to a Cloudflare worker, which is not what this project deploys |
-| `SUPABASE_URL` | same URL as `VITE_SUPABASE_URL` | Both Go services derive `<SUPABASE_URL>/auth/v1/.well-known/jwks.json` from it |
+| Name                       | Production value                              | Why                                                                                                                                                                                                                            |
+| -------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ENVIRONMENT`              | `production`                                  | Selects `config.Validate`'s hardening rules                                                                                                                                                                                    |
+| `NITRO_PRESET`             | `vercel`                                      | The web service: `@lovable.dev/vite-tanstack-config` defaults Nitro to a Cloudflare worker, which is not what this project deploys                                                                                             |
+| `SUPABASE_URL`             | same URL as `VITE_SUPABASE_URL`               | Both Go services derive `<SUPABASE_URL>/auth/v1/.well-known/jwks.json` from it                                                                                                                                                 |
 | `SUPABASE_PUBLISHABLE_KEY` | same value as `VITE_SUPABASE_PUBLISHABLE_KEY` | Read by **both** Go services: `auth` calls the Supabase Auth API, `users` calls the Data API. The value is already public, so this is not a secret — it is set twice because the browser and the services read different names |
-| `CORS_ALLOWED_ORIGINS` | `https://onemorestartup.vercel.app` | Required in production; `*` is rejected |
-| `RATE_LIMIT_ENABLED` | `1` | Cannot be disabled in production |
-| `LOG_LEVEL`, `LOG_FORMAT` | `info`, `json` (defaults) | Optional; structured logs are what Vercel captures |
-| `SERVICE_NAME` | optional | Appears in log lines; both services log a sensible default already |
+| `CORS_ALLOWED_ORIGINS`     | `https://onemorestartup.vercel.app`           | Required in production; `*` is rejected                                                                                                                                                                                        |
+| `RATE_LIMIT_ENABLED`       | `1`                                           | Cannot be disabled in production                                                                                                                                                                                               |
+| `LOG_LEVEL`, `LOG_FORMAT`  | `info`, `json` (defaults)                     | Optional; structured logs are what Vercel captures                                                                                                                                                                             |
+| `SERVICE_NAME`             | optional                                      | Appears in log lines; both services log a sensible default already                                                                                                                                                             |
 
 All three Go services read the server-only names from the same project scope, so
 setting them once covers `api`, `auth` and `users`. That is intended: the values
@@ -251,20 +255,20 @@ are the same, and the publishable key is not a secret.
 
 Deliberately **not** set:
 
-* `SUPABASE_JWT_SECRET` — both services verify tokens against the project's
+- `SUPABASE_JWT_SECRET` — both services verify tokens against the project's
   JWKS, so no shared HS256 secret exists to leak or rotate. Setting only
   `SUPABASE_URL` is enough; removing the secret is a security improvement, not a
   missing value.
-* `SUPABASE_SECRET_KEY` — no service reads it, and none may: each authorizes its
-  Supabase calls with the *caller's* token so Row Level Security stays the
+- `SUPABASE_SECRET_KEY` — no service reads it, and none may: each authorizes its
+  Supabase calls with the _caller's_ token so Row Level Security stays the
   boundary. The deployment runs with no database credential at all.
-* `UPSTREAM_AUTH_URL`, `UPSTREAM_USERS_URL` — injected by the service bindings.
+- `UPSTREAM_AUTH_URL`, `UPSTREAM_USERS_URL` — injected by the service bindings.
   See above.
-* `UPSTREAM_<OTHER>_URL` — the gateway answers `503` for a group whose upstream
+- `UPSTREAM_<OTHER>_URL` — the gateway answers `503` for a group whose upstream
   is unset, which is the intended state until those services exist. No value is
   committed here, because a deployment address is environment-specific.
-* `HTTP_ADDR` — Vercel injects the port; setting `HTTP_ADDR` would override it.
-* `SUPABASE_JWKS_URL`, `SUPABASE_JWT_ISSUER` — derived from `SUPABASE_URL`.
+- `HTTP_ADDR` — Vercel injects the port; setting `HTTP_ADDR` would override it.
+- `SUPABASE_JWKS_URL`, `SUPABASE_JWT_ISSUER` — derived from `SUPABASE_URL`.
 
 Vercel environment variables are project-scoped, so the API service can read the
 `VITE_` values too — that is harmless in that direction. The rule that matters is
@@ -275,7 +279,7 @@ secret never gets that prefix. See
 ### Preview deployments
 
 Preview deployments share the project's variables. Set the public values for
-*Preview* as well (preview URLs are `onemorestartup-<hash>.vercel.app`), and add
+_Preview_ as well (preview URLs are `onemorestartup-<hash>.vercel.app`), and add
 those origins to `CORS_ALLOWED_ORIGINS` if the preview is meant to call the API
 cross-origin. Leave `ENVIRONMENT=production` scoped to Production so a preview
 cannot be mistaken for it; unscoped, a service defaults to `development`, which
@@ -293,16 +297,16 @@ step of their own.
 
 ### 1. Prerequisites (dashboard, once)
 
-* **Framework preset = Services.** Vercel → project → *Settings → Build and
-  Deployment → Framework Preset* → **Services**. Without this, Vercel ignores the
+- **Framework preset = Services.** Vercel → project → _Settings → Build and
+  Deployment → Framework Preset_ → **Services**. Without this, Vercel ignores the
   `services` key in `vercel.json` and falls back to its default framework
   detection, so the deployment is not the one this document describes.
-* **Environment variables** from the tables above — in particular
+- **Environment variables** from the tables above — in particular
   `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`. They are not secrets but they are
   not optional either: without them `auth` boots, serves its probes, and answers
   `503` on `/api/v1/auth/sign-in|sign-up|refresh|session` instead of talking to
   Supabase, and `users` answers `503` on `/api/v1/users/me` for the same reason.
-* **`NITRO_PRESET=vercel`**, or the web service emits a Cloudflare worker.
+- **`NITRO_PRESET=vercel`**, or the web service emits a Cloudflare worker.
 
 ### 2. Deploy
 
@@ -342,8 +346,8 @@ against production.
 ### 4. Verify the end-to-end auth path in production
 
 `/api/v1/auth/*` is the point of this deployment. Before this change it answered
-`503 service_unavailable` with *"This API is not available in this environment
-yet."* — a correct answer for a group with no upstream. After it, the group must
+`503 service_unavailable` with _"This API is not available in this environment
+yet."_ — a correct answer for a group with no upstream. After it, the group must
 reach the auth service and Supabase:
 
 ```bash
@@ -362,7 +366,7 @@ curl -sS -X POST -H 'Content-Type: application/json' \
 
 A sign-in that returns `200` with `{ session, tokens, user }` proves the same
 chain from the other side. Email confirmation is a Supabase project setting: while
-it is on, `sign-up` answers `201` *without* `tokens`, which is a success and not a
+it is on, `sign-up` answers `201` _without_ `tokens`, which is a success and not a
 failure.
 
 ### 5. Verify the end-to-end profile path in production
@@ -418,47 +422,47 @@ in services mode.
 
 ## Troubleshooting
 
-| Symptom | Cause | Fix |
-| --- | --- | --- |
-| `Multiple frameworks detected in project root: TanStack Start, Nitro, Node. Specify "framework" explicitly in services.` | A service has no dashboard preset, and the root matches several detectors | Already fixed: the `web` service pins `"framework": "tanstack-start-lovable"` |
-| The `web` service build emits a Cloudflare worker (`.output/nitro.json` with `"preset": "cloudflare-module"`) | `@lovable.dev/vite-tanstack-config` sets that preset as the *default* for local builds; Vercel needs the `vercel` preset | Set `NITRO_PRESET=vercel` in the project's environment variables (Nitro's documented switch; an explicit preset beats the default). Never run that in Lovable's sandbox — the config ignores it there |
-| `/api/v1/*` returns the app's HTML 404 | The project is not in services mode, so the rewrites are inert | Set the framework preset to **Services** |
-| A group answers `503 This API is not available in this environment yet.` | That group has no `UPSTREAM_<SERVICE>_URL` | Expected for the groups with no service yet. For `auth` or `users`, check that the service exists in the build log and that the binding is declared on `api` (the **caller**), not on the callee |
-| `/api/v1/auth/*` answers `503` on every credential endpoint, but `/api/v1/auth/session` answers `401` | The binding works; the auth service has no Supabase credentials | Set `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` for the environment being tested — a preview needs them too |
-| `/api/v1/users/me` answers `503 Profiles are not available right now.` | The users service is deployed but has no Data API configuration | Set `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`. A `503` naming the *group* (`This API is not available in this environment yet.`) is a different fault: the binding, not the credentials |
-| `/api/v1/users/me` answers `403 permission denied for table profiles` on a read | A query asked for a column the SELECT grant excludes — `select=*` or a bare `Prefer: return=representation` projects `is_suspended` too | Name the projection. `supabaseprofile.Columns` is the list the grant allows, and both the read and the write use it; see [services/users/README.md](../../services/users/README.md#how-it-talks-to-supabase) |
-| The profile page shows a sign-in prompt immediately after a reload | The session lives in memory only, by design (no token in web storage), so a reload starts anonymous | Not a fault. Sign in again; restoring a session on boot is a deliberate decision for whoever adds route guards |
-| The `api` service is missing from the build log, or the deployment reports one fewer service than expected | A container service was not detected | The Dockerfile must be named exactly `Dockerfile.vercel` at the service root, and the service needs `"runtime": "container"` with `"entrypoint": "Dockerfile.vercel"` |
-| The `api` container builds but every request times out | The app bound a port Vercel does not route to | The image declares `ENV PORT=80` and Vercel routes to 80 by default. Do not set `HTTP_ADDR` or `PORT` in the dashboard |
-| The container build fails with `"/packages/go/platform": not found` | The build context is a subdirectory, so the relative `replace` in `services/go.mod` cannot resolve | `api` must keep `"root": "./"` and build from the repository root |
-| Every browser request fails with a CORS error naming two origins | An upstream set its own `Access-Control-Allow-Origin` and the gateway's was appended | Already fixed: the gateway strips upstream CORS headers (`corsResponseHeaders` in `services/gateway/internal/proxy`) |
+| Symptom                                                                                                                  | Cause                                                                                                                                   | Fix                                                                                                                                                                                                          |
+| ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Multiple frameworks detected in project root: TanStack Start, Nitro, Node. Specify "framework" explicitly in services.` | A service has no dashboard preset, and the root matches several detectors                                                               | Already fixed: the `web` service pins `"framework": "tanstack-start-lovable"`                                                                                                                                |
+| The `web` service build emits a Cloudflare worker (`.output/nitro.json` with `"preset": "cloudflare-module"`)            | `@lovable.dev/vite-tanstack-config` sets that preset as the _default_ for local builds; Vercel needs the `vercel` preset                | Set `NITRO_PRESET=vercel` in the project's environment variables (Nitro's documented switch; an explicit preset beats the default). Never run that in Lovable's sandbox — the config ignores it there        |
+| `/api/v1/*` returns the app's HTML 404                                                                                   | The project is not in services mode, so the rewrites are inert                                                                          | Set the framework preset to **Services**                                                                                                                                                                     |
+| A group answers `503 This API is not available in this environment yet.`                                                 | That group has no `UPSTREAM_<SERVICE>_URL`                                                                                              | Expected for the groups with no service yet. For `auth` or `users`, check that the service exists in the build log and that the binding is declared on `api` (the **caller**), not on the callee             |
+| `/api/v1/auth/*` answers `503` on every credential endpoint, but `/api/v1/auth/session` answers `401`                    | The binding works; the auth service has no Supabase credentials                                                                         | Set `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` for the environment being tested — a preview needs them too                                                                                                |
+| `/api/v1/users/me` answers `503 Profiles are not available right now.`                                                   | The users service is deployed but has no Data API configuration                                                                         | Set `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`. A `503` naming the _group_ (`This API is not available in this environment yet.`) is a different fault: the binding, not the credentials                  |
+| `/api/v1/users/me` answers `403 permission denied for table profiles` on a read                                          | A query asked for a column the SELECT grant excludes — `select=*` or a bare `Prefer: return=representation` projects `is_suspended` too | Name the projection. `supabaseprofile.Columns` is the list the grant allows, and both the read and the write use it; see [services/users/README.md](../../services/users/README.md#how-it-talks-to-supabase) |
+| The profile page shows a sign-in prompt immediately after a reload                                                       | The session lives in memory only, by design (no token in web storage), so a reload starts anonymous                                     | Not a fault. Sign in again; restoring a session on boot is a deliberate decision for whoever adds route guards                                                                                               |
+| The `api` service is missing from the build log, or the deployment reports one fewer service than expected               | A container service was not detected                                                                                                    | The Dockerfile must be named exactly `Dockerfile.vercel` at the service root, and the service needs `"runtime": "container"` with `"entrypoint": "Dockerfile.vercel"`                                        |
+| The `api` container builds but every request times out                                                                   | The app bound a port Vercel does not route to                                                                                           | The image declares `ENV PORT=80` and Vercel routes to 80 by default. Do not set `HTTP_ADDR` or `PORT` in the dashboard                                                                                       |
+| The container build fails with `"/packages/go/platform": not found`                                                      | The build context is a subdirectory, so the relative `replace` in `services/go.mod` cannot resolve                                      | `api` must keep `"root": "./"` and build from the repository root                                                                                                                                            |
+| Every browser request fails with a CORS error naming two origins                                                         | An upstream set its own `Access-Control-Allow-Origin` and the gateway's was appended                                                    | Already fixed: the gateway strips upstream CORS headers (`corsResponseHeaders` in `services/gateway/internal/proxy`)                                                                                         |
 
 ## Verified in the repository
 
 Verified in the repository (see [development/testing.md](../development/testing.md)):
 
-* `gofmt -l` clean and `go vet ./...` clean in both modules; `go test ./...` green
+- `gofmt -l` clean and `go vet ./...` clean in both modules; `go test ./...` green
   in both; all seventeen `main` packages build (fourteen services, the gateway,
   `services/cmd/api` and `services/cmd/server`).
-* **Every deployment entrypoint** — `services/cmd/api` (the users service on the Go
+- **Every deployment entrypoint** — `services/cmd/api` (the users service on the Go
   preset), `services/cmd/server` (the auth service on the Go preset) and
   `services/gateway/cmd/gateway` (the gateway container) — executes the same
   `servicekit.MustRun(<service>.Options())` wiring as its local binary, and each
   oneshot local command (`go run ./users/cmd/users`, `./auth/cmd/auth`,
   `./gateway/cmd/gateway`) calls the same function, so a deployment and a local
   shell run one implementation, not two.
-* **The container image**: `docker build -f Dockerfile.vercel .` succeeds and the
+- **The container image**: `docker build -f Dockerfile.vercel .` succeeds and the
   result serves `GET /api/v1/health` → `200 {"status":"ok","version":"dev"}` on
   port 80 with an empty filesystem and a CA bundle, which is what the JWKS fetch
   and the upstream call need.
-* **The full production-shaped path, locally**: the built container run with
+- **The full production-shaped path, locally**: the built container run with
   `UPSTREAM_AUTH_URL` pointed at the deployed entrypoint of the auth service
   (itself configured with the real `SUPABASE_URL` and publishable key) answers
   `/api/v1/auth/sign-in` with a real Supabase `401` mapped to the platform
   envelope — not the `503` of an unconfigured group — while an unconfigured group
   still answers `503`, a token-less `/api/v1/auth/session` answers `401`, and
   every response carries exactly one `Access-Control-Allow-Origin`.
-* **The whole product, locally, against the real Supabase project**: the three Go
+- **The whole product, locally, against the real Supabase project**: the three Go
   services (auth, users, gateway) and `vite dev` were run together and driven in a
   browser. Signing in showed the account's real display name and username on
   `/settings`, `/profile` and `/settings/profile` instead of the prototype
@@ -467,15 +471,15 @@ Verified in the repository (see [development/testing.md](../development/testing.
   `avatars` bucket and pointed `avatarPath` at it, and the image then rendered from
   its public URL; a `PATCH` with a stale `expectedUpdatedAt` was answered `409`.
   The probe account and its object were deleted afterwards.
-* `npx tsc --noEmit` clean, 62 vitest tests pass, `npm run build` succeeds and
+- `npx tsc --noEmit` clean, 62 vitest tests pass, `npm run build` succeeds and
   `npm run sitemap:check` reports `sitemap.xml is up to date`. The frontend suite
   includes the profile store and the profile editor, which drive the real
   `apiFetch` path against a stubbed `fetch`: the request shapes, the states
   (loading, signed out, no profile row, failure), the conditional write and its
   `409`, and that no edit is written to web storage.
-* The built bundle contains no value of `SUPABASE_SECRET_KEY` — searched by value,
+- The built bundle contains no value of `SUPABASE_SECRET_KEY` — searched by value,
   not by name — and the publishable key is present, as designed.
-* `node scripts/check-api-contract.mjs` reports the 16 routed groups documented
+- `node scripts/check-api-contract.mjs` reports the 16 routed groups documented
   across 28 paths, and `redocly lint` accepts the contract.
 
 ## Verified against production
@@ -485,23 +489,25 @@ against `https://onemorestartup.vercel.app`. Every request below was a real
 request to the live deployment, and the credential cases ran against the live
 Supabase project.
 
-| Request | Observed | What it proves |
-| --- | --- | --- |
-| `GET /api/v1/health` | `200 {"status":"ok","version":"dev"}` | The container-image gateway is serving |
-| `GET /api/v1` | `200 {"apiVersion":"v1","commit":"","version":"dev"}` | Version discovery |
-| `GET /healthz` · `GET /readyz` | `200 ok` · `200 {"status":"ready","version":"dev"}` | Both probes |
-| `GET /` | `200` | The web app still renders alongside two backends |
-| `GET /api/v1/games` | `503 This API is not available in this environment yet.` | A group with no upstream still answers as documented — so the gateway distinguishes configured from unconfigured groups, and `/api/v1/auth/*` reaching `auth` is not a wildcard |
-| `GET /api/v1/auth/session` (no token) | `401 unauthorized` | **The binding resolved**: this is the auth service's answer, not the gateway's `503` |
-| `POST /api/v1/auth/sign-in` (unknown field) | `400 bad_request`, `details[0] = {field:"sneaky",rule:"unknown"}` | Request validation through production |
-| `POST /api/v1/auth/sign-in` (wrong password) | `401 "That email and password do not match."` | A live round trip to Supabase, mapped to the platform envelope |
-| `OPTIONS /api/v1/auth/sign-in` | `204`, exactly **one** `Access-Control-Allow-Origin: https://onemorestartup.vercel.app` | CORS works and the upstream's header is not duplicated |
-| `POST /api/v1/auth/sign-in` (confirmed account) | `200`, `session.userId` = a real Supabase uuid, `role: user`, `onboarded: false`, `tokens.expiresIn: 3600` | Sign-in end to end, including the RLS-guarded `profiles` read |
-| `GET /api/v1/auth/session` (bearer) | `200` with the same session | **JWKS verification of a live Supabase token** |
-| `POST /api/v1/auth/refresh` | `200`, a new access *and* refresh token | Refresh works |
-| `POST /api/v1/auth/refresh` (garbage token) | `422 unprocessable_entity` | Invalid material is distinguishable from a valid session |
-| `POST /api/v1/auth/sign-out` | `204` | Revocation |
-| `POST /api/v1/auth/sign-up` (address already registered) | `201` with a user object and **no** `tokens` | Supabase's anti-enumeration answer is passed through as the documented "awaiting confirmation" success |
+| Request                                                  | Observed                                                                                                   | What it proves                                                                                                                                                                    |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/health`                                     | `200 {"status":"ok","version":"dev"}`                                                                      | The container-image gateway is serving                                                                                                                                            |
+| `GET /api/v1`                                            | `200 {"apiVersion":"v1","commit":"","version":"dev"}`                                                      | Version discovery                                                                                                                                                                 |
+| `GET /healthz` · `GET /readyz`                           | `200 ok` · `200 {"status":"ready","version":"dev"}`                                                        | Both probes                                                                                                                                                                       |
+| `GET /`                                                  | `200`                                                                                                      | The web app still renders alongside two backends                                                                                                                                  |
+| `GET /api/v1/games`                                      | `200 {"items":[…],"nextCursor":…}`                                                                         | The games service is deployed and the binding resolved. A `503` here means the binding did not (check the build log for the `games` service)                                      |
+| `GET /api/v1/categories`                                 | `200 {"items":[… "gameCount": …]}`                                                                         | Real counts from the database view                                                                                                                                                |
+| `GET /api/v1/admin/…`                                    | `503 This API is not available in this environment yet.`                                                   | A group with no upstream still answers as documented — so the gateway distinguishes configured from unconfigured groups, and `/api/v1/games/*` reaching `games` is not a wildcard |
+| `GET /api/v1/auth/session` (no token)                    | `401 unauthorized`                                                                                         | **The binding resolved**: this is the auth service's answer, not the gateway's `503`                                                                                              |
+| `POST /api/v1/auth/sign-in` (unknown field)              | `400 bad_request`, `details[0] = {field:"sneaky",rule:"unknown"}`                                          | Request validation through production                                                                                                                                             |
+| `POST /api/v1/auth/sign-in` (wrong password)             | `401 "That email and password do not match."`                                                              | A live round trip to Supabase, mapped to the platform envelope                                                                                                                    |
+| `OPTIONS /api/v1/auth/sign-in`                           | `204`, exactly **one** `Access-Control-Allow-Origin: https://onemorestartup.vercel.app`                    | CORS works and the upstream's header is not duplicated                                                                                                                            |
+| `POST /api/v1/auth/sign-in` (confirmed account)          | `200`, `session.userId` = a real Supabase uuid, `role: user`, `onboarded: false`, `tokens.expiresIn: 3600` | Sign-in end to end, including the RLS-guarded `profiles` read                                                                                                                     |
+| `GET /api/v1/auth/session` (bearer)                      | `200` with the same session                                                                                | **JWKS verification of a live Supabase token**                                                                                                                                    |
+| `POST /api/v1/auth/refresh`                              | `200`, a new access _and_ refresh token                                                                    | Refresh works                                                                                                                                                                     |
+| `POST /api/v1/auth/refresh` (garbage token)              | `422 unprocessable_entity`                                                                                 | Invalid material is distinguishable from a valid session                                                                                                                          |
+| `POST /api/v1/auth/sign-out`                             | `204`                                                                                                      | Revocation                                                                                                                                                                        |
+| `POST /api/v1/auth/sign-up` (address already registered) | `201` with a user object and **no** `tokens`                                                               | Supabase's anti-enumeration answer is passed through as the documented "awaiting confirmation" success                                                                            |
 
 One disposable probe account (`phase3b-probe@example.com`) was created confirmed,
 with the Supabase admin API, to exercise the authenticated paths above. It is
@@ -510,11 +516,11 @@ when it is no longer useful.
 
 Two behaviours that look like defects and are not:
 
-* **After `sign-out`, the access token still reads the session until it expires.**
+- **After `sign-out`, the access token still reads the session until it expires.**
   Access tokens are verified statelessly against the project's JWKS, so
-  revocation ends the *refresh* chain rather than rewriting an issued JWT. This
+  revocation ends the _refresh_ chain rather than rewriting an issued JWT. This
   is why the client must not keep a token past its expiry.
-* **Replaying a refresh token is accepted even after the response handed back a
+- **Replaying a refresh token is accepted even after the response handed back a
   new one.** See the gap below.
 
 ## Known gap: refresh-token rotation is off in this Supabase project
@@ -534,20 +540,20 @@ its predecessor. Until then, treat a refresh token as a long-lived credential.
 
 ## Still not verified
 
-* **No Vercel build log has been read.** The deployment succeeded and every route
+- **No Vercel build log has been read.** The deployment succeeded and every route
   above behaves as designed, but the log line naming the detected services was
-  never inspected, so *why* the routing works is documented behaviour rather than
+  never inspected, so _why_ the routing works is documented behaviour rather than
   an observation. It matters only if a future change makes a service disappear:
   a service that is not detected does not error, it simply stops existing.
-* **Deployment Protection for previews.** Only production was exercised, so
+- **Deployment Protection for previews.** Only production was exercised, so
   whether an outside `curl` to a preview URL is answered by the protection wall
   is untested here.
-* **The rate limiter under Vercel's instance model.** `AUTH_RATE_LIMIT_*` is
+- **The rate limiter under Vercel's instance model.** `AUTH_RATE_LIMIT_*` is
   in-process, so it is per instance; asserting a `429` in production would depend
   on which instance answered. It is covered by the test suite and by a local run
   that observed the `429` and its `Retry-After`, which is the strongest claim
   available without a shared store.
-* **Vercel Services is still in Beta.** If the platform later rejects a
+- **Vercel Services is still in Beta.** If the platform later rejects a
   configuration detail (a `root`, a `framework` slug, or a binding on a
   container service), the fix belongs in `vercel.json`; nothing in the Go code
   depends on it.

@@ -41,7 +41,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { adminScores, type AdminScoreRow } from "@/lib/admin-mock";
-import { fmt, games, getGame, type GameId } from "@/lib/mock";
+import { fmt } from "@/lib/format";
+import { games, getGame, type GameId } from "@/lib/admin-mock";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/admin/leaderboards")({

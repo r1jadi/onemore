@@ -12,7 +12,6 @@ import {
   UserName,
   useMockLoad,
 } from "@/components/common";
-import { GameCard, GameRow } from "@/components/game/GameCard";
 import { ShareSheet } from "@/components/social/Sheets";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,7 +21,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
-import { achievements, fmt, games } from "@/lib/mock";
+import { achievements } from "@/lib/mock";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -215,51 +214,35 @@ export function ProfileView({
               <GridSkeleton count={4} />
             ) : (
               <>
-                {tab === "Best scores" &&
-                  games
-                    .filter((g) => g.yourBest)
-                    .map((g) => (
-                      <GameRow
-                        key={g.id}
-                        game={g}
-                        meta={`${g.category} · Top 8%`}
-                        action={
-                          <span className="font-mono text-sm font-semibold tabular">
-                            {fmt(g.yourBest!)}
-                          </span>
-                        }
-                      />
-                    ))}
+                {/*
+                 * The tabs that need recorded activity — best scores, activity,
+                 * saved and recent — have no data source. They used to be filled
+                 * with fixture rows ("Scored 2,140 on Stack 10", four saved
+                 * games) which is exactly the kind of claim this app must not
+                 * make: nothing records scores or saves yet, and none of these
+                 * tabs can tell a real row from an invented one.
+                 */}
+                {tab === "Best scores" && (
+                  <EmptyState
+                    title="No scores yet"
+                    body="Nothing records scores yet, so there are no personal bests to show."
+                  />
+                )}
                 {tab === "Activity" && (
-                  <ul className="divide-y divide-border">
-                    {[
-                      ["Scored 2,140 on Stack 10", "2h"],
-                      ["Unlocked Perfect chain", "1d"],
-                      ["Saved One Move", "2d"],
-                      ["Followed @nora.k", "3d"],
-                    ].map(([t, time]) => (
-                      <li key={t} className="flex justify-between px-4 py-3 text-sm md:px-0">
-                        <span>{t}</span>
-                        <span className="text-muted-foreground">{time}</span>
-                      </li>
-                    ))}
-                  </ul>
+                  <EmptyState
+                    title="No activity yet"
+                    body="Plays, likes, comments and saves are not recorded yet."
+                  />
                 )}
                 {tab === "Saved" && (
-                  <div className="grid grid-cols-2 gap-3 px-4 md:grid-cols-3 md:px-0">
-                    {games.slice(1, 4).map((g) => (
-                      <GameCard key={g.id} game={g} />
-                    ))}
-                  </div>
+                  <EmptyState title="Nothing saved yet" body="Saving a game is not recorded yet." />
                 )}
-                {tab === "Recent" &&
-                  (self || (user.stats?.played ?? 0) > 0 ? (
-                    games
-                      .slice(0, 4)
-                      .map((g) => <GameRow key={g.id} game={g} meta="Played 2h ago" />)
-                  ) : (
-                    <EmptyState title="No games played yet" />
-                  ))}
+                {tab === "Recent" && (
+                  <EmptyState
+                    title="No games played yet"
+                    body="Playing a game is not recorded yet."
+                  />
+                )}
                 {tab === "Achievements" && (
                   <div className="grid grid-cols-2 gap-3 px-4 md:grid-cols-3 md:px-0">
                     {achievements.map((a) => (
