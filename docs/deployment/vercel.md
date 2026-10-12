@@ -12,7 +12,8 @@ second host and no `api.` subdomain.
 | API service        | `api` — **container image**, `Dockerfile.vercel` at the repository root; this is the Go gateway        |
 | Auth service       | `auth` — `services/`, framework `go`, entrypoint `services/cmd/server/main.go`                         |
 | Users service      | `users` — `services/`, framework `go`, entrypoint `services/cmd/api/main.go`                           |
-| Reachability       | `auth` and `users` are internal: no rewrite targets either, so only the gateway can reach them         |
+| Games service      | `games` — `services/`, framework `go`, entrypoint `services/main.go`; serves the catalogue **and** the play sessions (one remaining preset entrypoint name, two packages) |
+| Reachability       | `auth`, `users` and `games` are internal: no rewrite targets them, so only the gateway can reach them   |
 | Local API          | `http://localhost:8080/api/v1` (`go run ./gateway/cmd/gateway`, `HTTP_ADDR=:8080`)                     |
 | Production API     | `https://onemorestartup.vercel.app/api/v1`                                                             |
 | Production auth    | `https://onemorestartup.vercel.app/api/v1/auth/*`                                                      |
@@ -27,6 +28,7 @@ second host and no `api.` subdomain.
 | `api`   | `./`        | Custom container image (`Dockerfile.vercel`) | **Yes** — `/api/v1`, `/healthz`, `/readyz` |
 | `auth`  | `services/` | Vercel Go framework preset                   | **No** — internal only                     |
 | `users` | `services/` | Vercel Go framework preset                   | **No** — internal only                     |
+| `games` | `services/` | Vercel Go framework preset                   | **No** — internal only                     |
 
 A service is internal by default and only becomes routable if a top-level rewrite
 targets it. `web` and `api` have rewrites; `auth` and `users` do not, and that is
@@ -184,7 +186,8 @@ never falls back to the web app, whatever path it is.
 | `/api/v1`                               | `api`           | Version discovery                                                                          |
 | `/api/v1/auth/…`                        | `api` → `auth`  | The gateway proxies it over the binding to the deployed auth service                       |
 | `/api/v1/users/…`                       | `api` → `users` | The same, over the users binding — `/api/v1/users/me` is the profile                       |
-| `/api/v1/games/…`, `/api/v1/categories` | `api` → `games` | The same, over the games binding — the public catalogue                                    |
+| `/api/v1/games/…`, `/api/v1/categories` | `api` → `games` | The same, over the games binding — the public catalogue and each game's leaderboard         |
+| `/api/v1/sessions/…`                    | `api` → `games` | The same binding: the play-session routes are mounted in the games deployment               |
 | `/api/v1/<other group>/…`               | `api`           | The gateway proxies a group only when its `UPSTREAM_<SERVICE>_URL` is set; otherwise `503` |
 | `/healthz`, `/readyz`                   | `api`           | The Go probes, so they stay usable in production                                           |
 | everything else                         | `web`           | `/`, `/explore`, `/games/…`, `/categories/…`, `/profile/…`, `/settings`, assets, sitemap   |

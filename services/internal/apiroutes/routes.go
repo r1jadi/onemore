@@ -28,7 +28,14 @@ func Groups() []Group {
 		// service so a category page and its game list come from one place (and
 		// one database query for the counts).
 		{Prefix: BasePath + "/categories", Service: "games"},
-		{Prefix: BasePath + "/sessions", Service: "game-sessions"},
+		// Sessions are served by the `game-sessions` package, which the `games`
+		// deployment mounts alongside the catalogue: Vercel's Go preset gives a
+		// service root three entrypoint names and all three are taken, and a
+		// second container service at the same root is not detected. The prefix
+		// is listed under the service that actually answers it, so the gateway's
+		// upstream lookup cannot drift from what runs. See
+		// docs/deployment/vercel.md.
+		{Prefix: BasePath + "/sessions", Service: "games"},
 		{Prefix: BasePath + "/scores", Service: "scores"},
 		{Prefix: BasePath + "/leaderboards", Service: "leaderboards"},
 		{Prefix: BasePath + "/feed", Service: "feed"},

@@ -1,7 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Clock, X } from "lucide-react";
+import { Stack10Runtime } from "@/components/game/Stack10Runtime";
 import { Button } from "@/components/ui/button";
 import { titleFromSlug, useGame } from "@/lib/games/catalog";
+import { STACK10_RUNTIME } from "@/lib/games/stack10";
 
 export const Route = createFileRoute("/play/$id")({
   head: ({ params }) => {
@@ -22,18 +24,20 @@ export const Route = createFileRoute("/play/$id")({
  *
  * It used to be a working prototype that scored `10 + random(15)` points on every
  * tap and then reported a global rank and a personal best. None of that was real:
- * there was no game, and no score was ever stored. Presenting it as a playable
- * game was the most misleading thing in the app, so the screen now states the
- * truth — no runtime exists for any catalogue game yet — and keeps the way back to
- * the game's page.
+ * there was no game, and no score was ever stored. Presenting it as playable was the
+ * most misleading thing in the app, so it now mounts a runtime only when the
+ * catalogue says the game has one.
  *
- * The runtime and the session/scoring engine are a later phase. This screen is
- * where a real one will mount, keyed by the game's `runtime` identifier.
+ * The runtime is chosen by the game's `runtime` identifier — `stack-10` plays Stack
+ * 10, and anything else gets the honest "no runtime yet" screen rather than a board
+ * that does not follow that game's rules. Six of the seven catalogue games are in
+ * that position, which is why this branch is a feature and not a leftover.
  */
 function PlayScreen() {
   const { id } = Route.useParams();
   const state = useGame(id);
   const title = state.status === "ready" ? state.game.title : titleFromSlug(id);
+  const playable = state.status === "ready" && state.game.playable && !!state.game.runtime;
 
   return (
     <div className="fixed inset-0 flex flex-col bg-background">
@@ -48,24 +52,62 @@ function PlayScreen() {
         </div>
       </header>
 
-      <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
-        <div className="flex size-12 items-center justify-center rounded-full bg-surface-2">
-          <Clock className="size-5 text-muted-foreground" />
+      {state.status === "loading" && (
+        <div className="flex flex-1 items-center justify-center">
+          <Clock className="size-5 animate-pulse text-muted-foreground" />
         </div>
-        <h1 className="text-xl font-semibold">
-          {state.status === "missing" ? "No such game" : "Not playable yet"}
-        </h1>
-        <p className="max-w-sm text-sm text-muted-foreground">
-          {state.status === "missing"
-            ? "That game is not in the catalogue."
-            : `${title} has no runtime yet, so there is nothing to start. Scores, sessions and leaderboards arrive with it.`}
-        </p>
-        <Button asChild variant="play" size="lg" className="mt-2">
-          <Link to="/games/$id" params={{ id }}>
-            Back to the game
-          </Link>
-        </Button>
-      </div>
+      )}
+
+      {state.status === "ready" && state.game.runtime === STACK10_RUNTIME && playable && (
+        <Stack10Runtime key={state.game.slug} slug={state.game.slug} title={state.game.title} />
+      )}
+
+      {state.status === "ready" && !(state.game.runtime === STACK10_RUNTIME && playable) && (
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
+          <div className="flex size-12 items-center justify-center rounded-full bg-surface-2">
+            <Clock className="size-5 text-muted-foreground" />
+          </div>
+          <h1 className="text-xl font-semibold">Not playable yet</h1>
+          <p className="max-w-sm text-sm text-muted-foreground">
+            {title} has no runtime yet, so there is nothing to start. It is listed because it is
+            part of the catalogue.
+          </p>
+          <Button asChild variant="play" size="lg" className="mt-2">
+            <Link to="/games/$id" params={{ id }}>
+              Back to the game
+            </Link>
+          </Button>
+        </div>
+      )}
+
+      {state.status === "error" && (
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
+          <h1 className="text-xl font-semibold">Couldn't load this game</h1>
+          <p className="max-w-sm text-sm text-muted-foreground">
+            The catalogue is unavailable, so there is nothing to start.
+          </p>
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={state.retry}>
+              Try again
+            </Button>
+            <Button asChild variant="ghost">
+              <Link to="/explore">Browse games</Link>
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {state.status === "missing" && (
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
+          <h1 className="text-xl font-semibold">No such game</h1>
+          <p className="max-w-sm text-sm text-muted-foreground">
+            That game is not in the catalogue.
+          </p>
+          <Button asChild variant="play" size="lg" className="mt-2">
+            <Link to="/explore">Browse games</Link>
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

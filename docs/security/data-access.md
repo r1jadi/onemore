@@ -35,8 +35,9 @@ moderator or admin role.
 | `games` | select (published only) | select (published + own + staff), insert own (draft/review), update own (draft/review), delete own (draft), update staff | all |
 | `profiles` | select public columns | select public columns, update own presentation columns | all |
 | `user_roles` | — | select own, select staff | all (the only writer) |
-| `game_sessions` | — | select own, insert own | all |
+| `game_sessions` | — | select own (**no insert**: the server issues the row, the seed and the timestamps) | all |
 | `scores` | select (visible games) | select (visible games) | all (the only writer) |
+| `game_stats` (view) | select aggregates (`slug`, `plays`, `players`, `best_score`, `last_completed_at`) | select aggregates | all |
 | `comments` | select (not hidden) | select (not hidden + own + staff), insert own (published games), update own body, delete own or staff | all (hides comments) |
 | `likes` | select | select, insert own, delete own | all |
 | `follows` | select | select, insert own, delete own | all |
@@ -50,8 +51,21 @@ moderator or admin role.
 
 * **No client-written privilege.** No `INSERT`/`UPDATE` grant on `user_roles` for
   `authenticated`; role changes require the service key.
-* **No client-written scores.** No `INSERT` grant on `scores`; the game-sessions
-  service writes them after validating the session.
+* **No client-written scores.** No `INSERT` grant on `scores`; the only writer is
+  `public.complete_stack10_run`, which inserts a row after replaying the submitted
+  run and deriving the score itself. The game-sessions service passes the caller's
+  token through and cannot name a score at all — see
+  [0012](../decisions/0012-server-verified-scores.md).
+* **No client-written sessions.** The `INSERT` grant and policy on `game_sessions`
+  were revoked: a client that could write its own session row could choose its own
+  seed, and every score would then be verified against a deck the player stacked.
+  `public.start_game_session` is `security definer`, reads the caller from
+  `auth.uid()`, and is the only path in.
+* **Aggregates, not rows, and only granted columns.** `game_stats` is a
+  `security definer` view — `game_sessions` is readable only by its owner, so a
+  count of everybody's runs cannot come from a view that runs as the caller. It
+  exposes counts and the `slug`; `game_id` is deliberately not granted, because the
+  uuid is internal everywhere else in this API.
 * **No client-written moderation state.** `comments.is_hidden` and
   `profiles.is_suspended` have no `UPDATE` grant for `authenticated`. Postgres
   column grants are additive, so a column granted "for staff" would be granted to

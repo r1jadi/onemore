@@ -69,6 +69,55 @@ begin
   raise exception 'ASSERTION FAILED: % — the statement was allowed', message;
 end $$;
 
+-- The statement must be rejected with a specific SQLSTATE. Used for the
+-- server-side write functions, whose invalid input is an exception rather than a
+-- policy violation, and whose refusals are outcomes the caller reads.
+create or replace function rls_test.raises(statement text, expected_state text, message text)
+returns void language plpgsql as $$
+declare
+  actual text;
+begin
+  begin
+    execute statement;
+  exception
+    when others then
+      actual := sqlstate;
+      if actual = expected_state then
+        raise notice 'ok   % (raised %)', message, actual;
+        return;
+      end if;
+      raise exception 'ASSERTION FAILED: % — raised %, expected %', message, actual, expected_state;
+  end;
+  raise exception 'ASSERTION FAILED: % — the statement was allowed', message;
+end $$;
+
+-- A server-side function that answers with an outcome rather than raising: the
+-- call is made exactly once, because every call has side effects.
+create or replace function rls_test.says(statement text, expected text, message text)
+returns void language plpgsql as $$
+declare
+  actual text;
+begin
+  execute format('select (%s).outcome', statement) into actual;
+  if actual is distinct from expected then
+    raise exception 'ASSERTION FAILED: % — outcome was %, expected %', message, coalesce(actual, 'null'), expected;
+  end if;
+  raise notice 'ok   % (outcome %)', message, actual;
+end $$;
+
+-- One field of that same answer, read from a single call.
+create or replace function rls_test.says_field(statement text, field text, expected text, message text)
+returns void language plpgsql as $$
+declare
+  actual text;
+begin
+  execute format('select (%s).%s::text', statement, field) into actual;
+  if actual is distinct from expected then
+    raise exception 'ASSERTION FAILED: % — % was %, expected %', message, field, coalesce(actual, 'null'), expected;
+  end if;
+  raise notice 'ok   % (% = %)', message, field, actual;
+end $$;
+
 -- The statement must succeed while touching no rows.
 create or replace function rls_test.blocked(statement text, message text)
 returns void language plpgsql as $$
@@ -567,6 +616,315 @@ select rls_test.allow(
 );
 
 reset role;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Play sessions and server-verified scores
+--
+-- Two properties are asserted here, and they are the whole point of the
+-- migration: a client cannot write a session or a score at all, and the number
+-- that ends up in `scores` is the database's replay rather than the caller's
+-- claim. The expected score (55 over 14 tiles and 3 clears) is arithmetic from
+-- seed 1, not a value read back from the function.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+\set greedy_run 'array[0,0,1,0,0,0,2,2,2,3,0,0,0,0]'
+
+-- A published, playable game — the only kind a run can be started for — plus one
+-- that stays unpublished, so the refusal path has a subject. The sessions below
+-- are fixtures only in the sense that the *superuser* may choose their seed:
+-- `start_game_session` never may, which is exactly what makes the expected score
+-- below arithmetic instead of whatever the verifier happens to return.
+--
+-- seed 1: tiles 1,7,9,2,2,5,4,6,7,8,3,4,3,5
+--   greedy line 0,0,1,0,0,0,2,2,2,3,0,0,0,0 → 3 clears (3 tiles, 2 tiles, 3
+--   tiles) = 20 + 15 + 20 = 55, then the 14th tile overflows column 0.
+\set runnable_game 'aaaaaaaa-4444-4444-8444-aaaaaaaaaaaa'
+\set secret_game   'aaaaaaaa-5555-4555-8555-aaaaaaaaaaaa'
+\set pending_session   'cccccccc-1111-4111-8111-cccccccccccc'
+\set expired_session   'cccccccc-2222-4222-8222-cccccccccccc'
+\set abandoned_session 'cccccccc-3333-4333-8333-cccccccccccc'
+\set guest_session     'cccccccc-4444-4444-8444-cccccccccccc'
+\set old_rules_session 'cccccccc-5555-4555-8555-cccccccccccc'
+\set bob_session       'cccccccc-6666-4666-8666-cccccccccccc'
+
+insert into public.games (id, owner_id, slug, title, status, published_at, runtime, playable, category_id) values
+  (:'runnable_game', :'alice', 'fixture-runnable', 'Fixture Runnable', 'published', now(), 'stack-10', true,
+   (select id from public.categories where slug = 'puzzle')),
+  (:'secret_game',   :'alice', 'fixture-secret',   'Fixture Secret',   'draft',     null, 'stack-10', true,
+   (select id from public.categories where slug = 'puzzle'));
+
+-- Runs that have been open for five minutes, which is what makes a claimed
+-- 45-second duration credible: a run cannot have taken longer than the session
+-- has existed, and that check is one of the assertions below.
+insert into public.game_sessions (id, game_id, user_id, seed, rules_version, started_at, expires_at, abandoned_at) values
+  (:'pending_session',   :'runnable_game', :'alice', 1, 'stack-10@1', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'expired_session',   :'runnable_game', :'alice', 1, 'stack-10@1', now() - interval '3 hours', now() - interval '1 hour', null),
+  (:'abandoned_session', :'runnable_game', :'alice', 1, 'stack-10@1', now() - interval '5 minutes', now() + interval '2 hours', now()),
+  (:'guest_session',     :'runnable_game', null,     1, 'stack-10@1', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'old_rules_session', :'runnable_game', :'alice', 1, 'stack-10@0', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'bob_session',       :'runnable_game', :'bob',   1, 'stack-10@1', now() - interval '5 minutes', now() + interval '2 hours', null);
+
+select set_config('request.jwt.claims', '{"role":"anon"}', true);
+set local role anon;
+
+select rls_test.denied(
+  $$insert into public.game_sessions (game_id, user_id) values ('aaaaaaaa-4444-4444-8444-aaaaaaaaaaaa', null)$$,
+  'a client cannot insert a session: the server issues it with the seed'
+);
+select rls_test.denied(
+  $$insert into public.scores (session_id, game_id, user_id, score)
+    values ('cccccccc-4444-4444-8444-cccccccccccc', 'aaaaaaaa-4444-4444-8444-aaaaaaaaaaaa', null, 1)$$,
+  'a client cannot write a score row'
+);
+select rls_test.denied(
+  $$update public.game_sessions set completed_at = now() where id = 'cccccccc-4444-4444-8444-cccccccccccc'$$,
+  'a client cannot close its own session'
+);
+select rls_test.denied(
+  $$select id from public.game_sessions$$,
+  'anonymous callers cannot read session rows at all'
+);
+
+-- The aggregate is public; the row-level table it is built from is not, and the
+-- internal uuid is not part of the aggregate a caller may read.
+select rls_test.allow($$select slug, plays from public.game_stats$$,
+  'anon reads published aggregate activity');
+select rls_test.denied($$select game_id from public.game_stats$$,
+  'the internal game id is not granted on the public aggregate');
+select rls_test.visible($$select * from public.game_leaderboard('fixture-secret', null, 10, 0)$$, 0,
+  'an unpublished game has no public board');
+select rls_test.visible($$select * from public.game_leaderboard('fixture-runnable', null, 10, 0)$$, 0,
+  'a playable game with no recorded score has an empty board');
+
+-- Starting a run: only a published, playable game, and only with the rules the
+-- database can verify.
+select rls_test.says(
+  $$public.start_game_session('fixture-secret', 'stack-10@1', 'test')$$,
+  'not_playable', 'an unpublished game cannot start a run'
+);
+select rls_test.says(
+  $$public.start_game_session('fixture-stack', 'stack-10@1', 'test')$$,
+  'not_playable', 'a published game with no runtime cannot start a run'
+);
+select rls_test.says(
+  $$public.start_game_session('no-such-game-anywhere', 'stack-10@1', 'test')$$,
+  'not_playable', 'an unknown slug is refused exactly like an unpublished one'
+);
+select rls_test.raises(
+  $$select public.start_game_session('Not A Slug', 'stack-10@1', 'test')$$,
+  '22023', 'a malformed slug is a request error, not a catalogue lookup'
+);
+select rls_test.says(
+  $$public.start_game_session('fixture-runnable', 'stack-10@2', 'test')$$,
+  'unsupported_runtime', 'rules the verifier does not implement are refused at the door'
+);
+-- The shipped game itself, not a fixture: after every migration has been applied,
+-- the catalogue's own Stack 10 record is playable, carries its runtime, and can
+-- issue a run to a guest. This is the production shape, asserted in the same suite
+-- that runs the migration.
+select rls_test.visible(
+  $$select 1 from public.games where slug = 'stack-10' and playable and runtime = 'stack-10'$$,
+  1, 'the shipped Stack 10 game is playable and names its runtime'
+);
+-- `fixture-%` is this suite's own playable game (the one the refusal paths need),
+-- so the claim is about the catalogue: of the games this repository ships, only
+-- Stack 10 is playable.
+select rls_test.visible(
+  $$select 1 from public.games
+     where slug <> 'stack-10' and slug not like 'fixture-%' and (playable or runtime is not null)$$,
+  0, 'no other shipped game is marked playable'
+);
+select rls_test.says_field(
+  $$public.start_game_session('stack-10', 'stack-10@1', 'test/1.0')$$,
+  'game_slug', 'stack-10', 'the shipped game issues a run like any other'
+);
+select rls_test.says(
+  $$public.start_game_session('fixture-runnable', 'stack-10@1', 'test/1.0')$$,
+  'started', 'a guest can start a run'
+);
+select rls_test.says_field(
+  $$public.start_game_session('fixture-runnable', 'stack-10@1', 'test/1.0')$$,
+  'tile_count', '60', 'the server tells the client how long the run is'
+);
+
+-- A guest run completes and is verified, and stays unranked: there is no score
+-- row for it, because `scores.user_id` is NOT NULL by design.
+select rls_test.says(
+  format($$public.complete_stack10_run('cccccccc-4444-4444-8444-cccccccccccc'::uuid, %s, 55, 45000)$$, :'greedy_run'),
+  'recorded', 'a guest run is replayed and recorded'
+);
+select rls_test.says(
+  format($$public.complete_stack10_run('cccccccc-4444-4444-8444-cccccccccccc'::uuid, %s, 55, 45000)$$, :'greedy_run'),
+  'duplicate', 'a repeated submission of the same run is recognised, not recorded again'
+);
+select rls_test.says_field(
+  format($$public.complete_stack10_run('cccccccc-4444-4444-8444-cccccccccccc'::uuid, %s, 55, 45000)$$, :'greedy_run'),
+  'ranked', 'false', 'a guest run is never ranked'
+);
+
+reset role;
+
+select set_config('request.jwt.claims',
+  json_build_object('sub', :'alice', 'role', 'authenticated')::text, true);
+set local role authenticated;
+
+select rls_test.denied(
+  $$insert into public.game_sessions (game_id, user_id) values ('aaaaaaaa-4444-4444-8444-aaaaaaaaaaaa', '11111111-1111-4111-8111-111111111111')$$,
+  'a signed-in player cannot insert a session either: the seed has to be the server''s'
+);
+
+-- Refusals: another player's session, a guest session, an expired one, an
+-- abandoned one, and rules this database cannot verify.
+select rls_test.says(
+  format($$public.complete_stack10_run('cccccccc-6666-4666-8666-cccccccccccc'::uuid, %s, 55, 1000)$$, :'greedy_run'),
+  'not_found', 'another player''s session is not found, and not distinguished from missing'
+);
+select rls_test.says(
+  format($$public.complete_stack10_run('cccccccc-4444-4444-8444-cccccccccccc'::uuid, %s, 55, 1000)$$, :'greedy_run'),
+  'not_found', 'a guest run cannot be claimed by a signed-in caller'
+);
+select rls_test.says(
+  format($$public.complete_stack10_run('cccccccc-2222-4222-8222-cccccccccccc'::uuid, %s, 55, 1000)$$, :'greedy_run'),
+  'expired', 'a run cannot be completed after its session expired'
+);
+select rls_test.says(
+  format($$public.complete_stack10_run('cccccccc-3333-4333-8333-cccccccccccc'::uuid, %s, 55, 1000)$$, :'greedy_run'),
+  'abandoned', 'a replaced run cannot be submitted'
+);
+select rls_test.says(
+  format($$public.complete_stack10_run('cccccccc-5555-4555-8555-cccccccccccc'::uuid, %s, 55, 1000)$$, :'greedy_run'),
+  'wrong_rules', 'a session pinned to rules this verifier does not implement is refused'
+);
+
+-- Refusals: a run the rules cannot have produced. Each one leaves the session
+-- open, so the same fixture can be used for the next attempt.
+select rls_test.says(
+  format($$public.complete_stack10_run('cccccccc-1111-4111-8111-cccccccccccc'::uuid, %s, 55, 999999999)$$, :'greedy_run'),
+  'invalid_duration', 'a claim that the run took longer than the session has existed is impossible'
+);
+select rls_test.says(
+  $$public.complete_stack10_run('cccccccc-1111-4111-8111-cccccccccccc'::uuid, array[0,0,1,0,0,0,2,2,2,3], 55, 45000)$$,
+  'invalid_actions', 'a partial run is not a finished run: the ending move cannot be dropped'
+);
+select rls_test.says(
+  $$public.complete_stack10_run('cccccccc-1111-4111-8111-cccccccccccc'::uuid, array[0,0,4], 55, 45000)$$,
+  'invalid_actions', 'a column that does not exist is impossible play'
+);
+select rls_test.says(
+  format($$public.complete_stack10_run('cccccccc-1111-4111-8111-cccccccccccc'::uuid, %s || 0, 55, 45000)$$, :'greedy_run'),
+  'invalid_actions', 'play cannot continue after the run ended'
+);
+select rls_test.raises(
+  $$select public.complete_stack10_run('cccccccc-1111-4111-8111-cccccccccccc'::uuid, array[null]::integer[], 55, 45000)$$,
+  '22023', 'a ragged action list is a request error, not a scored run'
+);
+select rls_test.says(
+  format($$public.complete_stack10_run('cccccccc-1111-4111-8111-cccccccccccc'::uuid, %s, 999, 45000)$$, :'greedy_run'),
+  'score_mismatch', 'a score the replay does not produce is refused'
+);
+select rls_test.says_field(
+  format($$public.complete_stack10_run('cccccccc-1111-4111-8111-cccccccccccc'::uuid, %s, 999, 45000)$$, :'greedy_run'),
+  'score', '55', 'the replay is the score, and it is reported back'
+);
+
+-- The real submission, then a retry of it.
+select rls_test.says(
+  format($$public.complete_stack10_run('cccccccc-1111-4111-8111-cccccccccccc'::uuid, %s, 55, 45000)$$, :'greedy_run'),
+  'recorded', 'a legal run is recorded'
+);
+select rls_test.says(
+  format($$public.complete_stack10_run('cccccccc-1111-4111-8111-cccccccccccc'::uuid, %s, 55, 45000)$$, :'greedy_run'),
+  'duplicate', 'a retry of the same submission is safe to repeat'
+);
+select rls_test.says_field(
+  format($$public.complete_stack10_run('cccccccc-1111-4111-8111-cccccccccccc'::uuid, %s, 55, 45000)$$, :'greedy_run'),
+  'ranked', 'true', 'a signed-in run is ranked'
+);
+select rls_test.says(
+  $$public.complete_stack10_run('cccccccc-1111-4111-8111-cccccccccccc'::uuid, array[0], 55, 45000)$$,
+  'closed', 'a closed session does not accept a different run in place of the recorded one'
+);
+select rls_test.ok(
+  (select verified_score = 55 from public.game_sessions where id = 'cccccccc-1111-4111-8111-cccccccccccc'),
+  'a player can read the verified score on their own session'
+);
+select rls_test.ok(
+  (select rank = 1 and score = 55 from public.game_standing('fixture-runnable', '11111111-1111-4111-8111-111111111111', null)),
+  'your standing on the board is your recorded best at its real rank'
+);
+
+-- Starting replaces your own open run, so a player cannot accumulate runs and
+-- pick one to submit later. This runs after the completion tests on purpose:
+-- replacing the open run is exactly what it does, and the fixtures above are
+-- open until they are submitted.
+select rls_test.says(
+  $$public.start_game_session('fixture-runnable', 'stack-10@1', 'test/1.0')$$,
+  'started', 'a signed-in player starts a real run'
+);
+select rls_test.says(
+  $$public.start_game_session('fixture-runnable', 'stack-10@1', 'test/1.0')$$,
+  'started', 'starting again is allowed'
+);
+select rls_test.ok(
+  rls_test.count_rows($$select id from public.game_sessions where game_id = 'aaaaaaaa-4444-4444-8444-aaaaaaaaaaaa'
+    and user_id = '11111111-1111-4111-8111-111111111111' and completed_at is null and abandoned_at is null$$) = 1,
+  'exactly one run stays open: the previous one was abandoned'
+);
+select rls_test.ok(
+  rls_test.count_rows($$select id from public.game_sessions where game_id = 'aaaaaaaa-4444-4444-8444-aaaaaaaaaaaa'
+    and user_id = '11111111-1111-4111-8111-111111111111' and abandoned_at is not null$$) >= 1,
+  'the replaced run is marked abandoned rather than deleted'
+);
+
+reset role;
+
+select set_config('request.jwt.claims', '{"role":"anon"}', true);
+set local role anon;
+
+-- The board is public, and it is the real ranking of the recorded score.
+select rls_test.visible($$select * from public.game_leaderboard('fixture-runnable', null, 10, 0)$$, 1,
+  'the board lists exactly the players with a recorded score'
+);
+select rls_test.ok(
+  (select score = 55 and rank = 1 and plays = 1 from public.game_leaderboard('fixture-runnable', null, 10, 0)),
+  'the top of the board is the verified score, at rank one, with one scored run'
+);
+select rls_test.ok(
+  (select username is not null from public.game_leaderboard('fixture-runnable', null, 10, 0)),
+  'a board entry names its player'
+);
+select rls_test.visible($$select * from public.game_standing('fixture-runnable', '22222222-2222-4222-8222-222222222222', null)$$, 0,
+  'a player with no recorded score has no standing'
+);
+
+reset role;
+
+-- Row state, read as the table's owner: the guest run closed with a verified
+-- score and wrote no ranked score row, and the retry wrote none either.
+select rls_test.ok(
+  (select verified_score = 55 and verified_digest is not null and completed_at is not null
+     from public.game_sessions where id = 'cccccccc-4444-4444-8444-cccccccccccc'),
+  'a guest run closes with a verified score on the session'
+);
+select rls_test.ok(
+  rls_test.count_rows($$select 1 from public.scores where session_id = 'cccccccc-4444-4444-8444-cccccccccccc'$$) = 0,
+  'a guest run records no ranked score'
+);
+select rls_test.ok(
+  rls_test.count_rows($$select 1 from public.scores where session_id = 'cccccccc-1111-4111-8111-cccccccccccc'$$) = 1,
+  'a retried completion leaves exactly one score for the session'
+);
+
+-- Plays are completed sessions, counted by the database: one ranked run plus one
+-- guest run, one distinct signed-in player, and the best recorded score.
+select rls_test.ok(
+  (select plays = 2 and players = 1 and best_score = 55 from public.game_stats where slug = 'fixture-runnable'),
+  'the public activity counts completed runs, distinct players and the best score'
+);
+select rls_test.ok(
+  rls_test.count_rows($$select 1 from public.game_stats where slug = 'fixture-secret'$$) = 0,
+  'an unpublished game is not in the public aggregate at all'
+);
 
 rollback;
 

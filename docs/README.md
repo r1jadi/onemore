@@ -11,6 +11,7 @@ change something safely, not to describe the project to a stranger.
 | [architecture/api.md](architecture/api.md) | To add or change an API endpoint, or to understand the gateway. |
 | [architecture/data-model.md](architecture/data-model.md) | To change the schema, or to understand ownership and row access. |
 | [architecture/web-app.md](architecture/web-app.md) | To work on the web app: SSR, SEO, PWA, performance, bundle. |
+| [games/README.md](games/README.md) | To work on a game's rules, or to make another catalogue game playable. |
 
 ## Development — how to work on it
 
@@ -44,9 +45,13 @@ one that covers an area before changing its design.
 
 ## Status
 
-This repository is at the **foundation** stage: the UI is complete and the
-infrastructure to build on is in place. Product features (games, scores,
-leaderboards, social, notifications, search, moderation, analytics, payments) are
-deliberately not implemented — each has a published contract and an unimplemented
-endpoint that answers `501` until its own task lands. See
+The foundation is complete — the UI, the API, the database and the deployment
+path all exist — and the first feature has landed on top of it: **Stack 10**, a
+real game with server-issued sessions, server-verified scores and a working
+leaderboard. Of the seven catalogue games, Stack 10 is `playable`; the other six
+are published but not playable and no screen offers to start them.
+
+The remaining features (the other games, social, notifications, search,
+moderation, analytics, payments) each have a published contract and an
+unimplemented endpoint that answers `501` until its own task lands. See
 [architecture/api.md](architecture/api.md) for the endpoint inventory.

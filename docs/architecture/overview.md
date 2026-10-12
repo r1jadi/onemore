@@ -102,14 +102,19 @@ relying on the API column: see [deployment/vercel.md](../deployment/vercel.md).
 
 ## What this foundation deliberately does not do
 
-* Most product features are not implemented: apart from the session lifecycle
-  (`auth`) and the caller's own profile (`users`), every service exposes its
-  contract and answers `501`.
+* Most product features are not implemented: `auth` (the session lifecycle),
+  `users` (the caller's own profile), `games` (the catalogue, with real play
+  counts), `sessions` (a Stack 10 run, verified and scored server-side) and one
+  `leaderboards` operation (a game's board) are available; every other service
+  exposes its contract and answers `501`.
 * No Redis, no queue, no CDN, no autoscaling: the API runs as a single instance
   until load justifies more.
 * No payments: the RaiAccept integration is designed, not built.
 * The **signed-in identity is no longer mock data**: the UI reads it from
-  `GET /api/v1/users/me`, and an edit writes the real `public.profiles` row. The
-  rest of `src/lib/mock.ts` — games, scores, leaderboards, comments and
-  notifications — is still the UI's data source until those services exist, and
-  it is never used as a fallback for the signed-in user.
+  `GET /api/v1/users/me`, and an edit writes the real `public.profiles` row. Nor
+  is the play path: **Stack 10** runs from a server-issued session, its score is
+  the database's replay of the run, and its detail page and board read real play
+  counts and real scores. The rest of `src/lib/mock.ts` — the other games,
+  comments, notifications and sample activity — is still the UI's data source
+  until those services exist, and it is never used as a fallback for the
+  signed-in user or for anything the API can answer.

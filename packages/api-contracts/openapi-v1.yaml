@@ -464,15 +464,16 @@ paths:
         anonymous caller, so a draft, a game under review or a restricted game is
         absent from the result rather than filtered out here.
 
-        Ordering is recency, which is the only order the catalogue can compute
-        from real data. `popular` and `trending` need play counts and no service
-        records plays yet, so `sort` accepts only `latest` instead of pretending a
-        ranking exists.
+        Ordering is recency, which is the only order the catalogue offers. Play
+        counts now exist, but a popularity ranking is not implemented, so `sort`
+        accepts only `latest` instead of pretending one is.
 
-        No response carries a play count, rating, like total, comment total or
-        average session duration. None of them can be derived from stored
-        activity today, and a fabricated number is indistinguishable from a real
-        one on screen.
+        `plays` is a real measurement: the number of completed runs of that game,
+        counted in the database from persisted sessions. A game nobody has
+        finished reports `0`, which is a fact and not a missing value. No rating,
+        like total, comment total or average session duration is returned — no
+        service records those, and a fabricated number is indistinguishable from a
+        real one on screen.
       security: []
       x-status: available
       parameters:
@@ -574,6 +575,71 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "501": { $ref: "#/components/responses/NotImplemented" }
 
+  /games/{slug}/leaderboard:
+    parameters:
+      - $ref: "#/components/parameters/GameSlug"
+    get:
+      operationId: getLeaderboard
+      tags: [leaderboards]
+      summary: Read a game's leaderboard
+      description: |
+        The persisted ranking for one published game: each player's best score,
+        the first time they reached it, and how many scored runs they had in the
+        window. It is derived entirely from verified scores — a board is not a
+        separate record that could disagree with the runs behind it.
+
+        Ties share a rank, so two players on 120 points are both first rather than
+        one of them being arbitrarily second.
+
+        Authentication is optional. The board is public; a caller who presents a
+        token also gets their own standing as `me`, and `me` is `null` for an
+        anonymous caller and for a signed-in one with no scored run in the window.
+        A player with no score has no rank, and zero would read as "last place".
+
+        A game that does not exist, or is not published, is a `404` — the same
+        answer as reading it — rather than an empty board. A published game nobody
+        has played is an empty board, which is a real answer.
+
+        `scope=friends` is refused with a `400` that says why: a friends board
+        needs a following graph, which does not exist yet. `scope=global` is the
+        only scope that can be computed.
+      security:
+        - {}
+        - bearerAuth: []
+      x-status: available
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - name: offset
+          in: query
+          description: |
+            How many ranked players to skip. A board is a ranking, so deep paging
+            is bounded: an offset past 10000 is a `400` rather than a request that
+            walks the whole board.
+          schema: { type: integer, minimum: 0, maximum: 10000, default: 0 }
+        - name: scope
+          in: query
+          description: |
+            Only `global` can be computed. `friends` is a real, unimplemented
+            scope and is refused with an explanation rather than being treated as a
+            typo.
+          schema: { type: string, enum: [global, friends], default: global }
+        - name: period
+          in: query
+          description: |
+            The window over the scores, by their recorded time: `all` (the
+            default), the last 24 hours, or the last 7 days.
+          schema: { type: string, enum: [all, day, week], default: all }
+      responses:
+        "200":
+          description: One page of the board, plus the caller's own standing.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LeaderboardBoard" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
   /categories:
     get:
       operationId: listCategories
@@ -604,9 +670,27 @@ paths:
       tags: [sessions]
       summary: Start a play session
       description: |
-        The server owns the session id and (where the game needs one) the seed.
-        A session is the precondition for submitting a score.
-      x-status: planned
+        Issues one run of one game. The server owns the session id, the seed and
+        the start time; the caller names the game, the rules it intends to play and
+        what it is running on. A session is the precondition for submitting a
+        score, and the only way to get one: clients have no write access to the
+        session table at all.
+
+        Only a published game with an implemented runtime can be started. An
+        unpublished game, a playable-but-unimplemented one, and a slug that does
+        not exist all answer the same `404`, so nothing can be probed by slug.
+
+        Authentication is optional. A signed-in caller's run is eligible to become
+        a ranked score; a guest's run is issued, played and verified exactly the
+        same way, and is never recorded as a score — the caller's identity comes
+        from their token and no body field can supply one.
+
+        Starting a run also abandons the caller's previous open run of the same
+        game, so a reload cannot leave two completable sessions behind.
+      security:
+        - {}
+        - bearerAuth: []
+      x-status: available
       requestBody:
         required: true
         content:
@@ -614,19 +698,27 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [gameId]
+              required: [gameSlug, rulesVersion]
               properties:
-                gameId: { type: string, format: uuid }
+                gameSlug: { type: string, pattern: "^[a-z0-9-]{2,48}$", example: stack-10 }
+                rulesVersion:
+                  type: string
+                  pattern: "^[a-z0-9-]{2,32}@[0-9]{1,4}$"
+                  example: stack-10@1
+                  description: |
+                    The rules the client will play. The server issues a session
+                    pinned to a version it can verify, and refuses one it cannot.
                 client: { type: string, maxLength: 40, example: web/1.0 }
       responses:
         "201":
           description: The open session.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/GameSession" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
+              schema: { $ref: "#/components/schemas/PlaySession" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "501": { $ref: "#/components/responses/NotImplemented" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
 
   /sessions/{sessionID}/complete:
     parameters:
@@ -639,9 +731,28 @@ paths:
       tags: [sessions]
       summary: Complete a play session and record the score
       description: |
-        The session must belong to the caller and still be open. Progress is
-        validated server-side before a score exists.
-      x-status: planned
+        Submits a finished run for verification. **The score in the body is a
+        claim, not a record**: the server replays `progress.actions` from the
+        session's seed, derives the score itself, and records that. A claimed score
+        the replay does not produce is refused (`422`, with the replayed score in
+        the message rather than recorded).
+
+        The whole run must be submitted: a body that stops before the move which
+        ended the run is refused, so a player cannot discard the move that lost.
+
+        Retries are safe and expected. A repeated submission of the run already
+        recorded answers `200` with `duplicate: true` and the recorded score, and a
+        *different* run for a closed session is refused (`409`) rather than
+        replacing the first.
+
+        The session's rules version is the one it was issued under; a session
+        pinned to rules the server does not implement is refused (`409`). A session
+        that has expired (`409`) or was abandoned by a newer run (`409`) cannot be
+        submitted at all.
+      security:
+        - {}
+        - bearerAuth: []
+      x-status: available
       requestBody:
         required: true
         content:
@@ -649,23 +760,45 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [score]
+              required: [score, durationMs, progress]
               properties:
-                score: { type: integer, minimum: 0 }
-                durationMs: { type: integer, minimum: 1 }
+                score:
+                  type: integer
+                  minimum: 0
+                  description: The score the client believes it earned. Compared with the replay; never trusted.
+                durationMs:
+                  type: integer
+                  minimum: 1
+                  description: |
+                    How long the run took, measured by the player's own clock. A
+                    claim longer than the session has existed is refused.
                 progress:
                   type: object
-                  description: "Game-defined payload, validated per game."
-                  additionalProperties: true
+                  additionalProperties: false
+                  required: [rulesVersion, actions]
+                  properties:
+                    rulesVersion: { type: string, pattern: "^[a-z0-9-]{2,32}@[0-9]{1,4}$" }
+                    actions:
+                      type: array
+                      description: |
+                        The run, as the ordered list of columns a tile was placed
+                        in. This is what is replayed; the rules for how a tile is
+                        generated and what a move does belong to the game (see
+                        `docs/games`).
+                      maxItems: 60
+                      items: { type: integer, minimum: 0, maximum: 3 }
       responses:
         "200":
-          description: The recorded score.
+          description: The verified run. Identical to a retry's answer, except that a retry sets `duplicate`.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Score" }
+              schema: { $ref: "#/components/schemas/RunResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "422": { $ref: "#/components/responses/Unprocessable" }
-        "501": { $ref: "#/components/responses/NotImplemented" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
 
   /scores/me:
     get:
@@ -731,35 +864,9 @@ paths:
                     items: { $ref: "#/components/schemas/Leaderboard" }
         "501": { $ref: "#/components/responses/NotImplemented" }
 
-  /leaderboards/{boardID}:
-    parameters:
-      - name: boardID
-        in: path
-        required: true
-        schema: { type: string, pattern: "^[a-z0-9-]{2,48}$" }
-    get:
-      operationId: getLeaderboard
-      tags: [leaderboards]
-      summary: Read a board
-      security: []
-      x-status: planned
-      parameters:
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Cursor"
-      responses:
-        "200":
-          description: Ranked entries.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  scope: { type: string, enum: [global, friends] }
-                  entries:
-                    type: array
-                    items: { $ref: "#/components/schemas/LeaderboardEntry" }
-        "404": { $ref: "#/components/responses/NotFound" }
-        "501": { $ref: "#/components/responses/NotImplemented" }
+  # A board is addressed by the game it belongs to: `GET /games/{slug}/leaderboard`.
+  # A separate `/leaderboards/{boardID}` would have taken the same game slug and
+  # answered the same question, which is two documented ways to read one resource.
 
   /feed:
     get:
@@ -1298,15 +1405,18 @@ components:
         following: { type: integer, minimum: 0 }
     Game:
       type: object
-      required: [slug, title, playable, isOfficial, updatedAt]
+      required: [slug, title, playable, plays, isOfficial, updatedAt]
       description: |
         A published game as the catalogue exposes it.
 
+        `plays` is a measurement: completed runs, counted by the database, where
+        `0` means nobody has finished the game rather than "unknown".
+
         Deliberately absent: `id` (a slug is the public identifier and the uuid is
         internal), `ownerId` (there is no public profile endpoint to resolve it
-        into a name) and every activity metric — plays, likes, comments, saves,
-        ratings, average session and ranking. None of those can be derived from
-        stored activity yet, and shipping a plausible-looking zero would be
+        into a name), and the activity metrics no service records — likes,
+        comments, saves, ratings, average session duration and any aggregate
+        ranking. Shipping a plausible-looking zero for one of those would be
         indistinguishable from a real measurement.
       properties:
         slug:
@@ -1330,14 +1440,22 @@ components:
         runtime:
           type: [string, "null"]
           description: |
-            The client runtime that plays this game, or null when none exists.
-            `playable` is `false` for every game until a runtime ships.
+            The client runtime that plays this game (`stack-10`), or null when none
+            exists. It is the runtime's identifier, not its title, because the
+            client mounts a runtime by that name.
         playable:
           type: boolean
           description: |
             True only when `runtime` names a runtime that actually exists. A
             published but unplayable game is listed, not playable, and the UI must
             not offer to start it.
+        plays:
+          type: integer
+          minimum: 0
+          description: |
+            Completed runs of this game, counted from persisted sessions. One play
+            is one finished run: an opened tab is not a play, a guest's verified
+            run is, and retrying a submission cannot add a second.
         isOfficial:
           type: boolean
           description: First-party OneMore content, as opposed to a creator's.
@@ -1402,15 +1520,66 @@ components:
         tagline: { type: string, maxLength: 120 }
         description: { type: string, maxLength: 2000 }
         categoryId: { type: string, format: uuid }
-    GameSession:
+    PlaySession:
       type: object
-      required: [id, gameId, startedAt]
+      required:
+        [id, gameSlug, rulesVersion, seed, tileCount, startedAt, expiresAt, ranked]
+      description: |
+        An issued run. The id and the seed are the server's, and the seed is sent
+        as a decimal string: it is a 64-bit integer, and a JSON number would round
+        it in a client that parses it as a double.
       properties:
         id: { type: string, format: uuid }
-        gameId: { type: string, format: uuid }
-        seed: { type: integer, format: int64 }
+        gameSlug: { type: string, pattern: "^[a-z0-9-]{2,48}$" }
+        rulesVersion: { type: string, pattern: "^[a-z0-9-]{2,32}@[0-9]{1,4}$" }
+        seed:
+          type: string
+          pattern: "^-?[0-9]{1,19}$"
+          description: The run's seed, as a decimal string. The game's tile sequence is a function of it.
+        tileCount:
+          type: integer
+          minimum: 1
+          description: How many tiles the run has. The client does not choose it.
         startedAt: { type: string, format: date-time }
-        completedAt: { type: [string, "null"], format: date-time }
+        expiresAt:
+          type: string
+          format: date-time
+          description: When the run stops being completable. An abandoned tab must not leave an open run forever.
+        ranked:
+          type: boolean
+          description: |
+            Whether a score from this run can be ranked. False for a guest run:
+            it is played and verified, and there is no user to attach a score to.
+    RunResult:
+      type: object
+      required:
+        [sessionId, gameSlug, score, clearedColumns, tilesPlaced, durationMs, ranked, recordedAt, duplicate]
+      description: |
+        A verified run. `score` is the server's own arithmetic from replaying the
+        submitted actions — not the number the client sent, which was compared with
+        it and refused on any disagreement.
+      properties:
+        sessionId: { type: string, format: uuid }
+        gameSlug: { type: string, pattern: "^[a-z0-9-]{2,48}$" }
+        score: { type: integer, minimum: 0 }
+        clearedColumns: { type: integer, minimum: 0 }
+        tilesPlaced: { type: integer, minimum: 0 }
+        durationMs: { type: integer, minimum: 1 }
+        ranked:
+          type: boolean
+          description: "False for a guest run, which is verified and recorded on the session alone."
+        recordedAt: { type: string, format: date-time }
+        personalBest:
+          type: [integer, "null"]
+          minimum: 0
+          description: The player's best score for this game after this run. Null for an unranked run.
+        rank:
+          type: [integer, "null"]
+          minimum: 1
+          description: The player's place on the all-time board after this run. Null for an unranked run.
+        duplicate:
+          type: boolean
+          description: True when this submission was a retry of the run already recorded, which is safe and scored nothing twice.
     Score:
       type: object
       required: [id, gameId, userId, score, createdAt]
@@ -1421,23 +1590,73 @@ components:
         score: { type: integer, minimum: 0 }
         durationMs: { type: [integer, "null"], minimum: 1 }
         createdAt: { type: string, format: date-time }
+    LeaderboardBoard:
+      type: object
+      required: [gameSlug, scope, period, entries, hasMore, me]
+      description: |
+        One game's ranking, as `GET /games/{slug}/leaderboard` returns it.
+      properties:
+        gameSlug: { type: string, pattern: "^[a-z0-9-]{2,48}$" }
+        scope: { type: string, enum: [global] }
+        period: { type: string, enum: [all, day, week] }
+        entries:
+          type: array
+          items: { $ref: "#/components/schemas/LeaderboardEntry" }
+        hasMore:
+          type: boolean
+          description: True when a further page exists. The server reads one row past the page rather than counting the board.
+        me:
+          oneOf:
+            - $ref: "#/components/schemas/BoardStanding"
+            - type: "null"
+          description: |
+            The caller's own standing, or null when they are anonymous or have no
+            scored run in the window. A player with no score has no rank; zero
+            would read as last place.
+    LeaderboardEntry:
+      type: object
+      required: [rank, username, score, achievedAt, plays]
+      description: |
+        One ranked player's best score in the window. There is no user id: a
+        username is how a person is addressed everywhere else in this API, and a
+        caller's own row comes back separately as `me` rather than by matching an
+        id on the client.
+      properties:
+        rank:
+          type: integer
+          minimum: 1
+          description: Ties share a rank, so two players on the same score are both first.
+        username:
+          type: string
+          description: |
+            Empty when the profile row behind the score is gone. The score is still
+            real, so it keeps its place instead of shifting everybody else up.
+        score: { type: integer, minimum: 0 }
+        achievedAt:
+          type: [string, "null"]
+          format: date-time
+          description: When the player first reached this score.
+        plays:
+          type: integer
+          minimum: 0
+          description: How many scored runs the player had in this window.
+    BoardStanding:
+      type: object
+      required: [rank, score, achievedAt, plays]
+      properties:
+        rank: { type: integer, minimum: 1 }
+        score: { type: integer, minimum: 0 }
+        achievedAt: { type: [string, "null"], format: date-time }
+        plays: { type: integer, minimum: 0 }
     Leaderboard:
       type: object
       required: [id, gameId, scope]
+      description: A board a client can discover from `GET /leaderboards`. The ranking itself is read per game.
       properties:
         id: { type: string }
         gameId: { type: string, format: uuid }
         scope: { type: string, enum: [global, friends, daily] }
         updatedAt: { type: string, format: date-time }
-    LeaderboardEntry:
-      type: object
-      required: [rank, userId, score]
-      properties:
-        rank: { type: integer, minimum: 1 }
-        userId: { type: string, format: uuid }
-        username: { type: string }
-        score: { type: integer, minimum: 0 }
-        achievedAt: { type: string, format: date-time }
     Comment:
       type: object
       required: [id, gameId, authorId, body, createdAt]

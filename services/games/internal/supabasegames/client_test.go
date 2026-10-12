@@ -2,6 +2,7 @@ package supabasegames
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 const (
 	testPublishableKey = "sb_publishable_test_value"
 	testGameID         = "11111111-1111-4111-8111-111111111111"
+	testUserID         = "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f"
 )
 
 // recorded is one request the client made.
@@ -25,6 +27,9 @@ type recorded struct {
 	path   string
 	query  url.Values
 	header http.Header
+	// body is the request payload, which is how the read-only function calls
+	// are asserted: their arguments are the request.
+	body map[string]any
 }
 
 // stubServer serves the Data API and records what the client sent.
@@ -33,12 +38,19 @@ func stubServer(t *testing.T, handler http.HandlerFunc) (*Client, *[]recorded) {
 
 	requests := &[]recorded{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		*requests = append(*requests, recorded{
+		entry := recorded{
 			method: r.Method,
 			path:   r.URL.Path,
 			query:  r.URL.Query(),
 			header: r.Header.Clone(),
-		})
+		}
+		if r.Body != nil {
+			raw, _ := io.ReadAll(r.Body)
+			if len(raw) > 0 {
+				_ = json.Unmarshal(raw, &entry.body)
+			}
+		}
+		*requests = append(*requests, entry)
 		handler(w, r)
 	}))
 	t.Cleanup(server.Close)
@@ -325,6 +337,229 @@ func TestCategoryCountsReadTheView(t *testing.T) {
 	sent := (*requests)[0]
 	if sent.path != "/rest/v1/category_game_counts" {
 		t.Fatalf("path = %q, want the counted view", sent.path)
+	}
+}
+
+// ── Activity, ranking and standing ──────────────────────────────────────────
+
+func TestGameStatsReadsOnlyTheGrantedColumns(t *testing.T) {
+	client, requests := stubServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, `[{"slug":"stack-10","plays":12},{"slug":"one-move","plays":0}]`)
+	})
+
+	stats, err := client.GameStats(context.Background())
+	if err != nil {
+		t.Fatalf("GameStats: %v", err)
+	}
+	if stats["stack-10"].Plays != 12 {
+		t.Fatalf("stack-10 plays = %d, want 12", stats["stack-10"].Plays)
+	}
+	if stats["one-move"].Plays != 0 {
+		t.Fatalf("one-move plays = %d, want a measured zero", stats["one-move"].Plays)
+	}
+	// A slug the view does not list is absent from the map, so a caller looking
+	// it up gets Go's zero — which is the answer, not a missing value.
+	if _, ok := stats["never-made"]; ok {
+		t.Fatal("a game with no stat row must not appear in the map")
+	}
+
+	sent := (*requests)[0]
+	if sent.path != "/rest/v1/game_stats" {
+		t.Fatalf("path = %q, want the activity view", sent.path)
+	}
+	if sent.query.Get("select") != statColumns {
+		t.Fatalf("select = %q, want exactly the granted columns", sent.query.Get("select"))
+	}
+	if strings.Contains(sent.query.Get("select"), "game_id") {
+		t.Fatal("the internal uuid is being selected from a public view")
+	}
+	// No user token: this is the anonymous read the browser could make itself.
+	if token := sent.header.Get("Authorization"); token != "" {
+		t.Fatalf("Authorization = %q, want none", token)
+	}
+}
+
+func TestGameStatFiltersBySlug(t *testing.T) {
+	client, requests := stubServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, `[{"slug":"stack-10","plays":3}]`)
+	})
+
+	stat, found, err := client.GameStat(context.Background(), "stack-10")
+	if err != nil {
+		t.Fatalf("GameStat: %v", err)
+	}
+	if !found || stat.Plays != 3 {
+		t.Fatalf("found = %v, stat = %#v", found, stat)
+	}
+	sent := (*requests)[0]
+	if sent.query.Get("slug") != "eq.stack-10" {
+		t.Fatalf("slug filter = %q, want an equality filter", sent.query.Get("slug"))
+	}
+	if sent.query.Get("limit") != "1" {
+		t.Fatalf("limit = %q, want one row", sent.query.Get("limit"))
+	}
+}
+
+func TestGameStatOfAnUnknownGameIsNotAnError(t *testing.T) {
+	client, _ := stubServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, `[]`)
+	})
+
+	_, found, err := client.GameStat(context.Background(), "never-made")
+	if err != nil {
+		t.Fatalf("GameStat: %v", err)
+	}
+	if found {
+		t.Fatal("a game with no stat row reported found")
+	}
+}
+
+func TestLeaderboardCallsTheBoardFunctionWithOneRowMoreThanThePage(t *testing.T) {
+	client, requests := stubServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, `[{"rank":1,"user_id":"3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f",`+
+			`"username":"rija","score":120,"achieved_at":"2026-10-12T09:30:00+00:00","plays":3},`+
+			`{"rank":2,"user_id":null,"username":null,"score":95,`+
+			`"achieved_at":"2026-10-12T09:30:00+00:00","plays":1}]`)
+	})
+
+	entries, err := client.Leaderboard(context.Background(), "stack-10", BoardQuery{Limit: 25})
+	if err != nil {
+		t.Fatalf("Leaderboard: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("entries = %d, want 2", len(entries))
+	}
+	if entries[0].Rank != 1 || entries[0].Username != "rija" || entries[0].Score != 120 || entries[0].Plays != 3 {
+		t.Fatalf("first entry = %#v", entries[0])
+	}
+	if entries[0].AchievedAt == nil {
+		t.Fatal("the first entry lost the time it was achieved")
+	}
+	// A score whose profile row is gone is still a real score: it keeps its place
+	// and its rank rather than being dropped and shifting everybody else up.
+	if entries[1].Username != "" {
+		t.Fatalf("a nameless entry = %q, want empty", entries[1].Username)
+	}
+
+	sent := (*requests)[0]
+	if sent.method != http.MethodPost || sent.path != "/rest/v1/rpc/game_leaderboard" {
+		t.Fatalf("request = %s %s, want the board function", sent.method, sent.path)
+	}
+	if sent.body["p_game_slug"] != "stack-10" {
+		t.Fatalf("p_game_slug = %v", sent.body["p_game_slug"])
+	}
+	if sent.body["p_limit"] != float64(26) {
+		t.Fatalf("p_limit = %v, want one row past the page", sent.body["p_limit"])
+	}
+	if sent.body["p_offset"] != float64(0) {
+		t.Fatalf("p_offset = %v, want 0", sent.body["p_offset"])
+	}
+	if sent.body["p_since"] != nil {
+		t.Fatalf("p_since = %v, want null for an all-time board", sent.body["p_since"])
+	}
+}
+
+func TestLeaderboardSendsAWindowedBoundary(t *testing.T) {
+	client, requests := stubServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, `[]`)
+	})
+	since := time.Date(2026, 10, 11, 9, 0, 0, 0, time.UTC)
+
+	if _, err := client.Leaderboard(context.Background(), "stack-10",
+		BoardQuery{Limit: 20, Since: since, HasSince: true}); err != nil {
+		t.Fatalf("Leaderboard: %v", err)
+	}
+
+	got, ok := (*requests)[0].body["p_since"].(string)
+	if !ok {
+		t.Fatalf("p_since = %v, want a timestamp rather than a zero date", (*requests)[0].body["p_since"])
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, got)
+	if err != nil || !parsed.Equal(since) {
+		t.Fatalf("p_since = %q (%v), want %v", got, err, since)
+	}
+}
+
+func TestLeaderboardRequiresAPositiveLimit(t *testing.T) {
+	client, requests := stubServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		t.Fatal("a page with no limit must not reach the database")
+	})
+
+	if _, err := client.Leaderboard(context.Background(), "stack-10", BoardQuery{}); err == nil {
+		t.Fatal("a zero limit was accepted")
+	}
+	if len(*requests) != 0 {
+		t.Fatalf("requests = %d, want none", len(*requests))
+	}
+}
+
+func TestStandingReadsOnePlayersPlace(t *testing.T) {
+	client, requests := stubServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, `[{"rank":4,"score":88,"achieved_at":"2026-10-12T09:30:00+00:00","plays":2}]`)
+	})
+
+	standing, found, err := client.Standing(context.Background(), "stack-10", testUserID, BoardQuery{})
+	if err != nil {
+		t.Fatalf("Standing: %v", err)
+	}
+	if !found || standing.Rank != 4 || standing.Score != 88 || standing.Plays != 2 {
+		t.Fatalf("found = %v, standing = %#v", found, standing)
+	}
+
+	sent := (*requests)[0]
+	if sent.path != "/rest/v1/rpc/game_standing" {
+		t.Fatalf("path = %q, want the standing function", sent.path)
+	}
+	if sent.body["p_user_id"] != testUserID {
+		t.Fatalf("p_user_id = %v, want the caller", sent.body["p_user_id"])
+	}
+}
+
+func TestStandingOfAnUnrankedPlayerIsAnAnswer(t *testing.T) {
+	client, _ := stubServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, `[]`)
+	})
+
+	_, found, err := client.Standing(context.Background(), "stack-10", testUserID, BoardQuery{})
+	if err != nil {
+		t.Fatalf("Standing: %v", err)
+	}
+	if found {
+		t.Fatal("a player with no scored run reported a standing")
+	}
+}
+
+func TestStandingWithoutAUserIsNeverSent(t *testing.T) {
+	client, requests := stubServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		t.Fatal("an empty user id must not become a query")
+	})
+
+	_, found, err := client.Standing(context.Background(), "stack-10", "", BoardQuery{})
+	if err != nil || found {
+		t.Fatalf("err = %v, found = %v; want no answer and no error", err, found)
+	}
+	if len(*requests) != 0 {
+		t.Fatalf("requests = %d, want none", len(*requests))
+	}
+}
+
+func TestReadOnlyFunctionFailureIsClassified(t *testing.T) {
+	client, _ := stubServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusForbidden, `{"code":"42501","message":"permission denied for function game_leaderboard",`+
+			`"details":"the role lacks execute"}`)
+	})
+
+	_, err := client.Leaderboard(context.Background(), "stack-10", BoardQuery{Limit: 20})
+	var dataErr *Error
+	if !errors.As(err, &dataErr) {
+		t.Fatalf("err = %v, want a classified Data API error", err)
+	}
+	if !dataErr.IsForbidden() || dataErr.Code != "42501" {
+		t.Fatalf("error = %+v, want a forbidden classification", dataErr)
+	}
+	// The database's own message describes the schema and is never carried.
+	if strings.Contains(err.Error(), "permission denied") || strings.Contains(err.Error(), "details") {
+		t.Fatalf("error %q carries the upstream message", err)
 	}
 }
 

@@ -28,6 +28,8 @@ function gamePayload(overrides: Partial<Game> = {}): Game {
     category: { slug: "puzzle", name: "Puzzle" },
     runtime: null,
     playable: false,
+    // Completed runs, counted by the database: zero until somebody finishes one.
+    plays: 0,
     isOfficial: true,
     coverPath: null,
     publishedAt: "2026-09-01T12:00:00+00:00",

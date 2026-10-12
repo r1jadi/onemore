@@ -8,11 +8,11 @@
  *   - **A slug is the identifier.** Routes and links use it (`/games/stack-10`),
  *     so a catalogue link survives a redeploy and matches the API's own path
  *     parameter.
- *   - **There are no activity metrics.** The API returns no play count, like
- *     total, comment total, rating, average session or ranking, because none of
- *     them can be derived from stored activity yet. Nothing in this module
- *     invents, defaults or estimates one — a screen renders nothing for a metric
- *     it does not have, which is the only honest empty state.
+ *   - **Activity is measured, never estimated.** A game's `plays` is its number of
+ *     *completed* runs, counted in the database from persisted sessions, and a game
+ *     nobody has finished reports zero. There is still no rating, comment total or
+ *     average session anywhere, because no service records those — and nothing here
+ *     invents, defaults or estimates one.
  *   - **An unpublished game is a 404.** The API answers the same way for an
  *     unknown slug and a draft, so a failed detail read is reported as "missing"
  *     rather than as an error to retry.
@@ -75,6 +75,11 @@ export type Game = {
    * is listed, not playable — no screen may offer to start it.
    */
   playable: boolean;
+  /**
+   * Completed runs, counted by the database. Always present, and always a real
+   * measurement: zero means nobody has finished this game yet.
+   */
+  plays: number;
   /** First-party OneMore content, as opposed to a creator's. */
   isOfficial: boolean;
   /** Storage object path (`<slug>/<file>`), not a URL. See `coverUrl`. */

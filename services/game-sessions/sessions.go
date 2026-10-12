@@ -1,0 +1,417 @@
+// Package gamesessions is the play-session service: it issues a run, and it
+// accepts a finished one.
+//
+// Three decisions shape everything here.
+//
+//   - **The database is the authority, and this service holds no master key.**
+//     `public.start_game_session` picks the seed, and
+//     `public.complete_stack10_run` replays the submitted actions, derives the
+//     score and writes the ledger. This service validates the request shape,
+//     maps the verifier's outcome onto an HTTP answer, and never sees a score it
+//     can change. That is why there is no service_role key anywhere in the
+//     configuration: a credential that bypasses every policy is a much larger
+//     thing to hand out than a verifier the database already owns.
+//
+//   - **The caller's own token is the credential.** Both writes go to the Data
+//     API with the access token the request arrived with, so `auth.uid()` inside
+//     those functions *is* the caller. A body can therefore never name a user,
+//     and a guest run (no token) is verified and closed without ever becoming a
+//     ranked score.
+//
+//   - **A refusal is data, not an exception.** The verifier answers with an
+//     outcome — `recorded`, `duplicate`, `expired`, `score_mismatch`, and so on —
+//     and this service is the only place that decides what each one means over
+//     HTTP: a retry that must be safe, a closed run that must not be replaced, a
+//     claim the replay contradicts.
+package gamesessions
+
+import (
+	"context"
+	"log/slog"
+	"net/http"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/r1jadi/onemore/packages/go/platform/apierr"
+	"github.com/r1jadi/onemore/packages/go/platform/authn"
+	"github.com/r1jadi/onemore/packages/go/platform/config"
+	"github.com/r1jadi/onemore/packages/go/platform/httpx"
+	"github.com/r1jadi/onemore/services/game-sessions/internal/supabaseplay"
+	"github.com/r1jadi/onemore/services/internal/servicekit"
+)
+
+// Name is the service's name in logs, configuration and the routing table.
+const Name = "game-sessions"
+
+const (
+	// maxBodyBytes bounds a request body: a run is at most a few hundred bytes.
+	maxBodyBytes = 8 * 1024
+	// maxActions mirrors the number of tiles in a run. The verifier enforces it
+	// too; this only keeps an absurd body from reaching the database at all.
+	maxActions = 60
+	// columns is the board width a column index has to address.
+	columns = 4
+)
+
+// Patterns mirror the database constraints, so a bad request is a 400 that names
+// the field instead of a 500 raised by a function.
+var (
+	gameSlugPattern     = regexp.MustCompile(`^[a-z0-9-]{2,48}$`)
+	rulesVersionPattern = regexp.MustCompile(`^[a-z0-9-]{2,32}@[0-9]{1,4}$`)
+	sessionIDPattern    = regexp.MustCompile(`^[0-9a-f-]{36}$`)
+)
+
+// ── The database surface this service needs ──────────────────────────────────
+//
+// The request and verdict types live in the play client, which is where a
+// database row becomes an API-shaped value — the same split the catalogue uses.
+// What this package owns is the decision of what each verdict means over HTTP.
+
+// Backend is the play surface this service needs. It is an interface so the
+// handlers are tested without a network, and so a deployment that was not given
+// Supabase credentials still boots, serves its probes, and answers 503 on the
+// session routes instead of crash-looping.
+type Backend interface {
+	StartSession(ctx context.Context, request supabaseplay.StartRequest) (supabaseplay.Start, error)
+	CompleteRun(ctx context.Context, request supabaseplay.CompleteRequest) (supabaseplay.Result, error)
+}
+
+// ── Response shapes ─────────────────────────────────────────────────────────
+
+// sessionView is an issued run as the API exposes it. It carries no user id:
+// the caller is the token, and the client already knows who it is.
+type sessionView struct {
+	ID           string `json:"id"`
+	GameSlug     string `json:"gameSlug"`
+	RulesVersion string `json:"rulesVersion"`
+	// Seed is a decimal string, exactly as the database holds it. See Start.Seed.
+	Seed      string    `json:"seed"`
+	TileCount int       `json:"tileCount"`
+	StartedAt time.Time `json:"startedAt"`
+	ExpiresAt time.Time `json:"expiresAt"`
+	// Ranked is false for a guest run: it is played and verified, and it is not
+	// eligible for a score.
+	Ranked bool `json:"ranked"`
+}
+
+// resultView is a finished run as the API exposes it. `duplicate` is true when
+// the submission was a retry of the run already recorded, which is the same
+// answer to the client — the score — and a different fact about the request.
+type resultView struct {
+	SessionID      string    `json:"sessionId"`
+	GameSlug       string    `json:"gameSlug"`
+	Score          int64     `json:"score"`
+	ClearedColumns int       `json:"clearedColumns"`
+	TilesPlaced    int       `json:"tilesPlaced"`
+	DurationMS     int       `json:"durationMs"`
+	Ranked         bool      `json:"ranked"`
+	RecordedAt     time.Time `json:"recordedAt"`
+	PersonalBest   *int64    `json:"personalBest"`
+	Rank           *int64    `json:"rank"`
+	Duplicate      bool      `json:"duplicate"`
+}
+
+// ── Handlers ────────────────────────────────────────────────────────────────
+
+type service struct {
+	backend Backend
+	logger  *slog.Logger
+}
+
+func newService(backend Backend, logger *slog.Logger) *service {
+	return &service{backend: backend, logger: logger}
+}
+
+// register mounts the session routes. Both are optional-auth: a visitor without
+// an account can play, and their run is verified and left unranked.
+func (s *service) register(router *httpx.Router) {
+	router.OptionalAuthFunc("POST /api/v1/sessions", s.startSession)
+	router.OptionalAuthFunc("POST /api/v1/sessions/{sessionID}/complete", s.completeSession)
+}
+
+// startSessionRequest is the documented body: the game by slug, the rules the
+// client intends to play, and who is playing. No user id and no seed — both are
+// the server's.
+type startSessionRequest struct {
+	GameSlug     string `json:"gameSlug"`
+	RulesVersion string `json:"rulesVersion"`
+	Client       string `json:"client"`
+}
+
+func (s *service) startSession(w http.ResponseWriter, r *http.Request) {
+	if s.backend == nil {
+		s.notConfigured(w, r, "start a run")
+		return
+	}
+
+	var body startSessionRequest
+	if err := httpx.DecodeJSON(w, r, maxBodyBytes, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+
+	slug := strings.TrimSpace(body.GameSlug)
+	if !gameSlugPattern.MatchString(slug) {
+		httpx.WriteError(w, r, httpx.NewError(httpx.CodeBadRequest,
+			"That is not a valid game slug.",
+			apierr.Detail{Field: "gameSlug", Rule: "format"}))
+		return
+	}
+
+	rules := strings.TrimSpace(body.RulesVersion)
+	if !rulesVersionPattern.MatchString(rules) {
+		httpx.WriteError(w, r, httpx.NewError(httpx.CodeBadRequest,
+			"That is not a valid rules version.",
+			apierr.Detail{Field: "rulesVersion", Rule: "format"}))
+		return
+	}
+
+	client := strings.TrimSpace(body.Client)
+	if len(client) > 40 {
+		httpx.WriteError(w, r, httpx.NewError(httpx.CodeBadRequest,
+			"client is longer than 40 characters.",
+			apierr.Detail{Field: "client", Rule: "length"}))
+		return
+	}
+
+	start, err := s.backend.StartSession(r.Context(), supabaseplay.StartRequest{
+		GameSlug:     slug,
+		RulesVersion: rules,
+		Client:       client,
+		AccessToken:  callerToken(r),
+	})
+	if err != nil {
+		s.dataFailure(w, r, "start a run", err)
+		return
+	}
+
+	switch start.Outcome {
+	case "started":
+		httpx.WriteJSON(w, r, http.StatusCreated, sessionView{
+			ID:           start.ID,
+			GameSlug:     start.GameSlug,
+			RulesVersion: start.RulesVersion,
+			Seed:         start.Seed,
+			TileCount:    start.TileCount,
+			StartedAt:    start.StartedAt,
+			ExpiresAt:    start.ExpiresAt,
+			Ranked:       start.Ranked,
+		})
+	case "not_playable":
+		// An unpublished game, a game with no runtime, and a slug that does not
+		// exist answer identically. Telling them apart would let a stranger
+		// enumerate drafts.
+		httpx.WriteError(w, r, httpx.NewError(httpx.CodeNotFound,
+			"No playable game with that slug."))
+	case "unsupported_runtime":
+		httpx.WriteError(w, r, httpx.NewError(httpx.CodeBadRequest,
+			"That game's rules version is not one this server can verify.",
+			apierr.Detail{Field: "rulesVersion", Rule: "unsupported"}))
+	default:
+		s.unexpectedOutcome(w, r, "start a run", start.Outcome)
+	}
+}
+
+// completeSessionRequest is the documented body: the score the client believes
+// it earned, how long the run took, and the run itself inside `progress`. The
+// claimed score is a claim — the verifier compares it against its own replay.
+type completeSessionRequest struct {
+	Score      *int64 `json:"score"`
+	DurationMS *int   `json:"durationMs"`
+	Progress   *struct {
+		RulesVersion string  `json:"rulesVersion"`
+		Actions      []int32 `json:"actions"`
+	} `json:"progress"`
+}
+
+func (s *service) completeSession(w http.ResponseWriter, r *http.Request) {
+	if s.backend == nil {
+		s.notConfigured(w, r, "submit a run")
+		return
+	}
+
+	sessionID := strings.TrimSpace(r.PathValue("sessionID"))
+	if !sessionIDPattern.MatchString(sessionID) {
+		httpx.WriteError(w, r, httpx.NewError(httpx.CodeBadRequest,
+			"That is not a valid session id.",
+			apierr.Detail{Field: "sessionID", Rule: "format"}))
+		return
+	}
+
+	var body completeSessionRequest
+	if err := httpx.DecodeJSON(w, r, maxBodyBytes, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+
+	if body.Score == nil || *body.Score < 0 {
+		httpx.WriteError(w, r, httpx.NewError(httpx.CodeBadRequest,
+			"score must be a whole number of zero or more.",
+			apierr.Detail{Field: "score", Rule: "range"}))
+		return
+	}
+	if body.DurationMS == nil || *body.DurationMS < 1 {
+		httpx.WriteError(w, r, httpx.NewError(httpx.CodeBadRequest,
+			"durationMs must be a positive number of milliseconds.",
+			apierr.Detail{Field: "durationMs", Rule: "range"}))
+		return
+	}
+	if body.Progress == nil {
+		httpx.WriteError(w, r, httpx.NewError(httpx.CodeBadRequest,
+			"progress is required: the run has to be submitted to be verified.",
+			apierr.Detail{Field: "progress", Rule: "required"}))
+		return
+	}
+
+	rules := strings.TrimSpace(body.Progress.RulesVersion)
+	if !rulesVersionPattern.MatchString(rules) {
+		httpx.WriteError(w, r, httpx.NewError(httpx.CodeBadRequest,
+			"That is not a valid rules version.",
+			apierr.Detail{Field: "progress.rulesVersion", Rule: "format"}))
+		return
+	}
+
+	actions := body.Progress.Actions
+	if len(actions) > maxActions {
+		httpx.WriteError(w, r, httpx.NewError(httpx.CodeBadRequest,
+			"That run has more moves than the game has tiles.",
+			apierr.Detail{Field: "progress.actions", Rule: "length"}))
+		return
+	}
+	// A column index outside the board is malformed input rather than a bad run;
+	// whether the *sequence* is possible is the verifier's call, not this one's.
+	for _, action := range actions {
+		if action < 0 || action >= columns {
+			httpx.WriteError(w, r, httpx.NewError(httpx.CodeBadRequest,
+				"Every action must be a column index from 0 to 3.",
+				apierr.Detail{Field: "progress.actions", Rule: "range"}))
+			return
+		}
+	}
+
+	result, err := s.backend.CompleteRun(r.Context(), supabaseplay.CompleteRequest{
+		SessionID:    sessionID,
+		RulesVersion: rules,
+		Actions:      actions,
+		Score:        *body.Score,
+		DurationMS:   *body.DurationMS,
+		AccessToken:  callerToken(r),
+	})
+	if err != nil {
+		s.dataFailure(w, r, "submit a run", err)
+		return
+	}
+
+	switch result.Outcome {
+	case "recorded", "duplicate":
+		httpx.WriteJSON(w, r, http.StatusOK, resultView{
+			SessionID:      result.SessionID,
+			GameSlug:       result.GameSlug,
+			Score:          deref(result.Score),
+			ClearedColumns: deref(result.ClearedColumns),
+			TilesPlaced:    deref(result.TilesPlaced),
+			DurationMS:     deref(result.DurationMS),
+			Ranked:         deref(result.Ranked),
+			RecordedAt:     deref(result.RecordedAt),
+			PersonalBest:   result.PersonalBest,
+			Rank:           result.Rank,
+			Duplicate:      result.Outcome == "duplicate",
+		})
+	case "not_found":
+		// Someone else's session and a session that never existed are the same
+		// answer, so run ids cannot be probed for existence.
+		httpx.WriteError(w, r, httpx.NewError(httpx.CodeNotFound, "No such run."))
+	case "expired":
+		httpx.WriteError(w, r, httpx.NewError(httpx.CodeConflict,
+			"That run expired before it was submitted. Start a new one."))
+	case "abandoned":
+		httpx.WriteError(w, r, httpx.NewError(httpx.CodeConflict,
+			"That run was replaced by a newer one. Only the open run can be submitted."))
+	case "closed":
+		httpx.WriteError(w, r, httpx.NewError(httpx.CodeConflict,
+			"That run was already recorded, and a different submission cannot replace it."))
+	case "wrong_rules":
+		httpx.WriteError(w, r, httpx.NewError(httpx.CodeConflict,
+			"That run was started under different rules and cannot be verified now."))
+	case "invalid_actions":
+		httpx.WriteError(w, r, httpx.NewError(httpx.CodeUnprocessable,
+			"That run does not follow the rules, so it cannot be scored."))
+	case "invalid_duration":
+		httpx.WriteError(w, r, httpx.NewError(httpx.CodeUnprocessable,
+			"That run claims to have lasted longer than the session has existed."))
+	case "score_mismatch":
+		httpx.WriteError(w, r, httpx.NewError(httpx.CodeUnprocessable,
+			"That score is not the one this run produces."))
+	default:
+		s.unexpectedOutcome(w, r, "submit a run", result.Outcome)
+	}
+}
+
+func deref[T any](value *T) T {
+	if value == nil {
+		return *new(T)
+	}
+	return *value
+}
+
+// ── Caller identity and failure reporting ───────────────────────────────────
+
+// callerToken is the caller's own access token, forwarded so the database can
+// answer as that caller. It is never stored, logged or reused.
+func callerToken(r *http.Request) string {
+	return authn.BearerToken(r.Header.Get("Authorization"))
+}
+
+// notConfigured is the answer when the deployment has no Supabase credentials:
+// a 503 that says the feature is unavailable, not a 404 that would suggest the
+// route does not exist.
+func (s *service) notConfigured(w http.ResponseWriter, r *http.Request, operation string) {
+	s.logger.WarnContext(r.Context(), "play sessions are not configured", slog.String("operation", operation))
+	httpx.WriteError(w, r, httpx.NewError(httpx.CodeUnavailable, "Play sessions are not available right now."))
+}
+
+// dataFailure logs the operation and the transport error and answers 503. The
+// error is logged, never returned: it can carry the upstream status and codes,
+// which are not the caller's business.
+func (s *service) dataFailure(w http.ResponseWriter, r *http.Request, operation string, err error) {
+	s.logger.ErrorContext(r.Context(), "play session call failed",
+		slog.String("operation", operation),
+		slog.Any("error", err),
+	)
+	httpx.WriteError(w, r, httpx.NewError(httpx.CodeUnavailable, "Play sessions are not available right now."))
+}
+
+// unexpectedOutcome is the only honest answer to an outcome this service does not
+// know: the run's state is unclear, so it must not be reported as success.
+func (s *service) unexpectedOutcome(w http.ResponseWriter, r *http.Request, operation, outcome string) {
+	s.logger.ErrorContext(r.Context(), "unrecognised play outcome",
+		slog.String("operation", operation),
+		slog.String("outcome", outcome),
+	)
+	httpx.WriteError(w, r, httpx.NewError(httpx.CodeInternal, "Something went wrong on our side."))
+}
+
+// ── Wiring ──────────────────────────────────────────────────────────────────
+
+// Options returns the wiring every game-sessions entrypoint runs.
+func Options() servicekit.Options {
+	return servicekit.Options{
+		Name: Name,
+		RegisterWith: func(router *httpx.Router, cfg *config.Config, logger *slog.Logger, _ *authn.Verifier) {
+			var backend Backend
+			client, err := supabaseplay.New(cfg)
+			if err != nil {
+				// Booting anyway is deliberate: the service still serves its
+				// probes and answers 503 on the session routes, which is far
+				// more diagnosable than a crash loop. The error names the
+				// missing variables and carries no value.
+				logger.Warn("Supabase play sessions are not configured; the session routes answer 503",
+					slog.Any("error", err))
+			} else {
+				backend = client
+			}
+			newService(backend, logger).register(router)
+		},
+	}
+}

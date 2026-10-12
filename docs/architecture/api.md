@@ -63,10 +63,11 @@ Rules that hold everywhere:
 | Prefix                                   | Service         | Notes                                                                    |
 | ---------------------------------------- | --------------- | ------------------------------------------------------------------------ |
 | `/api/v1/auth`                           | auth            | sessions on top of Supabase Auth — **implemented**                       |
+| `/api/v1/games/{slug}/leaderboard`       | games           | a game's persisted ranking — **implemented** (optional auth: adds `me`)   |
 | `/api/v1/users`                          | users           | the caller's own profile — **implemented** (`GET`/`PATCH /users/me`)     |
-| `/api/v1/games`                          | games           | the published catalogue — **implemented** (list, search, detail by slug) |
+| `/api/v1/games`                          | games           | the published catalogue — **implemented** (list, search, detail by slug, and per-game leaderboard) |
 | `/api/v1/categories`                     | games           | categories with real published-game counts — **implemented**             |
-| `/api/v1/sessions`                       | game-sessions   | play sessions; the only door to a score                                  |
+| `/api/v1/sessions`                       | game-sessions   | play sessions; the only door to a score — **implemented** (`POST`, and `POST /{id}/complete`) |
 | `/api/v1/scores`                         | scores          | read-only to clients                                                     |
 | `/api/v1/leaderboards`                   | leaderboards    | projections over scores                                                  |
 | `/api/v1/feed`                           | feed            | personalised feed                                                        |
@@ -130,9 +131,22 @@ deployment would report a healthy gateway as down.
 carry `x-status: planned | available`; `available` means the behaviour is
 implemented and matches the document, and `planned` means the route exists, is
 authorized and is rate limited, and answers `501` until the feature task lands.
-Two groups are `available`: `auth` (the session lifecycle) and `users` (`/users/me`,
-the signed-in user's own profile). Ten operations are `available` today; the rest
-of the document is the route table the remaining services will fill in.
+Four groups are `available`: `auth` (the session lifecycle), `users` (`/users/me`,
+the signed-in user's own profile), `games` (the catalogue, with real play counts)
+and `sessions` (starting a run and submitting it for verification). The
+`leaderboards` group is available for one operation — a game's board, nested under
+the game it ranks — and planned for the rest. The rest of the document is the route
+table the remaining services will fill in.
+
+A score is the server's arithmetic, never the client's claim: `POST /sessions/{id}/complete`
+replays the submitted run in the database and records what it derives. See
+[ADR 0012](../decisions/0012-server-verified-scores.md) and [docs/games](../games/README.md).
+
+`/api/v1/sessions` is served by the **games deployment**, which mounts the
+`game-sessions` package beside the catalogue: Vercel's Go preset offers one
+remaining entrypoint name at that service root, so two packages share one
+deployment while staying separate packages with separate backends. See
+[../deployment/vercel.md](../deployment/vercel.md).
 
 CI verifies the contract twice: `redocly lint` for structural validity, and the
 drift check that every routed group appears in it (and that nothing documented is

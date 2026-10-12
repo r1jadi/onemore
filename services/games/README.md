@@ -1,43 +1,67 @@
 # services/games
 
-The public game catalogue: which games exist, what they are, and how many
-published games each category holds. It is the read side of the product — the
-screens that browse, search and open a game.
+The public game catalogue: which games exist, what they are, how many published
+games each category holds, how many runs each game has had, and each game's
+leaderboard. It is the read side of the product — the screens that browse, search,
+open and rank a game.
 
 ## Routes
 
-| Route                               | Auth          | What it does                                                                                                                                                                             |
-| ----------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/v1/games`                 | public        | A page of published games, newest first. Filters: `category` (slug), `q` (substring over title, tagline and description), `sort` (only `latest`), `limit` (1–100, default 20), `cursor`. |
-| `GET /api/v1/games/{slug}`          | public        | One published game, by its stable slug (`stack-10`).                                                                                                                                     |
-| `GET /api/v1/categories`            | public        | Every category with its real published-game count.                                                                                                                                       |
-| `POST /api/v1/games`                | authenticated | **Planned** — answers `501`. Creating a game is a separate feature.                                                                                                                      |
-| `PATCH /api/v1/games/{slug}`        | authenticated | **Planned** — answers `501`.                                                                                                                                                             |
-| `POST /api/v1/games/{slug}/publish` | authenticated | **Planned** — answers `501`. Publishing is a moderation decision.                                                                                                                        |
+| Route                                | Auth     | What it does                                                                                                                                                                             |
+| ------------------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/games`                  | public   | A page of published games, newest first. Filters: `category` (slug), `q` (substring over title, tagline and description), `sort` (only `latest`), `limit` (1–100, default 20), `cursor`. |
+| `GET /api/v1/games/{slug}`           | public   | One published game, by its stable slug (`stack-10`), with its real play count.                                                                                                           |
+| `GET /api/v1/games/{slug}/leaderboard` | optional | The game's persisted ranking. A token only adds the caller's own standing as `me`.                                                                                                        |
+| `GET /api/v1/categories`             | public   | Every category with its real published-game count.                                                                                                                                       |
+| `POST /api/v1/games`                 | authenticated | **Planned** — answers `501`. Creating a game is a separate feature.                                                                                                                  |
+| `PATCH /api/v1/games/{slug}`         | authenticated | **Planned** — answers `501`.                                                                                                                                                         |
+| `POST /api/v1/games/{slug}/publish`  | authenticated | **Planned** — answers `501`. Publishing is a moderation decision.                                                                                                                  |
 
 `x-status` in [`packages/api-contracts/openapi-v1.yaml`](../../packages/api-contracts/openapi-v1.yaml)
 is the authority for which of these are implemented; the planned three exist so
 the contract and the router cannot drift, and so a client gets a documented `501`
 rather than an unexplained `404`.
 
+The play sessions and the submission that verifies a score are the
+[`game-sessions`](../game-sessions/README.md) package's routes. They are served by
+the same *deployment* (Vercel's Go preset has one entrypoint name left — see
+[deployment/vercel.md](../../docs/deployment/vercel.md)) but not by this package:
+the route table names `/api/v1/sessions` under the service that answers it.
+
+## Play counts and boards
+
+`plays` is a real measurement: the number of **completed** runs, counted in the
+database by `public.game_stats` from persisted sessions. Zero means nobody has
+finished the game, which is a fact rather than a missing value — so the field is
+always present and always a number.
+
+The board comes from `public.game_leaderboard`, which derives it from recorded
+scores: each player's best score, the first time they reached it, how many scored
+runs they had in the window, and ties sharing a rank. Both are `security invoker`,
+so RLS still decides what a caller may see, and the service presents what the
+database ranked without recomputing or caching it. A game nobody has played is an
+empty board — an answer — while an unknown or unpublished game is a `404`, the same
+answer as reading it.
+
+`scope=friends` is refused with a `400` that explains itself: a friends board needs
+a following graph, which does not exist yet.
+
 ## What the catalogue deliberately does not return
 
-No response carries a play count, like total, comment total, save total, rating,
-average session duration or ranking. None of them can be derived from stored
-activity today: the sessions, scores and social services are not implemented, so
-`public.game_sessions` and `public.scores` are empty. A zero would read as a
-measurement and an estimate would read as a fact, so the fields are absent and the
-UI renders nothing.
+No response carries a like total, comment total, save total, rating, average
+session duration or aggregate ranking. No service records any of them, and a
+plausible-looking zero would be indistinguishable from a real measurement, so the
+fields are absent and the UI renders nothing.
 
-`sort` therefore accepts exactly one value. `popular` and `trending` need play
-counts, and a `400` that says so is more honest than a ranking computed from
-publication order.
+`sort` therefore accepts exactly one value: play counts exist, but a
+play-weighted ranking is not implemented, and a `400` that says so is more honest
+than a ranking computed from publication order.
 
-For the same reason `GET /api/v1/games/{slug}` reports `playable: false` and
-`runtime: null` for every game: no game runtime has been built, and the UI must not
-offer a Play button that cannot start anything. `playable` is true only when a
-runtime genuinely exists — the database enforces that with
-`games_playable_requires_runtime`.
+`playable` is true only when a runtime genuinely exists — the database enforces
+that with `games_playable_requires_runtime` — and Stack 10 is the only game with
+one today. `runtime` is the runtime's identifier (`stack-10`), because the client
+mounts a runtime by that name; the game's rules are documented in
+[`docs/games`](../../docs/games/README.md).
 
 ## How it reads
 
@@ -48,8 +72,10 @@ Two properties of the client
   as the `anon` role, so Row Level Security is the authority on what exists: an
   unpublished game is not filtered out by this service, it is not in the response
   at all. The service holds no credential that could read a draft.
-- **The service never writes.** Creating and editing games is a later feature, so a
-  bug here cannot mutate production content.
+- **The service never writes.** It reads the catalogue, the activity view and the
+  board, and calls two read-only functions. Creating and editing games is a later
+  feature, so a bug here cannot mutate production content — and it holds no
+  credential that could.
 
 An unknown slug and an unpublished game both answer `404`, which is why they must
 stay indistinguishable: telling them apart would let a stranger enumerate drafts.
@@ -57,6 +83,11 @@ stay indistinguishable: telling them apart would let a stranger enumerate drafts
 Category counts come from `public.category_game_counts`, a view whose
 `status = 'published'` filter lives inside its definition — so a draft never
 contributes, not even for a caller who could see it.
+
+The activity view's projections name their columns: `slug` and `plays` are granted,
+`game_id` is not. The internal uuid stays internal, exactly as it does in a game
+response, and a request that asked for it would be refused by the grant rather than
+by this service remembering to omit it.
 
 ## Cursors
 
@@ -111,8 +142,11 @@ cd services && go test ./games/...
 ```
 
 The suite covers the query the client builds, the cursor round-trip, every rejected
-parameter, `404` for an unknown slug, the `503` when Supabase is unconfigured, and
-the absence of fabricated metrics from a response. The database-side rules —
-unpublished games invisible to an anonymous caller, and the category count — are in
+parameter, `404` for an unknown slug, the `503` when Supabase is unconfigured, the
+real play count (and that an unreadable one fails the listing rather than reading as
+zero), the board's paging, windows and scopes, that a standing is read for the
+caller's token and for nobody else, and the absence of fabricated metrics from a
+response. The database-side rules — unpublished games invisible to an anonymous
+caller, the category count, and the board's derivation — are in
 [`tests/security/rls_test.sql`](../../tests/security/rls_test.sql), run by
 `./scripts/test-rls.sh`.

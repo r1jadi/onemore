@@ -20,6 +20,7 @@
 package supabasegames
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -61,6 +62,12 @@ const gameOrder = "published_at.desc.nullslast,id.desc"
 
 // categoryCountColumns is the projection of the `category_game_counts` view.
 const categoryCountColumns = "slug,name,description,sort_order,game_count"
+
+// statColumns is the projection of the `game_stats` view. `game_id` is
+// deliberately absent: the view grants a caller the aggregate columns and not the
+// internal uuid, which is why this projection is also the complete list of what
+// may be read from it.
+const statColumns = "slug,plays"
 
 // Category is a game's category, trimmed to what a screen renders.
 type Category struct {
@@ -107,6 +114,44 @@ type CategoryCount struct {
 	Description *string
 	SortOrder   int
 	GameCount   int64
+}
+
+// PlayStat is one published game's real activity: how many finished runs it has
+// had. It is counted in the database, and a game nobody has finished is present
+// with zero — which is a measurement, not a missing value.
+type PlayStat struct {
+	Slug  string
+	Plays int64
+}
+
+// LeaderboardEntry is one player's place on a board: their best score, the first
+// time they reached it and how many scored runs they had it with. There is no
+// user id here on purpose — a username is how a person is addressed everywhere
+// else in this API, and the caller's own row comes back as `me`.
+type LeaderboardEntry struct {
+	Rank       int64
+	Username   string
+	Score      int64
+	AchievedAt *time.Time
+	Plays      int64
+}
+
+// Standing is one player's place on one board, as the database computed it.
+type Standing struct {
+	Rank       int64
+	Score      int64
+	AchievedAt *time.Time
+	Plays      int64
+}
+
+// BoardQuery describes one page of a board. Since is exclusive of everything
+// before it; nil means all time. HasSince distinguishes "all time" from a zero
+// timestamp, the same way the catalogue's cursor does.
+type BoardQuery struct {
+	Limit    int
+	Offset   int
+	Since    time.Time
+	HasSince bool
 }
 
 // ListQuery describes one catalogue page.
@@ -260,6 +305,155 @@ func (c *Client) CategoryCounts(ctx context.Context) ([]CategoryCount, error) {
 	return counts, nil
 }
 
+// GameStats reads every published game's real play count.
+//
+// One request rather than one per game: the view is small, and a screen that
+// listed games one count at a time would be a query per row.
+func (c *Client) GameStats(ctx context.Context) (map[string]PlayStat, error) {
+	params := url.Values{}
+	params.Set("select", statColumns)
+
+	rows, err := getRows[playStatRow](c, ctx, "game-stats", "/rest/v1/game_stats?"+params.Encode())
+	if err != nil {
+		return nil, err
+	}
+
+	stats := make(map[string]PlayStat, len(rows))
+	for _, row := range rows {
+		stats[row.Slug] = PlayStat{Slug: row.Slug, Plays: row.Plays}
+	}
+	return stats, nil
+}
+
+// GameStat reads one game's play count. The slug is filtered in the query rather
+// than by reading the whole view, so a single game costs one row.
+func (c *Client) GameStat(ctx context.Context, slug string) (PlayStat, bool, error) {
+	if slug == "" {
+		return PlayStat{}, false, errors.New("a play-count lookup needs a slug")
+	}
+
+	params := url.Values{}
+	params.Set("select", statColumns)
+	params.Set("slug", "eq."+slug)
+	params.Set("limit", "1")
+
+	rows, err := getRows[playStatRow](c, ctx, "game-stat", "/rest/v1/game_stats?"+params.Encode())
+	if err != nil {
+		return PlayStat{}, false, err
+	}
+	if len(rows) == 0 {
+		return PlayStat{}, false, nil
+	}
+	return PlayStat{Slug: rows[0].Slug, Plays: rows[0].Plays}, true, nil
+}
+
+// Leaderboard reads one page of a game's public ranking.
+//
+// It returns at most `query.Limit + 1` entries, the same contract the catalogue
+// uses: one row more than the page is how the caller learns another page exists
+// without a COUNT over the whole board.
+func (c *Client) Leaderboard(ctx context.Context, slug string, query BoardQuery) ([]LeaderboardEntry, error) {
+	if query.Limit < 1 {
+		return nil, errors.New("a board page needs a positive limit")
+	}
+
+	payload := map[string]any{
+		"p_game_slug": slug,
+		"p_since":     sinceArgument(query),
+		"p_limit":     query.Limit + 1,
+		"p_offset":    query.Offset,
+	}
+
+	var rows []leaderboardRow
+	if err := c.rpc(ctx, "leaderboard", "game_leaderboard", payload, &rows); err != nil {
+		return nil, err
+	}
+
+	entries := make([]LeaderboardEntry, 0, len(rows))
+	for _, row := range rows {
+		entries = append(entries, row.entry())
+	}
+	return entries, nil
+}
+
+// Standing reads one player's place on one board. `found` is false when they have
+// no scored run in the window, which is an answer — not an error and not a rank
+// of zero.
+func (c *Client) Standing(ctx context.Context, slug, userID string, query BoardQuery) (Standing, bool, error) {
+	if userID == "" {
+		return Standing{}, false, nil
+	}
+
+	payload := map[string]any{
+		"p_game_slug": slug,
+		"p_user_id":   userID,
+		"p_since":     sinceArgument(query),
+	}
+
+	var rows []standingRow
+	if err := c.rpc(ctx, "standing", "game_standing", payload, &rows); err != nil {
+		return Standing{}, false, err
+	}
+	if len(rows) == 0 {
+		return Standing{}, false, nil
+	}
+	row := rows[0]
+	return Standing{
+		Rank:       row.Rank,
+		Score:      row.Score,
+		AchievedAt: row.AchievedAt,
+		Plays:      row.Plays,
+	}, true, nil
+}
+
+// sinceArgument sends NULL for all time rather than a zero timestamp, which the
+// function would read as "everything before 1 AD" and answer the same way by
+// accident.
+func sinceArgument(query BoardQuery) any {
+	if !query.HasSince {
+		return nil
+	}
+	return query.Since.UTC().Format(time.RFC3339Nano)
+}
+
+// rpc posts to one of the read-only functions the catalogue is allowed to call
+// and decodes the JSON array PostgREST returns. Like every other call in this
+// package it presents the publishable key and no user token: the board functions
+// are invoker-security, so Row Level Security still decides what a visitor may
+// see, and the standing function only ever answers with a name and a score that
+// are already on the public board.
+func (c *Client) rpc(ctx context.Context, op, function string, payload any, dst any) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return &Error{Op: op, cause: err}
+	}
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.baseURL+"/rest/v1/rpc/"+function, bytes.NewReader(body))
+	if err != nil {
+		return &Error{Op: op, cause: err}
+	}
+	request.Header.Set("apikey", c.apiKey)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("X-Client-Info", "onemore-games-service")
+
+	response, err := c.http.Do(request)
+	if err != nil {
+		return &Error{Op: op, cause: err}
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		code, _ := errorCode(response.Body)
+		return &Error{Op: op, Status: response.StatusCode, Code: code}
+	}
+	if err := decodeJSON(response.Body, dst); err != nil {
+		return &Error{Op: op, Status: response.StatusCode, cause: err}
+	}
+	return nil
+}
+
 // SearchTerm normalises a user's search box into something the PostgREST filter
 // grammar cannot misinterpret, and reports whether anything searchable is left.
 //
@@ -363,6 +557,44 @@ type categoryCountRow struct {
 	Description *string `json:"description"`
 	SortOrder   int     `json:"sort_order"`
 	GameCount   int64   `json:"game_count"`
+}
+
+// playStatRow is one `game_stats` row.
+type playStatRow struct {
+	Slug  string `json:"slug"`
+	Plays int64  `json:"plays"`
+}
+
+// leaderboardRow is one `game_leaderboard` row. `username` is nullable because a
+// score whose profile row is gone is still a real score; the API answers it with
+// an empty name rather than dropping the row and shifting everyone's rank.
+type leaderboardRow struct {
+	Rank       int64      `json:"rank"`
+	Username   *string    `json:"username"`
+	Score      int64      `json:"score"`
+	AchievedAt *time.Time `json:"achieved_at"`
+	Plays      int64      `json:"plays"`
+}
+
+func (r leaderboardRow) entry() LeaderboardEntry {
+	entry := LeaderboardEntry{
+		Rank:       r.Rank,
+		Score:      r.Score,
+		AchievedAt: r.AchievedAt,
+		Plays:      r.Plays,
+	}
+	if r.Username != nil {
+		entry.Username = *r.Username
+	}
+	return entry
+}
+
+// standingRow is one `game_standing` row.
+type standingRow struct {
+	Rank       int64      `json:"rank"`
+	Score      int64      `json:"score"`
+	AchievedAt *time.Time `json:"achieved_at"`
+	Plays      int64      `json:"plays"`
 }
 
 func (r row) game() Game {

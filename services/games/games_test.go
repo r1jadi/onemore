@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,6 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
+
+	"github.com/r1jadi/onemore/packages/go/platform/authn"
 	"github.com/r1jadi/onemore/packages/go/platform/config"
 	"github.com/r1jadi/onemore/packages/go/platform/httpx"
 	"github.com/r1jadi/onemore/services/games/internal/supabasegames"
@@ -23,6 +27,20 @@ const (
 	oldestID    = "33333333-3333-4333-8333-333333333333"
 )
 
+const (
+	// testSecret must be at least 32 characters; the verifier refuses shorter ones.
+	testSecret = "test-secret-used-only-in-unit-tests-0123456789"
+	// testUserID is the subject signed into every token below.
+	testUserID = "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f"
+	// testOtherID is a second account, used to prove that no request can reach
+	// it: the handlers have no parameter that could address it.
+	testOtherID = "11111111-2222-4333-8444-555555555555"
+)
+
+// boardPath is the leaderboard route for the catalogue's Stack 10 record, with
+// the `{slug}` placeholder filled in as a real client would.
+const boardPath = "/api/v1/games/stack-10/leaderboard"
+
 // fakeBackend stands in for the Supabase client. It is deliberately dumb: it
 // returns what it was given and records the last query, so a test asserts what
 // the handler *asked for* as well as what it rendered.
@@ -30,9 +48,27 @@ type fakeBackend struct {
 	games       []supabasegames.Game
 	categoryIDs map[string]string
 	counts      []supabasegames.CategoryCount
-	err         error
-	lastQuery   supabasegames.ListQuery
-	listCalls   int
+	// stats is the play count per slug, as `game_stats` stores it. A slug that
+	// is absent has no counted play, which is a zero and not a gap.
+	stats   map[string]int64
+	entries []supabasegames.LeaderboardEntry
+	// standing is the caller's own board row, or nil when they have none.
+	standing *supabasegames.Standing
+	err      error
+	// statErr fails the play-count read on its own, which is how a test drives
+	// the case where the catalogue and the activity view disagree.
+	statErr error
+	// boardErr fails the ranking read on its own.
+	boardErr error
+
+	lastQuery  supabasegames.ListQuery
+	boardQuery supabasegames.BoardQuery
+	boardScope string
+	standUser  string
+	listCalls  int
+	statCalls  int
+	boardCalls int
+	standCalls int
 }
 
 func (b *fakeBackend) ListGames(_ context.Context, query supabasegames.ListQuery) ([]supabasegames.Game, error) {
@@ -75,6 +111,63 @@ func (b *fakeBackend) CategoryCounts(_ context.Context) ([]supabasegames.Categor
 		return nil, b.err
 	}
 	return b.counts, nil
+}
+
+func (b *fakeBackend) GameStats(_ context.Context) (map[string]supabasegames.PlayStat, error) {
+	b.statCalls++
+	if b.err != nil {
+		return nil, b.err
+	}
+	if b.statErr != nil {
+		return nil, b.statErr
+	}
+	stats := make(map[string]supabasegames.PlayStat, len(b.stats))
+	for slug, plays := range b.stats {
+		stats[slug] = supabasegames.PlayStat{Slug: slug, Plays: plays}
+	}
+	return stats, nil
+}
+
+func (b *fakeBackend) GameStat(_ context.Context, slug string) (supabasegames.PlayStat, bool, error) {
+	b.statCalls++
+	if b.err != nil {
+		return supabasegames.PlayStat{}, false, b.err
+	}
+	if b.statErr != nil {
+		return supabasegames.PlayStat{}, false, b.statErr
+	}
+	plays, ok := b.stats[slug]
+	return supabasegames.PlayStat{Slug: slug, Plays: plays}, ok, nil
+}
+
+func (b *fakeBackend) Leaderboard(_ context.Context, _ string, query supabasegames.BoardQuery) ([]supabasegames.LeaderboardEntry, error) {
+	b.boardCalls++
+	b.boardQuery = query
+	if b.err != nil {
+		return nil, b.err
+	}
+	if b.boardErr != nil {
+		return nil, b.boardErr
+	}
+	// Like the real client, it answers with one row more than the page.
+	limit := min(query.Limit+1, len(b.entries))
+	return b.entries[:limit], nil
+}
+
+func (b *fakeBackend) Standing(_ context.Context, _ string, userID string, query supabasegames.BoardQuery) (supabasegames.Standing, bool, error) {
+	b.standCalls++
+	b.standUser = userID
+	b.boardQuery = query
+	if b.err != nil {
+		return supabasegames.Standing{}, false, b.err
+	}
+	if b.boardErr != nil {
+		return supabasegames.Standing{}, false, b.boardErr
+	}
+	if b.standing == nil {
+		return supabasegames.Standing{}, false, nil
+	}
+	return *b.standing, true, nil
 }
 
 func testGame(id, slug, title string, publishedAt time.Time) supabasegames.Game {
@@ -121,6 +214,76 @@ func testServer(t *testing.T, backend Backend) *httptest.Server {
 	return server
 }
 
+// testServerWithAuth serves the same routes with a real token verifier — the
+// difference that turns the optional-auth leaderboard into a personalised
+// response. It returns the server and a function that signs a token for a
+// subject, so a test can be a specific signed-in player.
+func testServerWithAuth(t *testing.T, backend Backend) (*httptest.Server, func(subject string) string) {
+	t.Helper()
+	t.Setenv("SUPABASE_JWT_SECRET", testSecret)
+	t.Setenv("SUPABASE_JWT_AUDIENCE", "authenticated")
+
+	cfg, err := config.Load("games-test")
+	if err != nil {
+		t.Fatalf("loading test configuration: %v", err)
+	}
+	verifier, err := authn.NewVerifier(cfg)
+	if err != nil {
+		t.Fatalf("building verifier: %v", err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	router := httpx.NewRouter(httpx.RouterOptions{Config: cfg, Verifier: verifier, Logger: logger})
+	newService(backend, logger).register(router)
+
+	server := httptest.NewServer(router.Mux())
+	t.Cleanup(server.Close)
+
+	sign := func(subject string) string {
+		t.Helper()
+		claims := jwt.MapClaims{
+			"sub":          subject,
+			"email":        "player@example.com",
+			"aud":          "authenticated",
+			"iat":          time.Now().Add(-time.Minute).Unix(),
+			"exp":          time.Now().Add(time.Hour).Unix(),
+			"role":         "authenticated",
+			"app_metadata": map[string]any{"role": "user"},
+		}
+		signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(testSecret))
+		if err != nil {
+			t.Fatalf("signing test token: %v", err)
+		}
+		return signed
+	}
+
+	return server, sign
+}
+
+// getWithToken performs a request as a signed-in caller.
+func getWithToken(t *testing.T, server *httptest.Server, path, token string) (int, map[string]any) {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodGet, server.URL+path, nil)
+	if err != nil {
+		t.Fatalf("building request for %s: %v", path, err)
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("GET %s: %v", path, err)
+	}
+	defer response.Body.Close()
+	raw, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("reading body: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("decoding %s body %q: %v", path, raw, err)
+	}
+	return response.StatusCode, body
+}
+
 // get performs a request and returns the status plus the decoded body.
 func get(t *testing.T, server *httptest.Server, path string) (int, map[string]any) {
 	t.Helper()
@@ -147,6 +310,15 @@ func itemsOf(t *testing.T, body map[string]any) []any {
 		t.Fatalf("body has no items array: %#v", body)
 	}
 	return items
+}
+
+func entriesOf(t *testing.T, body map[string]any) []any {
+	t.Helper()
+	entries, ok := body["entries"].([]any)
+	if !ok {
+		t.Fatalf("body has no entries array: %#v", body)
+	}
+	return entries
 }
 
 // ── Listing ─────────────────────────────────────────────────────────────────
@@ -385,19 +557,27 @@ func TestGetGameRejectsAMalformedSlug(t *testing.T) {
 }
 
 // TestGameResponseCarriesNoFabricatedMetrics is the guard the whole phase turns
-// on. Play counts, likes, comments, saves, ratings, average session time and
-// rankings cannot be derived from stored activity — no service records any of
-// them yet — so a response that carries one is carrying an invention. The field
-// set is asserted exactly, which also means a new field has to be a deliberate
-// decision rather than a side effect of adding a database column.
+// on. Every field in a game response has to be something the service actually
+// measured: `plays` is a real count of completed runs, while likes, comments,
+// saves, ratings, average session time and rankings remain inventions no service
+// records. The field set is asserted exactly, which also means a new field has to
+// be a deliberate decision rather than a side effect of adding a database column.
 func TestGameResponseCarriesNoFabricatedMetrics(t *testing.T) {
-	server := testServer(t, testBackend())
+	backend := testBackend()
+	backend.stats = map[string]int64{"stack-10": 12}
+	server := testServer(t, backend)
 
 	_, body := get(t, server, GamesPath+"/stack-10")
 	want := map[string]bool{
 		"slug": true, "title": true, "tagline": true, "description": true,
 		"instructions": true, "category": true, "runtime": true, "playable": true,
-		"isOfficial": true, "coverPath": true, "publishedAt": true, "updatedAt": true,
+		"plays": true, "isOfficial": true, "coverPath": true, "publishedAt": true,
+		"updatedAt": true,
+	}
+	// The one metric that is present is the one that was measured, and it is the
+	// number the database counted.
+	if body["plays"] != float64(12) {
+		t.Errorf("plays = %v, want the 12 completed runs the activity view counted", body["plays"])
 	}
 	for key := range body {
 		if !want[key] {
@@ -449,7 +629,7 @@ func TestCategoriesReturnRealCounts(t *testing.T) {
 func TestRoutesWithoutConfigurationAnswer503(t *testing.T) {
 	server := testServer(t, nil)
 
-	for _, path := range []string{GamesPath, GamesPath + "/stack-10", CategoriesPath} {
+	for _, path := range []string{GamesPath, GamesPath + "/stack-10", CategoriesPath, boardPath} {
 		t.Run(path, func(t *testing.T) {
 			status, body := get(t, server, path)
 			if status != http.StatusServiceUnavailable {
@@ -582,6 +762,326 @@ func TestInvalidParametersNeverReachTheDatabase(t *testing.T) {
 	}
 	if backend.calls != 0 {
 		t.Fatalf("the listing ran %d times for a rejected request, want 0", backend.calls)
+	}
+}
+
+// ── Play counts ─────────────────────────────────────────────────────────────
+
+func TestListGamesCarriesRealPlayCounts(t *testing.T) {
+	backend := testBackend()
+	backend.stats = map[string]int64{"stack-10": 41}
+	server := testServer(t, backend)
+
+	status, body := get(t, server, GamesPath+"?limit=3")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	items := itemsOf(t, body)
+	if len(items) != 3 {
+		t.Fatalf("items = %d, want 3", len(items))
+	}
+	third, _ := items[2].(map[string]any)
+	if third["slug"] != "stack-10" || third["plays"] != float64(41) {
+		t.Fatalf("stack-10 = %#v, want its real 41 completed runs", third)
+	}
+	// A game nobody has finished reports zero, which is a measurement rather
+	// than a missing value.
+	first, _ := items[0].(map[string]any)
+	if first["plays"] != float64(0) {
+		t.Fatalf("one-move plays = %v, want 0", first["plays"])
+	}
+	// One read for the page, not one per row.
+	if backend.statCalls != 1 {
+		t.Fatalf("play counts were read %d times for one page, want 1", backend.statCalls)
+	}
+}
+
+func TestUnreadablePlayCountsFailTheListing(t *testing.T) {
+	// An absent count and a count of zero render identically on screen, so a
+	// listing whose counts cannot be read fails instead of claiming zero.
+	backend := testBackend()
+	backend.statErr = errors.New("activity view is not readable")
+	server := testServer(t, backend)
+
+	status, body := get(t, server, GamesPath)
+	if status != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", status)
+	}
+	failure, _ := body["error"].(map[string]any)
+	if failure["code"] != "service_unavailable" {
+		t.Fatalf("code = %v, want service_unavailable", failure["code"])
+	}
+}
+
+func TestGetGameCarriesItsRealPlayCount(t *testing.T) {
+	backend := testBackend()
+	backend.stats = map[string]int64{"stack-10": 7}
+	server := testServer(t, backend)
+
+	status, body := get(t, server, GamesPath+"/stack-10")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	if body["plays"] != float64(7) {
+		t.Fatalf("plays = %v, want 7", body["plays"])
+	}
+}
+
+// ── Leaderboard ─────────────────────────────────────────────────────────────
+
+// testBoard is a ranking of three players.
+func testBoard() []supabasegames.LeaderboardEntry {
+	achieved := time.Date(2026, 10, 12, 9, 30, 0, 0, time.UTC)
+	return []supabasegames.LeaderboardEntry{
+		{Rank: 1, Username: "rija", Score: 120, AchievedAt: &achieved, Plays: 3},
+		{Rank: 2, Username: "sam", Score: 95, AchievedAt: &achieved, Plays: 1},
+		{Rank: 3, Username: "kim", Score: 90, AchievedAt: &achieved, Plays: 2},
+	}
+}
+
+func TestLeaderboardReturnsPersistedRanking(t *testing.T) {
+	backend := testBackend()
+	backend.entries = testBoard()
+	server := testServer(t, backend)
+
+	status, body := get(t, server, boardPath)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	if body["gameSlug"] != "stack-10" || body["scope"] != "global" || body["period"] != "all" {
+		t.Fatalf("body = %#v, want the stack-10 global all-time board", body)
+	}
+	if body["hasMore"] != false {
+		t.Fatalf("hasMore = %v, want false on the last page", body["hasMore"])
+	}
+	if body["me"] != nil {
+		t.Fatalf("me = %v, want null for an anonymous caller", body["me"])
+	}
+	items := entriesOf(t, body)
+	if len(items) != 3 {
+		t.Fatalf("entries = %d, want 3", len(items))
+	}
+	first, _ := items[0].(map[string]any)
+	if first["rank"] != float64(1) || first["username"] != "rija" || first["score"] != float64(120) {
+		t.Fatalf("first entry = %#v, want rank 1 with the real score", first)
+	}
+	if first["plays"] != float64(3) {
+		t.Fatalf("first entry plays = %v, want the player's real 3 scored runs", first["plays"])
+	}
+	if _, ok := first["userId"]; ok {
+		t.Fatalf("an entry exposes a user id: %#v", first)
+	}
+}
+
+func TestLeaderboardReportsAnotherPage(t *testing.T) {
+	backend := testBackend()
+	backend.entries = testBoard()
+	server := testServer(t, backend)
+
+	_, body := get(t, server, boardPath+"?limit=2")
+	if len(entriesOf(t, body)) != 2 {
+		t.Fatalf("entries = %d, want the requested 2", len(entriesOf(t, body)))
+	}
+	if body["hasMore"] != true {
+		t.Fatalf("hasMore = %v, want true when a further row exists", body["hasMore"])
+	}
+	// The board is read with the page size the caller asked for and the offset
+	// they asked for, so paging is real rather than re-read from the top.
+	if backend.boardQuery.Limit != 2 || backend.boardQuery.Offset != 0 {
+		t.Fatalf("board query = %+v, want limit 2 from the start", backend.boardQuery)
+	}
+}
+
+func TestLeaderboardPagingIsValidatedBeforeTheDatabase(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+		rule string
+	}{
+		{"zero limit", boardPath + "?limit=0", "limit"},
+		{"over-long page", boardPath + "?limit=101", "limit"},
+		{"negative offset", boardPath + "?offset=-1", "offset"},
+		{"absurd offset", boardPath + "?offset=100000", "offset"},
+		{"unknown period", boardPath + "?period=month", "period"},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			backend := testBackend()
+			server := testServer(t, backend)
+
+			status, body := get(t, server, testCase.path)
+			if status != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", status)
+			}
+			failure, _ := body["error"].(map[string]any)
+			details, _ := failure["details"].([]any)
+			if len(details) == 0 {
+				t.Fatalf("no field was named: %#v", failure)
+			}
+			detail, _ := details[0].(map[string]any)
+			if detail["field"] != testCase.rule {
+				t.Fatalf("field = %v, want %s", detail["field"], testCase.rule)
+			}
+			if backend.boardCalls != 0 {
+				t.Fatalf("the ranking was read %d times for a rejected request, want 0", backend.boardCalls)
+			}
+		})
+	}
+}
+
+func TestFriendBoardIsRefusedWithAReason(t *testing.T) {
+	// `friends` is a real scope that cannot be computed yet: refusing it with an
+	// explanation is the difference between an unimplemented feature and a typo.
+	server := testServer(t, testBackend())
+
+	status, body := get(t, server, boardPath+"?scope=friends")
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", status)
+	}
+	failure, _ := body["error"].(map[string]any)
+	message, _ := failure["message"].(string)
+	if !strings.Contains(message, "global") {
+		t.Fatalf("message %q does not tell the caller what is available", message)
+	}
+}
+
+func TestBoardWindowsBecomeASinceBoundary(t *testing.T) {
+	for _, testCase := range []struct {
+		period string
+		window time.Duration
+	}{
+		{periodDay, 24 * time.Hour},
+		{periodWeek, 7 * 24 * time.Hour},
+	} {
+		t.Run(testCase.period, func(t *testing.T) {
+			backend := testBackend()
+			server := testServer(t, backend)
+
+			get(t, server, boardPath+"?period="+testCase.period)
+
+			if !backend.boardQuery.HasSince {
+				t.Fatal("a windowed board must bound the scores it reads")
+			}
+			want := time.Now().UTC().Add(-testCase.window)
+			if delta := backend.boardQuery.Since.Sub(want); delta > time.Minute || delta < -time.Minute {
+				t.Fatalf("since = %v, want about %v", backend.boardQuery.Since, want)
+			}
+		})
+	}
+
+	// The default board is all-time: no boundary at all, not a zero timestamp.
+	backend := testBackend()
+	server := testServer(t, backend)
+	get(t, server, boardPath)
+	if backend.boardQuery.HasSince {
+		t.Fatalf("the default board bounded its window from %v", backend.boardQuery.Since)
+	}
+}
+
+func TestLeaderboardOfAnUnknownGameIsNotFound(t *testing.T) {
+	server := testServer(t, testBackend())
+
+	status, body := get(t, server, "/api/v1/games/never-made/leaderboard")
+	if status != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", status)
+	}
+	failure, _ := body["error"].(map[string]any)
+	if failure["code"] != "not_found" {
+		t.Fatalf("code = %v, want not_found", failure["code"])
+	}
+}
+
+func TestLeaderboardRejectsAMalformedSlug(t *testing.T) {
+	backend := testBackend()
+	server := testServer(t, backend)
+
+	status, _ := get(t, server, "/api/v1/games/Stack-10/leaderboard")
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", status)
+	}
+	if backend.boardCalls != 0 {
+		t.Fatalf("the ranking was read for a malformed slug")
+	}
+}
+
+func TestLeaderboardIncludesTheCallersOwnStanding(t *testing.T) {
+	backend := testBackend()
+	backend.entries = testBoard()
+	achieved := time.Date(2026, 10, 12, 8, 0, 0, 0, time.UTC)
+	backend.standing = &supabasegames.Standing{Rank: 4, Score: 88, AchievedAt: &achieved, Plays: 2}
+	server, sign := testServerWithAuth(t, backend)
+
+	// The query string names somebody else entirely. It must make no difference:
+	// identity comes from the verified token and from nowhere else.
+	status, body := getWithToken(t, server, boardPath+"?userId="+testOtherID, sign(testUserID))
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	me, ok := body["me"].(map[string]any)
+	if !ok {
+		t.Fatalf("me = %v, want the caller's own standing", body["me"])
+	}
+	if me["rank"] != float64(4) || me["score"] != float64(88) || me["plays"] != float64(2) {
+		t.Fatalf("me = %#v, want the persisted standing", me)
+	}
+	if backend.standUser != testUserID {
+		t.Fatalf("the standing was read for %q, want the token's subject", backend.standUser)
+	}
+}
+
+func TestLeaderboardDoesNotInventAStanding(t *testing.T) {
+	// No scored run in this window: the answer is no rank at all, not rank zero
+	// and not a zero score.
+	backend := testBackend()
+	backend.entries = testBoard()
+	server, sign := testServerWithAuth(t, backend)
+
+	status, body := getWithToken(t, server, boardPath, sign(testUserID))
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	if body["me"] != nil {
+		t.Fatalf("me = %v, want null for a player with no scored run", body["me"])
+	}
+	if backend.standCalls != 1 {
+		t.Fatalf("the standing was read %d times, want 1", backend.standCalls)
+	}
+}
+
+func TestAnonymousBoardDoesNotLookUpAStanding(t *testing.T) {
+	// The deployment has no auth material at all here, which is the same shape as
+	// a visitor with no token: the board is public and nothing is personalised.
+	backend := testBackend()
+	backend.entries = testBoard()
+	server := testServer(t, backend)
+
+	status, body := get(t, server, boardPath)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	if body["me"] != nil {
+		t.Fatalf("me = %v, want null", body["me"])
+	}
+	if backend.standCalls != 0 {
+		t.Fatalf("a standing was read for an anonymous caller")
+	}
+}
+
+func TestUnreadableRankingIsUnavailableWithoutLeaking(t *testing.T) {
+	backend := testBackend()
+	backend.boardErr = errors.New("game_leaderboard is not executable")
+	server := testServer(t, backend)
+
+	status, body := get(t, server, boardPath)
+	if status != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", status)
+	}
+	message, _ := body["error"].(map[string]any)["message"].(string)
+	for _, leaked := range []string{"game_leaderboard", "executable", "42501"} {
+		if strings.Contains(message, leaked) {
+			t.Fatalf("message %q leaked upstream detail %q", message, leaked)
+		}
 	}
 }
 

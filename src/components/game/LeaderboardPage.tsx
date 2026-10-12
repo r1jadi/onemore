@@ -4,21 +4,26 @@ import { LeaderboardList } from "./Leaderboard";
 import { Page, PageHeader } from "@/components/common";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DEFAULT_PAGE_SIZE, useGames } from "@/lib/games/catalog";
+import type { BoardPeriod, BoardScope } from "@/lib/games/sessions";
 import { cn } from "@/lib/utils";
 
 /**
  * The leaderboard screen.
  *
- * The game strip is real: it lists published games from the catalogue, so a game
- * published tomorrow appears here without a code change. The board under it is
- * empty and says so — nothing records scores yet, and a ranking is the last place
- * a plausible number should appear.
+ * Both halves are real. The game strip comes from the catalogue, so a game
+ * published tomorrow appears without a code change; the board under it is the
+ * persisted ranking from `GET /api/v1/games/{slug}/leaderboard`, which is derived
+ * from verified scores only. A game nobody has finished shows an empty board that
+ * says so — never a plausible-looking fixture list.
+ *
+ * The all-time window is the default because it is the one that can show every
+ * recorded score; the shorter windows are real filters over the same data.
  *
  * `gameId` is a catalogue slug, matching the URL the game pages use.
  */
 export function LeaderboardPage({ gameId }: { gameId?: string }) {
-  const [scope, setScope] = useState("global");
-  const [period, setPeriod] = useState("week");
+  const [scope, setScope] = useState<BoardScope>("global");
+  const [period, setPeriod] = useState<BoardPeriod>("all");
   const { status, items } = useGames({ limit: DEFAULT_PAGE_SIZE });
   const game = items.find((g) => g.slug === gameId);
 
@@ -27,7 +32,7 @@ export function LeaderboardPage({ gameId }: { gameId?: string }) {
       <PageHeader
         back={!!gameId}
         title={game ? `${game.title} leaderboard` : "Leaderboards"}
-        subtitle="Updated every few minutes."
+        subtitle="Verified scores only."
       />
       <div className="no-scrollbar flex gap-2 overflow-x-auto px-4 pb-3 md:px-0">
         <Link
@@ -63,7 +68,7 @@ export function LeaderboardPage({ gameId }: { gameId?: string }) {
         )}
       </div>
       <div className="flex items-center justify-between gap-3 px-4 pb-2 md:px-0">
-        <Tabs value={scope} onValueChange={setScope}>
+        <Tabs value={scope} onValueChange={(value) => setScope(value as BoardScope)}>
           <TabsList>
             <TabsTrigger value="global">Global</TabsTrigger>
             <TabsTrigger value="friends">Following</TabsTrigger>
@@ -72,7 +77,7 @@ export function LeaderboardPage({ gameId }: { gameId?: string }) {
         <select
           aria-label="Time period"
           value={period}
-          onChange={(e) => setPeriod(e.target.value)}
+          onChange={(e) => setPeriod(e.target.value as BoardPeriod)}
           className="h-9 rounded-lg bg-surface px-3 text-sm"
         >
           <option value="day">Today</option>
@@ -80,7 +85,7 @@ export function LeaderboardPage({ gameId }: { gameId?: string }) {
           <option value="all">All time</option>
         </select>
       </div>
-      <LeaderboardList friends={scope === "friends"} showMe />
+      <LeaderboardList gameSlug={gameId} scope={scope} period={period} showMe />
     </Page>
   );
 }

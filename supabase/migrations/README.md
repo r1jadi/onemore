@@ -8,6 +8,14 @@ The schema's only history. Applied in filename order by the Supabase CLI and by
 | `20261005120000_core_schema.sql` | Enums, tables, constraints, indexes, `updated_at` and auth triggers. |
 | `20261005120100_rls_and_grants.sql` | Role helpers, grants (column level where it matters), RLS policies, integrity triggers. |
 | `20261005120200_storage_buckets.sql` | Buckets with size/MIME limits and path-ownership policies. |
+| `20261012120000_games_catalog.sql` | The `games`/`categories` catalogue, its playable-implies-runtime constraint, and the seeded catalogue. |
+| `20261013120000_play_sessions.sql` | Server-issued sessions, the Stack 10 verifier, the public activity view and the board functions. Replaces client-written sessions and scores with server-issued ones. |
+| `20261013120100_stack10_playable.sql` | Flips Stack 10 to `playable` and names its runtime. Apply **last**, after the play schema and the deployment carrying the runtime are live. |
+
+Two migrations exist for one feature — the play schema and the catalogue flip — because
+the flip is a claim about shipped code. Applying it before the service that answers
+`/api/v1/sessions` is deployed would offer a Play button whose only endpoint answers
+`503`. See [docs/games](../../docs/games/README.md).
 
 ## Adding one
 

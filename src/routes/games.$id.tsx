@@ -110,14 +110,15 @@ function Detail({ game }: { game: Game }) {
             {game.tagline && <p className="mt-1 text-lg font-medium">{game.tagline}</p>}
             {game.description && <p className="mt-3 text-muted-foreground">{game.description}</p>}
 
-            {/* The three cells the API can actually fill. The prototype's "Plays"
-                and "Avg session" came from fixtures and are gone rather than
-                zeroed: a zero is a measurement, and nothing was measured. */}
+            {/* The cells the API can actually fill. `plays` is a real count of
+                completed runs, counted in the database; the prototype's "Avg
+                session" came from fixtures and is gone rather than zeroed,
+                because a zero is a measurement and nothing was measured. */}
             <dl className="mt-4 grid grid-cols-3 gap-2 rounded-xl bg-surface p-3 text-center">
               {(
                 [
+                  ["Plays", String(game.plays)],
                   ["Category", category ?? "—"],
-                  ["Status", game.playable ? "Playable" : "Not playable yet"],
                   ["Published", published ?? "—"],
                 ] as const
               ).map(([label, value]) => (
@@ -208,7 +209,7 @@ function Detail({ game }: { game: Game }) {
               </Link>
             }
           >
-            <LeaderboardList limit={5} />
+            <LeaderboardList gameSlug={game.slug} limit={5} />
           </Section>
         </aside>
       </div>

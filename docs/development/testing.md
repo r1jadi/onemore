@@ -4,7 +4,7 @@
 
 | Suite | Command | Covers |
 | --- | --- | --- |
-| Web unit tests | `bun run test` | SEO indexability rules and metadata, the API client's envelope/auth/URL behaviour, app routing |
+| Web unit tests | `bun run test` | SEO indexability rules and metadata, the API client's envelope/auth/URL behaviour, app routing, the Stack 10 engine against the shared rules vectors, the play-session client, and the play screen's guest, ranked and failed-verification paths |
 | Web type check | `bun run typecheck` | The whole app and the scripts' TypeScript surface |
 | Web lint | `bun run lint` | ESLint + Prettier |
 | Web build | `bun run build` | The production bundle Vercel ships |
@@ -14,6 +14,7 @@
 | Go platform tests | `cd packages/go/platform && go test ./...` | Token verification and JWKS key handling, listen-address resolution (`PORT` before `HTTP_ADDR`'s absence) and production configuration validation |
 | Go static checks | `go vet ./...`, `gofmt -l` (both modules) | Correctness and formatting |
 | Database security | `./scripts/test-rls.sh` | Migrations, seed idempotency and 50+ RLS assertions (allowed **and** denied) across six roles |
+| Live API smoke | `node tests/smoke/stack10-smoke.mjs` | A real gateway and database: a full Stack 10 run played, submitted, verified and ranked, plus the refusals. Needs a running stack — see [tests/smoke/README.md](../../tests/smoke/README.md) |
 | Go vulnerabilities | `govulncheck ./...` (CI) | Known CVEs in the dependency graph |
 | Secret scanning | `gitleaks` (CI) | No credential in the working tree or history |
 
@@ -66,11 +67,14 @@ Run it before and after any change to `supabase/migrations`.
 Stated plainly so nobody assumes otherwise:
 
 * **No end-to-end browser tests.** `tests/e2e/` is empty; Playwright is the
-  intended tool when the first real feature lands.
+  intended tool. The play screen is covered by a component test that renders it
+  against a stubbed API, and the live path by the smoke script, but nothing drives
+  a real browser through a run.
 * **No load or performance tests.** `tests/load/` is empty.
 * **No contract tests against a running service.** The drift check compares
-  documents, not responses; a generated client from the OpenAPI spec plus a
-  response-shape test is the next step.
+  documents, not responses; `tests/smoke/stack10-smoke.mjs` calls a live stack but
+  is hand-written and covers one game, so a generated client from the OpenAPI spec
+  plus a response-shape test is still the next step.
 * **No fuzzing.** `go test -fuzz` is a good fit for the token and JSON decoders
   once they gain more parsing surface.
 * **No dependency scanning for the Go modules beyond govulncheck**, and no SBOM.

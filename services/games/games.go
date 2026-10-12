@@ -3,21 +3,23 @@
 //
 // What it serves, and what it deliberately does not:
 //
-//   - **Three public read endpoints.** `GET /api/v1/games` (a page of published
+//   - **Four public read endpoints.** `GET /api/v1/games` (a page of published
 //     games, filterable by category and by a text search), `GET
-//     /api/v1/games/{slug}` (one published game) and `GET /api/v1/categories`
-//     (every category with its real count of published games). None of them
-//     needs a token: the catalogue is public, and the database's RLS policies
-//     already hide everything unpublished from the anonymous role.
-//   - **No fabricated metrics.** There is no play count, like total, comment
-//     total, average session, rating or ranking in any response, because none of
-//     them can be derived from stored activity yet — the sessions, scores and
-//     social services are not implemented. A field invented here would be
-//     indistinguishable from a real one on screen, so the field is simply absent
-//     and the UI renders nothing rather than a zero.
-//   - **No "popular" or "trending" ordering.** Both need play data. The only
-//     ordering the catalogue can honestly offer is recency, which is why `sort`
-//     accepts exactly one value.
+//     /api/v1/games/{slug}` (one published game), `GET
+//     /api/v1/games/{slug}/leaderboard` (the persisted ranking for one game, plus
+//     the caller's own standing when they present a token) and `GET
+//     /api/v1/categories` (every category with its real count of published
+//     games). None of them requires a token: the catalogue is public, and the
+//     database's RLS policies already hide everything unpublished from the
+//     anonymous role.
+//   - **Metrics are measured, never invented.** A game's `plays` is its number of
+//     *completed* runs, counted in the database from persisted sessions, and a
+//     game nobody has finished reports zero. There is still no rating, comment
+//     total or average session anywhere, because no service records those, and a
+//     field invented here would be indistinguishable from a real one on screen.
+//   - **No "popular" or "trending" ordering yet.** Play counts now exist, but the
+//     only ordering the catalogue offers is still recency: `sort` accepts exactly
+//     one value, so a sort option can never make an unplayed game look busy.
 //
 // The slug is the public identifier (`/api/v1/games/stack-10`), matching the
 // web app's stable URLs. A game's uuid is internal and never appears in a
@@ -39,6 +41,7 @@ import (
 	"github.com/r1jadi/onemore/packages/go/platform/authn"
 	"github.com/r1jadi/onemore/packages/go/platform/config"
 	"github.com/r1jadi/onemore/packages/go/platform/httpx"
+	"github.com/r1jadi/onemore/packages/go/platform/identity"
 	"github.com/r1jadi/onemore/services/games/internal/supabasegames"
 	"github.com/r1jadi/onemore/services/internal/servicekit"
 )
@@ -54,6 +57,10 @@ const (
 	GamesPath = "/api/v1/games"
 	// GamePath reads one game. The identifier is the game's slug, not its uuid.
 	GamePath = "/api/v1/games/{slug}"
+	// LeaderboardPath reads one game's persisted ranking. It is optional-auth:
+	// an anonymous caller sees the board, a signed-in one also sees their own
+	// standing on it.
+	LeaderboardPath = "/api/v1/games/{slug}/leaderboard"
 	// CategoriesPath lists categories with their real published-game counts.
 	CategoriesPath = "/api/v1/categories"
 )
@@ -69,6 +76,30 @@ const (
 	// cursorPrefix versions the cursor payload, so a future change to its shape
 	// can be told apart from a malformed one instead of misread as a date.
 	cursorPrefix = "v1"
+)
+
+// Board paging. A board is a ranking, so a deep offset is bounded: paging
+// thousands of rows into a ranking is not a use case, and an unbounded offset is
+// a cheap way to make the database walk the whole board.
+const (
+	defaultBoardLimit = 20
+	maxBoardLimit     = 100
+	maxBoardOffset    = 10000
+)
+
+// The board's scope and window, as the API spells them.
+const (
+	// boardScopeGlobal is the only scope that can be computed. A friends board
+	// needs a following graph, which does not exist yet.
+	boardScopeGlobal = "global"
+	periodAll        = "all"
+	periodDay        = "day"
+	periodWeek       = "week"
+)
+
+var (
+	boardScopes  = map[string]bool{boardScopeGlobal: true}
+	boardPeriods = map[string]bool{periodAll: true, periodDay: true, periodWeek: true}
 )
 
 // supportedSort is the only ordering the catalogue can compute from real data.
@@ -95,6 +126,14 @@ type Backend interface {
 	GetGame(ctx context.Context, slug string) (supabasegames.Game, bool, error)
 	CategoryID(ctx context.Context, slug string) (string, bool, error)
 	CategoryCounts(ctx context.Context) ([]supabasegames.CategoryCount, error)
+	// GameStats reads every published game's real play count in one call; a
+	// listing needs all of them. GameStat reads one.
+	GameStats(ctx context.Context) (map[string]supabasegames.PlayStat, error)
+	GameStat(ctx context.Context, slug string) (supabasegames.PlayStat, bool, error)
+	// Leaderboard reads one page of a game's public ranking, and Standing the
+	// caller's own place on it.
+	Leaderboard(ctx context.Context, slug string, query supabasegames.BoardQuery) ([]supabasegames.LeaderboardEntry, error)
+	Standing(ctx context.Context, slug, userID string, query supabasegames.BoardQuery) (supabasegames.Standing, bool, error)
 }
 
 // ── Response shapes ─────────────────────────────────────────────────────────
@@ -132,10 +171,14 @@ type gameView struct {
 	Instructions *string          `json:"instructions"`
 	Category     *categoryRefView `json:"category"`
 	// Runtime names the client runtime that plays this game, or null when none
-	// exists. Playable is false for every game today.
-	Runtime    *string `json:"runtime"`
-	Playable   bool    `json:"playable"`
-	IsOfficial bool    `json:"isOfficial"`
+	// exists.
+	Runtime  *string `json:"runtime"`
+	Playable bool    `json:"playable"`
+	// Plays is how many runs of this game have been completed, counted in the
+	// database from persisted sessions. It is always a measurement: zero means
+	// nobody has finished it, which is a fact and not a missing value.
+	Plays      int64 `json:"plays"`
+	IsOfficial bool  `json:"isOfficial"`
 	// CoverPath is a storage object path under the `game-assets` bucket, not a
 	// URL: the client builds the public URL, exactly as it does for avatars.
 	CoverPath   *string    `json:"coverPath"`
@@ -150,7 +193,7 @@ func categoryRef(category *supabasegames.Category) *categoryRefView {
 	return &categoryRefView{Slug: category.Slug, Name: category.Name}
 }
 
-func view(game supabasegames.Game) gameView {
+func view(game supabasegames.Game, plays int64) gameView {
 	return gameView{
 		Slug:         game.Slug,
 		Title:        game.Title,
@@ -160,6 +203,7 @@ func view(game supabasegames.Game) gameView {
 		Category:     categoryRef(game.Category),
 		Runtime:      game.Runtime,
 		Playable:     game.Playable,
+		Plays:        plays,
 		IsOfficial:   game.IsOfficial,
 		CoverPath:    game.CoverPath,
 		PublishedAt:  game.PublishedAt,
@@ -172,6 +216,44 @@ type gameListResponse struct {
 	// NextCursor is null on the last page. It is opaque to clients and is what
 	// makes paging stable while games are published between requests.
 	NextCursor *string `json:"nextCursor"`
+}
+
+// leaderboardEntryView is one row of a public board. There is no user id: a
+// username is how a person is addressed everywhere else in the API, and the
+// caller's own row is returned as `me` rather than by matching an id on the
+// client.
+type leaderboardEntryView struct {
+	Rank     int64  `json:"rank"`
+	Username string `json:"username"`
+	Score    int64  `json:"score"`
+	// AchievedAt is when the player first reached this score.
+	AchievedAt *time.Time `json:"achievedAt"`
+	// Plays is how many scored runs they had in this window.
+	Plays int64 `json:"plays"`
+}
+
+// standingView is the caller's own place on the board they asked for.
+type standingView struct {
+	Rank       int64      `json:"rank"`
+	Score      int64      `json:"score"`
+	AchievedAt *time.Time `json:"achievedAt"`
+	Plays      int64      `json:"plays"`
+}
+
+type leaderboardResponse struct {
+	GameSlug string `json:"gameSlug"`
+	// Scope and Period echo what was asked for, so a caller that paged through a
+	// weekly board cannot mistake it for the all-time one.
+	Scope   string                 `json:"scope"`
+	Period  string                 `json:"period"`
+	Entries []leaderboardEntryView `json:"entries"`
+	// HasMore is true when a further page exists. The service learns this by
+	// reading one row more than the page, not by counting the board.
+	HasMore bool `json:"hasMore"`
+	// Me is the signed-in caller's standing, or null when they are anonymous or
+	// have no scored run in this window. A player with no score has no rank, and
+	// reporting zero would read as "last place".
+	Me *standingView `json:"me"`
 }
 
 // ── Handlers ────────────────────────────────────────────────────────────────
@@ -197,6 +279,9 @@ func (s *service) register(router *httpx.Router) {
 	router.PublicFunc("GET "+GamesPath, s.listGames)
 	router.PublicFunc("GET "+GamePath, s.getGame)
 	router.PublicFunc("GET "+CategoriesPath, s.listCategories)
+	// Optional auth: the board is public, and a token only adds the caller's own
+	// standing to the same response.
+	router.OptionalAuthFunc("GET "+LeaderboardPath, s.leaderboard)
 
 	router.AuthenticatedFunc("POST "+GamesPath, httpx.NotImplemented(Name, "Creating a game"))
 	router.AuthenticatedFunc("PATCH "+GamePath, httpx.NotImplemented(Name, "Updating an owned game"))
@@ -240,8 +325,22 @@ func (s *service) listGames(w http.ResponseWriter, r *http.Request) {
 	// exactly the signal that another page exists.
 	limit := query.Limit
 	items := make([]gameView, 0, min(len(games), limit))
-	for _, game := range games[:min(len(games), limit)] {
-		items = append(items, view(game))
+
+	if len(games) > 0 {
+		// One extra read for the whole page, not one per row. A failure here is
+		// a failure of the listing rather than a page of games shown with a
+		// play count the service could not actually read: an absent count and a
+		// count of zero look identical on screen, so the request fails instead.
+		stats, statErr := s.backend.GameStats(r.Context())
+		if statErr != nil {
+			s.dataFailure(w, r, "read play counts", statErr)
+			return
+		}
+		for _, game := range games[:min(len(games), limit)] {
+			// A game published between the two reads has no stat row yet; zero is
+			// then the truth about it, not a substitute for an unknown.
+			items = append(items, view(game, stats[game.Slug].Plays))
+		}
 	}
 
 	var next *string
@@ -281,7 +380,105 @@ func (s *service) getGame(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, httpx.NewError(httpx.CodeNotFound, "No such game."))
 		return
 	}
-	httpx.WriteJSON(w, r, http.StatusOK, view(game))
+
+	// A published game always has a stat row; if this one somehow does not, zero
+	// plays is the honest answer for a game nobody has finished.
+	plays := int64(0)
+	stat, statFound, statErr := s.backend.GameStat(r.Context(), slug)
+	if statErr != nil {
+		s.dataFailure(w, r, "read a play count", statErr)
+		return
+	}
+	if statFound {
+		plays = stat.Plays
+	}
+
+	httpx.WriteJSON(w, r, http.StatusOK, view(game, plays))
+}
+
+// leaderboard answers one game's persisted ranking.
+//
+// The ranking is read straight from the database's board function, which derives
+// it from recorded scores — the service neither caches nor recomputes it, so
+// there is exactly one definition of "first place" in the system. An unknown or
+// unpublished game is a 404, the same answer as reading it: a board for a game
+// that does not exist is not an empty board.
+func (s *service) leaderboard(w http.ResponseWriter, r *http.Request) {
+	if s.backend == nil {
+		s.notConfigured(w, r, "read a leaderboard")
+		return
+	}
+
+	slug := strings.TrimSpace(r.PathValue("slug"))
+	if !gameSlugPattern.MatchString(slug) {
+		httpx.WriteError(w, r, httpx.NewError(httpx.CodeBadRequest,
+			"That is not a valid game slug.",
+			apierr.Detail{Field: "slug", Rule: "format"}))
+		return
+	}
+
+	query, failure := parseBoardQuery(r, time.Now().UTC())
+	if failure != nil {
+		httpx.WriteError(w, r, failure)
+		return
+	}
+
+	game, found, err := s.backend.GetGame(r.Context(), slug)
+	if err != nil {
+		s.dataFailure(w, r, "read a game", err)
+		return
+	}
+	if !found {
+		httpx.WriteError(w, r, httpx.NewError(httpx.CodeNotFound, "No such game."))
+		return
+	}
+
+	entries, err := s.backend.Leaderboard(r.Context(), slug, query.BoardQuery)
+	if err != nil {
+		s.dataFailure(w, r, "read a leaderboard", err)
+		return
+	}
+
+	limit := query.Limit
+	items := make([]leaderboardEntryView, 0, min(len(entries), limit))
+	for _, entry := range entries[:min(len(entries), limit)] {
+		items = append(items, leaderboardEntryView{
+			Rank:       entry.Rank,
+			Username:   entry.Username,
+			Score:      entry.Score,
+			AchievedAt: entry.AchievedAt,
+			Plays:      entry.Plays,
+		})
+	}
+
+	response := leaderboardResponse{
+		GameSlug: game.Slug,
+		Scope:    query.Scope,
+		Period:   query.Period,
+		Entries:  items,
+		HasMore:  len(entries) > limit,
+	}
+
+	// The caller's own standing needs a verified identity, and nothing else in
+	// this response does. An anonymous caller is served the board with a null
+	// `me` rather than refused.
+	if id, ok := identity.FromContext(r.Context()); ok && !id.Anonymous && id.UserID != "" {
+		standing, ranked, standingErr := s.backend.Standing(r.Context(), slug, id.UserID, query.BoardQuery)
+		if standingErr != nil {
+			s.dataFailure(w, r, "read a standing", standingErr)
+			return
+		}
+		if ranked {
+			response.Me = &standingView{
+				Rank:       standing.Rank,
+				Score:      standing.Score,
+				AchievedAt: standing.AchievedAt,
+				Plays:      standing.Plays,
+			}
+		}
+	}
+
+	httpx.WriteJSON(w, r, http.StatusOK, response)
 }
 
 func (s *service) listCategories(w http.ResponseWriter, r *http.Request) {
@@ -311,6 +508,75 @@ func (s *service) listCategories(w http.ResponseWriter, r *http.Request) {
 }
 
 // ── Query parsing ───────────────────────────────────────────────────────────
+
+// boardQuery is a board page as the API describes it: the scope and window the
+// caller asked for, plus the storage-level query they produce.
+type boardQuery struct {
+	supabasegames.BoardQuery
+	Scope  string
+	Period string
+}
+
+// parseBoardQuery validates a board request and turns its window into the
+// timestamp the database filters on. The boundary is computed here rather than
+// in SQL so that "today" is one value shared by the page and the caller's
+// standing — two `now()` calls could straddle a score and disagree about it.
+func parseBoardQuery(r *http.Request, now time.Time) (boardQuery, error) {
+	values := r.URL.Query()
+	query := boardQuery{
+		BoardQuery: supabasegames.BoardQuery{Limit: defaultBoardLimit},
+		Scope:      boardScopeGlobal,
+		Period:     periodAll,
+	}
+
+	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
+		limit, err := strconv.Atoi(raw)
+		if err != nil || limit < 1 || limit > maxBoardLimit {
+			return query, httpx.NewError(httpx.CodeBadRequest,
+				"limit must be a whole number between 1 and 100.",
+				apierr.Detail{Field: "limit", Rule: "range"})
+		}
+		query.Limit = limit
+	}
+
+	if raw := strings.TrimSpace(values.Get("offset")); raw != "" {
+		offset, err := strconv.Atoi(raw)
+		if err != nil || offset < 0 || offset > maxBoardOffset {
+			return query, httpx.NewError(httpx.CodeBadRequest,
+				"offset must be a whole number between 0 and 10000.",
+				apierr.Detail{Field: "offset", Rule: "range"})
+		}
+		query.Offset = offset
+	}
+
+	if raw := strings.TrimSpace(values.Get("scope")); raw != "" && raw != boardScopeGlobal {
+		// Told apart from a typo on purpose: `friends` is a real, unimplemented
+		// scope, and a caller asking for it deserves to know why it is refused.
+		message := "That is not a board scope."
+		if raw == "friends" {
+			message = "A friends board needs a following graph, which does not exist yet. The global board is available."
+		}
+		return query, httpx.NewError(httpx.CodeBadRequest, message,
+			apierr.Detail{Field: "scope", Rule: "unsupported"})
+	}
+
+	if raw := strings.TrimSpace(values.Get("period")); raw != "" {
+		if !boardPeriods[raw] {
+			return query, httpx.NewError(httpx.CodeBadRequest,
+				"period must be one of all, day or week.",
+				apierr.Detail{Field: "period", Rule: "unsupported"})
+		}
+		query.Period = raw
+		switch raw {
+		case periodDay:
+			query.Since, query.HasSince = now.Add(-24*time.Hour), true
+		case periodWeek:
+			query.Since, query.HasSince = now.Add(-7*24*time.Hour), true
+		}
+	}
+
+	return query, nil
+}
 
 // listQuery is a catalogue page as the API describes it.
 //

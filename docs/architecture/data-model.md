@@ -26,8 +26,8 @@ All tables live in `public` and are reachable only through the Data API roles
 | `user_roles` | `user_id` | Role assignment (`user`, `moderator`, `admin`). Separate table on purpose — see below. |
 | `categories` | — | Reference data. |
 | `games` | `owner_id` | Catalogue entries and their lifecycle (`draft` → `review` → `published`). |
-| `game_sessions` | `user_id` | One play attempt; the precondition for a score. |
-| `scores` | `user_id` | Immutable score records, one per completed session. |
+| `game_sessions` | `user_id` (nullable — a guest run has none) | One play attempt: the server's seed, the rules version it is played under, its lifecycle and its expiry, and the verified score and submission fingerprint once it closes. The precondition for a score. |
+| `scores` | `user_id` | Immutable score records, one per completed session, written only by the verifier. |
 | `comments` | `author_id` | Comments on published games, `is_hidden` for moderation. |
 | `likes` | `user_id` | `(user_id, target_kind, target_id)` — no duplicates by primary key. |
 | `follows` | `follower_id` | Directed follow edges; self-follow is a constraint violation. |
@@ -50,9 +50,17 @@ of:
    `authenticated`. Postgres column grants are additive, so a column granted "for
    staff" would be granted to everyone; hiding a comment is therefore a
    moderation service action using `service_role`.
-3. **Scores are written by the server.** `scores` has no `INSERT` grant for
-   `authenticated`. The game-sessions service writes the row with `service_role`
-   after validating the session it owns.
+3. **Scores are the database's arithmetic.** `scores` has no `INSERT` grant for
+   `authenticated`, and no service holds a key that could write one either:
+   `public.complete_stack10_run` replays the submitted run from the session's seed
+   and inserts the score it derives. The game-sessions service validates the request
+   shape and carries the caller's token; it cannot name a score. See
+   [0012](../decisions/0012-server-verified-scores.md).
+4. **Runs are issued, not created.** The `INSERT` grant on `game_sessions` was
+   revoked as well: a client-writable session row is a client-chosen seed, and every
+   "verified" score would then be verified against a stacked deck.
+   `public.start_game_session` is the only path in, and it reads the caller from
+   `auth.uid()`.
 
 ## Access matrix
 
@@ -64,8 +72,9 @@ The full matrix, including the denied cases, is in
 | `games` | select published | select visible, insert/update/delete own (draft/review only) | all |
 | `profiles` | select public columns | select public columns, update own presentation columns | all |
 | `user_roles` | — | select own + staff select all | all |
-| `game_sessions` | — | select/insert own | all |
+| `game_sessions` | — | select own (no insert) | all |
 | `scores` | select visible | select visible | all (writes) |
+| `game_stats` (view) | select aggregates | select aggregates | all |
 | `comments` | select visible | select visible, insert/delete own, update own body | all |
 | `likes`, `follows` | select | select, insert/delete own | all |
 | `reports` | — | insert own, select own, staff select/update | all |
@@ -86,6 +95,12 @@ Not every rule belongs in a policy, and some cannot be expressed as one:
   is resolved, so the resolver cannot be forged.
 * A comment must belong to a published game and cannot be parented to itself.
 * `profiles.username` is `citext` (case-insensitive unique) with a format check.
+* A closed session carries both the verified score and the fingerprint of the
+  submission that produced it, or neither: `(completed_at is null) = (verified_score
+  is null) = (verified_digest is null)`.
+* A session's expiry is after its start (`expires_at > started_at`), and a session
+  is either open, completed or abandoned — a retry is recognised by the stored
+  fingerprint rather than by inserting a second score.
 * Trigger-created profiles mean every auth user has a profile and a `user` role
   row from their first request.
 
@@ -96,7 +111,9 @@ Indexes exist for the access patterns the features will use, not speculatively:
 `comments(game_id, created_at desc) where not is_hidden`,
 `notifications(user_id, created_at desc)` plus a partial index for unread,
 `reports(status, created_at)` for the moderation queue,
-`game_sessions(user_id, started_at desc)`.
+`game_sessions(user_id, started_at desc)`, plus two the play path needs:
+`game_sessions(game_id, user_id)` where the run is open (finding the run to abandon
+when a new one starts) and `scores(game_id, created_at desc)` (windowed boards).
 
 ## Storage
 
