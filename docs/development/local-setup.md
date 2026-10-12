@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | Node | 22.x | web app, scripts |
 | bun | 1.2.x | the repo's lockfile (`bun.lock`); `bun install` is the canonical install |
-| Go | 1.23.x | services and the platform library |
+| Go | 1.27.x | services and the platform library |
 | Docker | any recent | the database security suite, `supabase start`, gitleaks |
 | Supabase CLI | latest | running the hosted-parity local stack |
 

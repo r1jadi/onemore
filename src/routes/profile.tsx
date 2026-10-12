@@ -3,7 +3,13 @@ import { EmptyState, ErrorState } from "@/components/common";
 import { ProfileView, type ProfileHeader } from "@/components/social/ProfileView";
 import { Button } from "@/components/ui/button";
 import { seo } from "@/lib/seo";
-import { avatarUrl, refreshProfile, useProfile, type Profile, type ProfileState } from "@/lib/users/profile";
+import {
+  avatarUrl,
+  refreshProfile,
+  useProfile,
+  type Profile,
+  type ProfileState,
+} from "@/lib/users/profile";
 
 export const Route = createFileRoute("/profile")({
   head: () => seo("Your profile", "Your scores, achievements, saved and recently played games."),
@@ -50,7 +56,11 @@ function absent(state: ProfileState) {
         <EmptyState
           title="Sign in to see your profile"
           body="Your profile, scores and saves belong to your account."
-          action={<Button asChild><Link to="/login">Log in</Link></Button>}
+          action={
+            <Button asChild>
+              <Link to="/login">Log in</Link>
+            </Button>
+          }
         />
       );
     case "missing":
@@ -58,7 +68,11 @@ function absent(state: ProfileState) {
         <EmptyState
           title="No profile yet"
           body="This account has no profile stored. A profile is created with the account, so try again in a moment."
-          action={<Button variant="secondary" onClick={() => void refreshProfile()}>Try again</Button>}
+          action={
+            <Button variant="secondary" onClick={() => void refreshProfile()}>
+              Try again
+            </Button>
+          }
         />
       );
     case "error":

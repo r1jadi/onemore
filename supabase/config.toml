@@ -70,6 +70,5 @@ enabled = false
 [edge_runtime]
 enabled = false
 
-[functions]
-# No Edge Functions are used: all backend logic lives in the Go services.
-enabled = false
+# No [functions] section on purpose: this project ships no Edge Functions,
+# and every entry there would have to be a named function table.

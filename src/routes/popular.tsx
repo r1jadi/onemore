@@ -5,5 +5,12 @@ import { seo } from "@/lib/seo";
 
 export const Route = createFileRoute("/popular")({
   head: () => seo("Popular games", "The most played games on onemore."),
-  component: () => <GameListPage title="Popular games" subtitle="The most played games on onemore." items={[...games].sort((a, b) => b.plays - a.plays)} ranked />,
+  component: () => (
+    <GameListPage
+      title="Popular games"
+      subtitle="The most played games on onemore."
+      items={[...games].sort((a, b) => b.plays - a.plays)}
+      ranked
+    />
+  ),
 });

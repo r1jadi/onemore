@@ -72,5 +72,8 @@ jobs:
 
       - name: Audit dependencies
         # Fails the job on a high or critical advisory in the production tree.
+        # Advisories that live in a transitive dependency, where no range in
+        # package.json can reach the patched release, are pinned by the
+        # "overrides" block in package.json instead of being ignored here.
         run: bun audit --audit-level=high
         continue-on-error: false

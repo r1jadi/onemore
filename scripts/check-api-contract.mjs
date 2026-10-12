@@ -60,7 +60,9 @@ function documentedPaths() {
     fail(`the contract does not declare a server at ...${API_BASE}`);
   }
   const pathsBlock = source.slice(source.indexOf("\npaths:"));
-  const paths = [...pathsBlock.matchAll(/^ {2}(\/[A-Za-z0-9/{}._-]*):$/gm)].map((match) => match[1]);
+  const paths = [...pathsBlock.matchAll(/^ {2}(\/[A-Za-z0-9/{}._-]*):$/gm)].map(
+    (match) => match[1],
+  );
   if (paths.length === 0) {
     fail("could not read any path from the OpenAPI contract");
   }

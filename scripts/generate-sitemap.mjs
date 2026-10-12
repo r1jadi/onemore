@@ -55,7 +55,9 @@ function staticPathsFromSource() {
       `Could not find INDEXABLE_PATHS in ${SEO_SOURCE}. Update scripts/generate-sitemap.mjs to match src/lib/seo.ts.`,
     );
   }
-  const paths = block.groups.body.match(/"(?:[^"\\]|\\.)*"/g)?.map((literal) => JSON.parse(literal));
+  const paths = block.groups.body
+    .match(/"(?:[^"\\]|\\.)*"/g)
+    ?.map((literal) => JSON.parse(literal));
   if (!paths?.length) {
     throw new Error("INDEXABLE_PATHS is empty — refusing to write an empty sitemap.");
   }
@@ -65,7 +67,9 @@ function staticPathsFromSource() {
 function buildSitemap() {
   const origin = siteOrigin();
   const paths = [...staticPathsFromSource(), ...DYNAMIC_PATHS];
-  const unique = [...new Set(paths)].sort((a, b) => (a === "/" ? -1 : b === "/" ? 1 : a.localeCompare(b)));
+  const unique = [...new Set(paths)].sort((a, b) =>
+    a === "/" ? -1 : b === "/" ? 1 : a.localeCompare(b),
+  );
 
   const urls = unique
     .map((path) => `  <url><loc>${new URL(path, `${origin}/`).href}</loc></url>`)

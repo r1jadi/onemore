@@ -13,9 +13,23 @@ const hueBg: Record<string, string> = {
 export const hueClass = (hue: string) => hueBg[hue] ?? "bg-primary";
 
 /** Static, purely visual representation of each game's board. No game logic. */
-export function GameArt({ id, className, live = false }: { id: GameId; className?: string; live?: boolean }) {
+export function GameArt({
+  id,
+  className,
+  live = false,
+}: {
+  id: GameId;
+  className?: string;
+  live?: boolean;
+}) {
   return (
-    <div className={cn("relative flex items-center justify-center overflow-hidden bg-surface", className)} aria-hidden>
+    <div
+      className={cn(
+        "relative flex items-center justify-center overflow-hidden bg-surface",
+        className,
+      )}
+      aria-hidden
+    >
       {id === "stack-10" && <Stack10 />}
       {id === "color-merge" && <ColorMerge />}
       {id === "dont-touch-the-black" && <BlackTiles live={live} />}
@@ -32,9 +46,15 @@ function Stack10() {
   return (
     <div className="flex h-3/5 items-end gap-[6%] w-3/4">
       {cols.map((c, i) => (
-        <div key={i} className="flex flex-1 flex-col-reverse gap-1.5 rounded-lg border border-glass-border p-1.5 h-full">
+        <div
+          key={i}
+          className="flex flex-1 flex-col-reverse gap-1.5 rounded-lg border border-glass-border p-1.5 h-full"
+        >
           {c.map((n, j) => (
-            <div key={j} className="flex aspect-square items-center justify-center rounded-md bg-game-1/80 font-mono text-lg font-semibold text-background tabular">
+            <div
+              key={j}
+              className="flex aspect-square items-center justify-center rounded-md bg-game-1/80 font-mono text-lg font-semibold text-background tabular"
+            >
               {n}
             </div>
           ))}
@@ -49,7 +69,14 @@ function ColorMerge() {
   return (
     <div className="grid w-3/4 max-w-80 grid-cols-4 gap-2">
       {o.map((v, i) => (
-        <div key={i} className={cn("aspect-square rounded-md", v === 0 ? "border border-glass-border" : "bg-game-2")} style={{ opacity: v === 0 ? 1 : 0.25 + v / 135 }} />
+        <div
+          key={i}
+          className={cn(
+            "aspect-square rounded-md",
+            v === 0 ? "border border-glass-border" : "bg-game-2",
+          )}
+          style={{ opacity: v === 0 ? 1 : 0.25 + v / 135 }}
+        />
       ))}
     </div>
   );
@@ -62,7 +89,14 @@ function BlackTiles({ live }: { live: boolean }) {
       {rows.map((b, r) => (
         <div key={r} className="grid grid-cols-4 border-b border-background/40">
           {[0, 1, 2, 3].map((c) => (
-            <div key={c} className={cn("border-r border-background/40", c === b ? "bg-background" : "bg-game-3", live && r === 5 && c === b && "bg-primary")} />
+            <div
+              key={c}
+              className={cn(
+                "border-r border-background/40",
+                c === b ? "bg-background" : "bg-game-3",
+                live && r === 5 && c === b && "bg-primary",
+              )}
+            />
           ))}
         </div>
       ))}
@@ -76,7 +110,17 @@ function OneMove() {
   return (
     <div className="grid w-2/3 max-w-72 grid-cols-5 gap-1.5">
       {cells.map((i) => (
-        <div key={i} className={cn("aspect-square rounded-sm", filled.has(i) ? "bg-game-4" : i === 18 ? "border-2 border-dashed border-game-4" : "bg-surface-2")} />
+        <div
+          key={i}
+          className={cn(
+            "aspect-square rounded-sm",
+            filled.has(i)
+              ? "bg-game-4"
+              : i === 18
+                ? "border-2 border-dashed border-game-4"
+                : "bg-surface-2",
+          )}
+        />
       ))}
     </div>
   );
@@ -86,7 +130,14 @@ function Chain() {
   return (
     <div className="flex w-3/4 flex-wrap items-center justify-center gap-3">
       {[1, 2, 3, 4, 5, 6, 7].map((i) => (
-        <div key={i} className={cn("size-12 rounded-full border-2 border-game-5", i < 5 && "bg-game-5", i === 5 && "bg-game-5/40")} />
+        <div
+          key={i}
+          className={cn(
+            "size-12 rounded-full border-2 border-game-5",
+            i < 5 && "bg-game-5",
+            i === 5 && "bg-game-5/40",
+          )}
+        />
       ))}
     </div>
   );
@@ -97,7 +148,10 @@ function MemoryFlash() {
   return (
     <div className="grid w-2/3 max-w-72 grid-cols-4 gap-2">
       {Array.from({ length: 16 }, (_, i) => (
-        <div key={i} className={cn("aspect-square rounded-md", lit.has(i) ? "bg-game-6" : "bg-surface-2")} />
+        <div
+          key={i}
+          className={cn("aspect-square rounded-md", lit.has(i) ? "bg-game-6" : "bg-surface-2")}
+        />
       ))}
     </div>
   );

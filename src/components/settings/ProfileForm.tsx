@@ -39,7 +39,11 @@ export function ProfileForm() {
         <EmptyState
           title="Sign in to edit your profile"
           body="Your name, bio and photo belong to your account."
-          action={<Button asChild><Link to="/login">Log in</Link></Button>}
+          action={
+            <Button asChild>
+              <Link to="/login">Log in</Link>
+            </Button>
+          }
         />
       </div>
     );
@@ -50,7 +54,11 @@ export function ProfileForm() {
         <EmptyState
           title="No profile yet"
           body="This account has no profile stored, so there is nothing to edit. Try again in a moment."
-          action={<Button variant="secondary" onClick={() => void refreshProfile()}>Try again</Button>}
+          action={
+            <Button variant="secondary" onClick={() => void refreshProfile()}>
+              Try again
+            </Button>
+          }
         />
       </div>
     );
@@ -70,10 +78,22 @@ export function ProfileForm() {
 function Loading() {
   return (
     <div className="space-y-4 px-4 md:px-0" aria-busy="true" aria-label="Loading">
-      <div className="flex items-center gap-4"><Skeleton className="size-24 rounded-full" /><Skeleton className="h-9 w-32 rounded-md" /></div>
-      <div className="space-y-2"><Skeleton className="h-4 w-24" /><Skeleton className="h-12 w-full rounded-lg" /></div>
-      <div className="space-y-2"><Skeleton className="h-4 w-20" /><Skeleton className="h-12 w-full rounded-lg" /></div>
-      <div className="space-y-2"><Skeleton className="h-4 w-12" /><Skeleton className="h-20 w-full rounded-lg" /></div>
+      <div className="flex items-center gap-4">
+        <Skeleton className="size-24 rounded-full" />
+        <Skeleton className="h-9 w-32 rounded-md" />
+      </div>
+      <div className="space-y-2">
+        <Skeleton className="h-4 w-24" />
+        <Skeleton className="h-12 w-full rounded-lg" />
+      </div>
+      <div className="space-y-2">
+        <Skeleton className="h-4 w-20" />
+        <Skeleton className="h-12 w-full rounded-lg" />
+      </div>
+      <div className="space-y-2">
+        <Skeleton className="h-4 w-12" />
+        <Skeleton className="h-20 w-full rounded-lg" />
+      </div>
     </div>
   );
 }
@@ -165,7 +185,12 @@ function Editor({ profile }: { profile: Profile }) {
           aria-label="Choose a profile picture"
           onChange={pick}
         />
-        <Button type="button" variant="secondary" disabled={busy} onClick={() => file.current?.click()}>
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={busy}
+          onClick={() => file.current?.click()}
+        >
           Change photo
         </Button>
       </div>
@@ -178,7 +203,13 @@ function Editor({ profile }: { profile: Profile }) {
         error={errors.displayName}
         onChange={(event) => setDraft({ ...value, displayName: event.target.value })}
       />
-      <Field id="username" label="Username" value={profile.username} readOnly hint="Can't be changed" />
+      <Field
+        id="username"
+        label="Username"
+        value={profile.username}
+        readOnly
+        hint="Can't be changed"
+      />
       <div className="space-y-1.5">
         <Label htmlFor="bio">Bio</Label>
         <Textarea
@@ -192,8 +223,14 @@ function Editor({ profile }: { profile: Profile }) {
         <p className="text-xs text-muted-foreground">Up to 120 characters.</p>
         {errors.bio && <p className="text-xs text-destructive">{errors.bio}</p>}
       </div>
-      {banner && <p className="text-sm text-destructive" role="alert">{banner}</p>}
-      <Button type="submit" size="lg" className="w-full md:w-auto" disabled={busy}>Save changes</Button>
+      {banner && (
+        <p className="text-sm text-destructive" role="alert">
+          {banner}
+        </p>
+      )}
+      <Button type="submit" size="lg" className="w-full md:w-auto" disabled={busy}>
+        Save changes
+      </Button>
     </form>
   );
 }

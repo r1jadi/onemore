@@ -19,14 +19,24 @@ const testUserID = "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f";
 /** The shape `POST /auth/sign-in` answers with, per the contract. */
 function sessionPayload(userId = testUserID) {
   return {
-    session: { userId, role: "user", email: "player@example.com", expiresAt: "2026-10-08T12:00:00.000Z" },
+    session: {
+      userId,
+      role: "user",
+      email: "player@example.com",
+      expiresAt: "2026-10-08T12:00:00.000Z",
+    },
     tokens: {
       accessToken: "access-token-1",
       refreshToken: "refresh-token-1",
       tokenType: "bearer",
       expiresIn: 3600,
     },
-    user: { id: userId, email: "player@example.com", emailConfirmed: true, createdAt: "2026-10-01T00:00:00.000Z" },
+    user: {
+      id: userId,
+      email: "player@example.com",
+      emailConfirmed: true,
+      createdAt: "2026-10-01T00:00:00.000Z",
+    },
   };
 }
 
@@ -88,9 +98,7 @@ async function signInAs(userId = testUserID) {
 /** A signed-in caller whose profile reads answer with `payload`. */
 function signedInWith(payload: unknown = profilePayload(), status = 200) {
   return mockFetch((url) =>
-    url.endsWith("/auth/sign-in")
-      ? jsonResponse(sessionPayload())
-      : jsonResponse(payload, status),
+    url.endsWith("/auth/sign-in") ? jsonResponse(sessionPayload()) : jsonResponse(payload, status),
   );
 }
 
@@ -174,7 +182,9 @@ describe("loadProfile", () => {
     const state = await loadProfile();
 
     expect(state.status).toBe("error");
-    expect(state.status === "error" && state.error.message).toBe("Profiles are not available right now.");
+    expect(state.status === "error" && state.error.message).toBe(
+      "Profiles are not available right now.",
+    );
   });
 
   it("shares one request between concurrent readers", async () => {
@@ -239,7 +249,11 @@ describe("updateProfile", () => {
       url.endsWith("/auth/sign-in")
         ? jsonResponse(sessionPayload())
         : url.endsWith("/users/me")
-          ? errorResponse(409, "conflict", "This profile changed since you loaded it. Reload and try again.")
+          ? errorResponse(
+              409,
+              "conflict",
+              "This profile changed since you loaded it. Reload and try again.",
+            )
           : jsonResponse(profilePayload()),
     );
     await signInAs();
@@ -279,7 +293,9 @@ describe("changeAvatar", () => {
     await loadProfile();
     const before = spy.mock.calls.length;
 
-    const failure = await changeAvatar(new File(["x"], "cat.gif", { type: "image/gif" })).catch((e) => e);
+    const failure = await changeAvatar(new File(["x"], "cat.gif", { type: "image/gif" })).catch(
+      (e) => e,
+    );
 
     expect(failure).toBeInstanceOf(ApiError);
     expect(failure.message).toMatch(/png, jpeg or webp/i);
@@ -370,10 +386,16 @@ describe("avatarUrl", () => {
 describe("account changes", () => {
   it("drops the cached profile when the session ends", async () => {
     const spy = mockFetch((url) =>
-      url.endsWith("/auth/sign-out") ? new Response(null, { status: 204 }) : jsonResponse(sessionPayload()),
+      url.endsWith("/auth/sign-out")
+        ? new Response(null, { status: 204 })
+        : jsonResponse(sessionPayload()),
     );
     await signInAs();
-    mockFetch((url) => (url.endsWith("/auth/sign-out") ? new Response(null, { status: 204 }) : jsonResponse(profilePayload())));
+    mockFetch((url) =>
+      url.endsWith("/auth/sign-out")
+        ? new Response(null, { status: 204 })
+        : jsonResponse(profilePayload()),
+    );
     await loadProfile();
     expect(getProfileState().status).toBe("ready");
 
@@ -386,12 +408,18 @@ describe("account changes", () => {
 
   it("reads the new account's profile after a switch", async () => {
     const otherUserID = "b7d1c0aa-1111-4222-8333-444455556666";
-    mockFetch((url) => (url.endsWith("/auth/sign-in") ? jsonResponse(sessionPayload(otherUserID)) : jsonResponse(sessionPayload(otherUserID))));
+    mockFetch((url) =>
+      url.endsWith("/auth/sign-in")
+        ? jsonResponse(sessionPayload(otherUserID))
+        : jsonResponse(sessionPayload(otherUserID)),
+    );
     await signInAs(otherUserID);
     let calls = 0;
     mockFetch(() => {
       calls += 1;
-      return jsonResponse(profilePayload({ id: otherUserID, username: "player_two", displayName: "Player Two" }));
+      return jsonResponse(
+        profilePayload({ id: otherUserID, username: "player_two", displayName: "Player Two" }),
+      );
     });
 
     const state = await loadProfile();

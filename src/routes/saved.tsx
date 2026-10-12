@@ -5,5 +5,12 @@ import { seo } from "@/lib/seo";
 
 export const Route = createFileRoute("/saved")({
   head: () => seo("Saved games", "Games you saved to play later."),
-  component: () => <GameListPage title="Saved games" subtitle="Games you saved to play later." items={games.slice(1, 5)} filters={["All", "Puzzle", "Arcade", "Memory"]} />,
+  component: () => (
+    <GameListPage
+      title="Saved games"
+      subtitle="Games you saved to play later."
+      items={games.slice(1, 5)}
+      filters={["All", "Puzzle", "Arcade", "Memory"]}
+    />
+  ),
 });

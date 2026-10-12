@@ -8,7 +8,9 @@ export const Route = createFileRoute("/terms")({
   component: () => (
     <Page>
       <PageHeader back title="Terms & Conditions" />
-      <div className="px-4 md:px-0"><LegalBody sections={terms} /></div>
+      <div className="px-4 md:px-0">
+        <LegalBody sections={terms} />
+      </div>
     </Page>
   ),
 });

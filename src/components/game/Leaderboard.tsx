@@ -4,20 +4,45 @@ import { fmt, leaderboard } from "@/lib/mock";
 import { avatarUrl, useProfile } from "@/lib/users/profile";
 import { cn } from "@/lib/utils";
 
-export function LeaderboardList({ limit, friends, loading, showMe = false }: { limit?: number; friends?: boolean; loading?: boolean; showMe?: boolean }) {
+export function LeaderboardList({
+  limit,
+  friends,
+  loading,
+  showMe = false,
+}: {
+  limit?: number;
+  friends?: boolean;
+  loading?: boolean;
+  showMe?: boolean;
+}) {
   // The signed-in row shows the caller's real identity. It carries no rank or
   // score: no scores service exists yet, so any number here would be invented.
   const state = useProfile();
   const profile = state.status === "ready" ? state.profile : undefined;
   if (loading) return <ListSkeleton rows={limit ?? 7} />;
-  const rows = (friends ? leaderboard.filter((_, i) => i % 2 === 0).map((r, i) => ({ ...r, rank: i + 1 })) : leaderboard).slice(0, limit);
+  const rows = (
+    friends
+      ? leaderboard.filter((_, i) => i % 2 === 0).map((r, i) => ({ ...r, rank: i + 1 }))
+      : leaderboard
+  ).slice(0, limit);
   return (
     <div>
       <ol className="divide-y divide-border">
         {rows.map((r) => (
           <li key={r.user} className="enter">
-            <Link to="/u/$username" params={{ username: r.user }} className="flex items-center gap-3 px-4 py-2.5 hover:bg-surface md:rounded-lg md:px-2">
-              <span className={cn("w-6 text-center font-mono text-sm tabular", r.rank <= 3 ? "font-semibold text-foreground" : "text-muted-foreground")}>{r.rank}</span>
+            <Link
+              to="/u/$username"
+              params={{ username: r.user }}
+              className="flex items-center gap-3 px-4 py-2.5 hover:bg-surface md:rounded-lg md:px-2"
+            >
+              <span
+                className={cn(
+                  "w-6 text-center font-mono text-sm tabular",
+                  r.rank <= 3 ? "font-semibold text-foreground" : "text-muted-foreground",
+                )}
+              >
+                {r.rank}
+              </span>
               <Avatar name={r.user} size="sm" />
               <span className="flex-1 truncate text-sm">@{r.user}</span>
               <span className="font-mono text-sm font-semibold tabular">{fmt(r.score)}</span>

@@ -36,12 +36,17 @@ jobs:
           # a leaked secret.
           fetch-depth: 0
 
+      # The scanner runs with the repository mounted at /repo while its own
+      # working directory is /, so both the source and the config are given as
+      # explicit absolute paths inside the container.
       - name: Scan the repository history for secrets
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/repo" \
             ghcr.io/gitleaks/gitleaks:latest \
-            detect --source /repo --redact --no-banner --exit-code 1
+            detect --source /repo \
+              --config /repo/.gitleaks.toml \
+              --redact --no-banner --exit-code 1
 
   dependency-review:
     name: dependency review

@@ -20,7 +20,7 @@
 # same PORT handling, same routes. It is not `services/cmd/api` because that slot
 # belongs to the Users service — Vercel's Go preset requires one of three fixed
 # entrypoint names and a container build has no such requirement.
-FROM golang:1.23-bookworm AS build
+FROM golang:1.27-bookworm AS build
 
 WORKDIR /src
 

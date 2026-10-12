@@ -15,20 +15,61 @@ function Reset() {
   const [b, setB] = useState("");
   const [done, setDone] = useState(false);
   const mismatch = b.length > 0 && a !== b;
-  if (done) return (
-    <AuthLayout title="Password updated" subtitle="You can now log in with your new password." back={false}>
-      <div className="flex justify-center py-8"><span className="flex size-16 items-center justify-center rounded-full bg-success/15"><Check className="size-7 text-success" /></span></div>
-      <Button asChild variant="play" size="xl" className="mt-auto w-full lg:mt-4"><Link to="/login">Log in</Link></Button>
-    </AuthLayout>
-  );
+  if (done)
+    return (
+      <AuthLayout
+        title="Password updated"
+        subtitle="You can now log in with your new password."
+        back={false}
+      >
+        <div className="flex justify-center py-8">
+          <span className="flex size-16 items-center justify-center rounded-full bg-success/15">
+            <Check className="size-7 text-success" />
+          </span>
+        </div>
+        <Button asChild variant="play" size="xl" className="mt-auto w-full lg:mt-4">
+          <Link to="/login">Log in</Link>
+        </Button>
+      </AuthLayout>
+    );
   return (
     <AuthLayout title="Set a new password" subtitle="Use at least 8 characters.">
-      <form className="flex flex-1 flex-col" onSubmit={(e) => { e.preventDefault(); if (a.length >= 8 && !mismatch) setDone(true); }}>
+      <form
+        className="flex flex-1 flex-col"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (a.length >= 8 && !mismatch) setDone(true);
+        }}
+      >
         <div className="space-y-4">
-          <Field id="new" type="password" label="New password" value={a} onChange={(e) => setA(e.target.value)} autoComplete="new-password" error={a && a.length < 8 ? "Too short." : undefined} />
-          <Field id="confirm" type="password" label="Confirm password" value={b} onChange={(e) => setB(e.target.value)} autoComplete="new-password" error={mismatch ? "Passwords don't match." : undefined} />
+          <Field
+            id="new"
+            type="password"
+            label="New password"
+            value={a}
+            onChange={(e) => setA(e.target.value)}
+            autoComplete="new-password"
+            error={a && a.length < 8 ? "Too short." : undefined}
+          />
+          <Field
+            id="confirm"
+            type="password"
+            label="Confirm password"
+            value={b}
+            onChange={(e) => setB(e.target.value)}
+            autoComplete="new-password"
+            error={mismatch ? "Passwords don't match." : undefined}
+          />
         </div>
-        <Button type="submit" variant="play" size="xl" className="mt-auto w-full lg:mt-6" disabled={a.length < 8 || a !== b}>Update password</Button>
+        <Button
+          type="submit"
+          variant="play"
+          size="xl"
+          className="mt-auto w-full lg:mt-6"
+          disabled={a.length < 8 || a !== b}
+        >
+          Update password
+        </Button>
       </form>
     </AuthLayout>
   );

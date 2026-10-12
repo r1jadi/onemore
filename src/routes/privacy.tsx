@@ -8,7 +8,9 @@ export const Route = createFileRoute("/privacy")({
   component: () => (
     <Page>
       <PageHeader back title="Privacy Policy" />
-      <div className="px-4 md:px-0"><LegalBody sections={privacy} /></div>
+      <div className="px-4 md:px-0">
+        <LegalBody sections={privacy} />
+      </div>
     </Page>
   ),
 });

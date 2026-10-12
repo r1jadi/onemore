@@ -74,7 +74,9 @@ function Identity({ state }: { state: ProfileState }) {
           {state.status === "anonymous" ? "Sign in to view your profile" : "No profile yet"}
         </p>
         <p className="text-sm text-muted-foreground">
-          {state.status === "anonymous" ? "Your identity comes from your account" : "Open to try again"}
+          {state.status === "anonymous"
+            ? "Your identity comes from your account"
+            : "Open to try again"}
         </p>
       </div>
     </>

@@ -66,7 +66,12 @@ function sessionPayload() {
       tokenType: "bearer",
       expiresIn: 3600,
     },
-    user: { id: testUserID, email: "player@example.com", emailConfirmed: true, createdAt: "2026-10-01T00:00:00.000Z" },
+    user: {
+      id: testUserID,
+      email: "player@example.com",
+      emailConfirmed: true,
+      createdAt: "2026-10-01T00:00:00.000Z",
+    },
   };
 }
 
@@ -125,7 +130,9 @@ describe("ProfileForm", () => {
     const name = (await screen.findByLabelText("Display name")) as HTMLInputElement;
     // The identity shown is the account's own row, not the prototype user.
     expect(name.value).toBe("Player One");
-    expect((screen.getByLabelText("Bio") as HTMLTextAreaElement).value).toBe("Puzzles in the morning.");
+    expect((screen.getByLabelText("Bio") as HTMLTextAreaElement).value).toBe(
+      "Puzzles in the morning.",
+    );
     expect((screen.getByLabelText("Username") as HTMLInputElement).value).toBe("player_one");
     expect((screen.getByLabelText("Username") as HTMLInputElement).readOnly).toBe(true);
     expect(screen.queryByDisplayValue("Rijad Halili")).toBeNull();
@@ -149,16 +156,21 @@ describe("ProfileForm", () => {
     });
 
     // The form shows what was stored, trimmed the way the API stores it.
-    await waitFor(() => expect((screen.getByLabelText("Display name") as HTMLInputElement).value).toBe("Player Two"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Display name") as HTMLInputElement).value).toBe("Player Two"),
+    );
   });
 
   it("keeps the user's draft and shows the API's message under the field it names", async () => {
     const spy = mockFetch((url, init) => {
       if (url.endsWith("/auth/sign-in")) return jsonResponse(sessionPayload());
       if (init?.method === "PATCH") {
-        return errorResponse(422, "unprocessable_entity", "Use at most 60 characters for your display name.", [
-          { field: "displayName", rule: "maxLength" },
-        ]);
+        return errorResponse(
+          422,
+          "unprocessable_entity",
+          "Use at most 60 characters for your display name.",
+          [{ field: "displayName", rule: "maxLength" }],
+        );
       }
       return jsonResponse(profilePayload());
     });
@@ -172,9 +184,13 @@ describe("ProfileForm", () => {
     });
 
     expect(patchRequests(spy)).toHaveLength(1);
-    expect(await screen.findByText("Use at most 60 characters for your display name.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Use at most 60 characters for your display name."),
+    ).toBeInTheDocument();
     // An edit in progress is never thrown away because the server refused it.
-    expect((screen.getByLabelText("Display name") as HTMLInputElement).value).toBe("A name that is far too long");
+    expect((screen.getByLabelText("Display name") as HTMLInputElement).value).toBe(
+      "A name that is far too long",
+    );
   });
 
   it("reports a conflict and re-reads the stored profile", async () => {
@@ -184,7 +200,11 @@ describe("ProfileForm", () => {
       if (init?.method === "PATCH") {
         // Someone else's edit landed first: the row moved on.
         stored = profilePayload({ displayName: "Someone Else" });
-        return errorResponse(409, "conflict", "This profile changed since you loaded it. Reload and try again.");
+        return errorResponse(
+          409,
+          "conflict",
+          "This profile changed since you loaded it. Reload and try again.",
+        );
       }
       return jsonResponse(stored);
     });
@@ -202,13 +222,17 @@ describe("ProfileForm", () => {
     );
     // Nothing was overwritten, and what is on screen is what the database holds.
     await waitFor(() =>
-      expect((screen.getByLabelText("Display name") as HTMLInputElement).value).toBe("Someone Else"),
+      expect((screen.getByLabelText("Display name") as HTMLInputElement).value).toBe(
+        "Someone Else",
+      ),
     );
   });
 
   it("refuses an empty display name without calling the API", async () => {
     const spy = mockFetch((url) =>
-      url.endsWith("/auth/sign-in") ? jsonResponse(sessionPayload()) : jsonResponse(profilePayload()),
+      url.endsWith("/auth/sign-in")
+        ? jsonResponse(sessionPayload())
+        : jsonResponse(profilePayload()),
     );
     await signInAs();
     await renderForm();

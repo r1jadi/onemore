@@ -1,10 +1,11 @@
 module github.com/r1jadi/onemore/services
 
-go 1.23
+go 1.27
 
-require github.com/r1jadi/onemore/packages/go/platform v0.0.0
-
-require github.com/golang-jwt/jwt/v5 v5.2.1
+require (
+	github.com/golang-jwt/jwt/v5 v5.3.1
+	github.com/r1jadi/onemore/packages/go/platform v0.0.0
+)
 
 // The platform library is not published to a module proxy; it is consumed from
 // this repository. Once it is versioned, drop this directive and pin a real

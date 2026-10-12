@@ -14,15 +14,39 @@ function Verify() {
   const nav = useNavigate();
   const [code, setCode] = useState("");
   const [wait, setWait] = useState(30);
-  useEffect(() => { if (wait <= 0) return; const t = setTimeout(() => setWait(wait - 1), 1000); return () => clearTimeout(t); }, [wait]);
+  useEffect(() => {
+    if (wait <= 0) return;
+    const t = setTimeout(() => setWait(wait - 1), 1000);
+    return () => clearTimeout(t);
+  }, [wait]);
   return (
     <AuthLayout title="Check your email" subtitle="We sent a 6-digit code to r•••@mail.com.">
-      <label className="mb-2 text-sm font-medium" htmlFor="otp">Verification code</label>
+      <label className="mb-2 text-sm font-medium" htmlFor="otp">
+        Verification code
+      </label>
       <InputOTP id="otp" maxLength={6} value={code} onChange={setCode}>
-        <InputOTPGroup className="w-full">{[0, 1, 2, 3, 4, 5].map((i) => <InputOTPSlot key={i} index={i} className="h-14 flex-1 text-lg" />)}</InputOTPGroup>
+        <InputOTPGroup className="w-full">
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <InputOTPSlot key={i} index={i} className="h-14 flex-1 text-lg" />
+          ))}
+        </InputOTPGroup>
       </InputOTP>
-      <button disabled={wait > 0} onClick={() => setWait(30)} className="mt-4 self-start text-sm text-muted-foreground disabled:opacity-60 enabled:hover:text-foreground">{wait > 0 ? `Resend code in ${wait}s` : "Resend code"}</button>
-      <Button variant="play" size="xl" className="mt-auto w-full lg:mt-8" disabled={code.length < 6} onClick={() => nav({ to: "/account-created" })}>Verify</Button>
+      <button
+        disabled={wait > 0}
+        onClick={() => setWait(30)}
+        className="mt-4 self-start text-sm text-muted-foreground disabled:opacity-60 enabled:hover:text-foreground"
+      >
+        {wait > 0 ? `Resend code in ${wait}s` : "Resend code"}
+      </button>
+      <Button
+        variant="play"
+        size="xl"
+        className="mt-auto w-full lg:mt-8"
+        disabled={code.length < 6}
+        onClick={() => nav({ to: "/account-created" })}
+      >
+        Verify
+      </Button>
     </AuthLayout>
   );
 }

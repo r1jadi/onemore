@@ -289,22 +289,19 @@ export async function changeAvatar(file: File): Promise<Profile> {
   // folder separator into %2F and break the owner-folder rule the bucket policy
   // checks (`avatars/<caller id>/<file>`).
   const encodedPath = objectPath.split("/").map(encodeURIComponent).join("/");
-  const response = await fetch(
-    `${baseUrl}/storage/v1/object/${AVATAR_BUCKET}/${encodedPath}`,
-    {
-      method: "POST",
-      headers: {
-        apikey: publishableKey,
-        // The caller's own token: the bucket policy only allows writes inside a
-        // folder named after this account.
-        Authorization: `Bearer ${token}`,
-        "Content-Type": file.type,
-        "x-upsert": "false",
-        "cache-control": "max-age=3600",
-      },
-      body: file,
+  const response = await fetch(`${baseUrl}/storage/v1/object/${AVATAR_BUCKET}/${encodedPath}`, {
+    method: "POST",
+    headers: {
+      apikey: publishableKey,
+      // The caller's own token: the bucket policy only allows writes inside a
+      // folder named after this account.
+      Authorization: `Bearer ${token}`,
+      "Content-Type": file.type,
+      "x-upsert": "false",
+      "cache-control": "max-age=3600",
     },
-  );
+    body: file,
+  });
 
   if (!response.ok) {
     throw new ApiError("That photo could not be uploaded. Try again.", {

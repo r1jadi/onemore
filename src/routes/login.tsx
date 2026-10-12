@@ -38,16 +38,54 @@ function Login() {
   }
 
   return (
-    <AuthLayout title="Welcome back" subtitle="Log in to keep your scores and streaks." footer={<>New to onemore? <Link to="/signup" className="font-medium text-foreground">Create account</Link></>}>
+    <AuthLayout
+      title="Welcome back"
+      subtitle="Log in to keep your scores and streaks."
+      footer={
+        <>
+          New to onemore?{" "}
+          <Link to="/signup" className="font-medium text-foreground">
+            Create account
+          </Link>
+        </>
+      }
+    >
       <SocialButtons />
       <form className="space-y-4" onSubmit={submit}>
         <Field id="email" name="email" type="email" label="Email" autoComplete="email" />
         <div className="relative">
-          <Field id="password" name="password" type={show ? "text" : "password"} label="Password" autoComplete="current-password" hint={<Link to="/forgot-password" className="text-xs text-muted-foreground hover:text-foreground">Forgot password?</Link>} />
-          <button type="button" aria-label={show ? "Hide password" : "Show password"} onClick={() => setShow(!show)} className="absolute right-3 bottom-3.5 text-muted-foreground">{show ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button>
+          <Field
+            id="password"
+            name="password"
+            type={show ? "text" : "password"}
+            label="Password"
+            autoComplete="current-password"
+            hint={
+              <Link
+                to="/forgot-password"
+                className="text-xs text-muted-foreground hover:text-foreground"
+              >
+                Forgot password?
+              </Link>
+            }
+          />
+          <button
+            type="button"
+            aria-label={show ? "Hide password" : "Show password"}
+            onClick={() => setShow(!show)}
+            className="absolute right-3 bottom-3.5 text-muted-foreground"
+          >
+            {show ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+          </button>
         </div>
-        {err && <p className="text-sm text-destructive" role="alert">{err}</p>}
-        <Button type="submit" variant="play" size="xl" className="w-full" disabled={busy}>Log in</Button>
+        {err && (
+          <p className="text-sm text-destructive" role="alert">
+            {err}
+          </p>
+        )}
+        <Button type="submit" variant="play" size="xl" className="w-full" disabled={busy}>
+          Log in
+        </Button>
       </form>
     </AuthLayout>
   );

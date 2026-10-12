@@ -1,0 +1,20 @@
+# gitleaks configuration for onemore.
+#
+# The stock ruleset is kept and only extended, never replaced. The single
+# allowlist entry below covers a unit-test fixture that is shaped like a
+# credential but is not one; it is in git history, so it cannot be silenced in
+# the source file itself.
+#
+# Real credentials must never be committed — see docs/development/environments.md.
+# Anything added here must be a placeholder, never an actual key: this file is
+# checked in and would itself become the leak.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Fake caller token in the Supabase auth client test, not a credential"
+# Scoped to the literal placeholder rather than to the whole file, so a genuine
+# secret committed to that test still fails the scan.
+regexTarget = "match"
+regexes = ['''the-callers-token''']

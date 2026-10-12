@@ -8,7 +8,7 @@
 // A service graduates to its own module when it needs an independent release
 // cadence or dependency set; `go work use` then gains that module and nothing
 // else changes. See docs/decisions/0001-go-module-strategy.md.
-go 1.23
+go 1.27
 
 use (
 	./packages/go/platform

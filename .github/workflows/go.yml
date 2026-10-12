@@ -94,8 +94,14 @@ jobs:
         with:
           go-version-file: services/go.mod
 
+      # Pinned, never @latest. This job's toolchain comes from go-version-file
+      # (services/go.mod) and GOTOOLCHAIN is local, while @latest resolves to
+      # whatever x/vuln was released most recently — and a release can raise its
+      # own go directive past that toolchain, which fails the install before a
+      # single package is scanned. v1.9.0 requires go >= 1.26.0; bump this pin
+      # deliberately, together with the go directive.
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
 
       - name: govulncheck (platform)
         working-directory: packages/go/platform

@@ -10,20 +10,52 @@ import type { GameId } from "@/lib/mock";
 
 const collage: GameId[] = ["stack-10", "memory-flash", "color-merge", "dont-break-the-chain"];
 
-export function AuthLayout({ title, subtitle, children, back = true, footer }: { title: string; subtitle?: string; children: ReactNode; back?: boolean; footer?: ReactNode }) {
+export function AuthLayout({
+  title,
+  subtitle,
+  children,
+  back = true,
+  footer,
+}: {
+  title: string;
+  subtitle?: string;
+  children: ReactNode;
+  back?: boolean;
+  footer?: ReactNode;
+}) {
   const router = useRouter();
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-2">
       <div className="hidden border-r border-border bg-sidebar p-10 lg:flex lg:flex-col">
-        <Link to="/" aria-label="onemore home"><Logo /></Link>
+        <Link to="/" aria-label="onemore home">
+          <Logo />
+        </Link>
         <div className="my-auto grid max-w-md grid-cols-2 gap-3 self-center">
-          {collage.map((id) => <GameArt key={id} id={id} className="aspect-square rounded-2xl border border-glass-border" />)}
+          {collage.map((id) => (
+            <GameArt
+              key={id}
+              id={id}
+              className="aspect-square rounded-2xl border border-glass-border"
+            />
+          ))}
         </div>
-        <p className="max-w-sm text-sm text-muted-foreground">Short games. Real scores. Always one more.</p>
+        <p className="max-w-sm text-sm text-muted-foreground">
+          Short games. Real scores. Always one more.
+        </p>
       </div>
       <div className="flex min-h-dvh flex-col px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1.5rem,env(safe-area-inset-bottom))]">
         <div className="flex h-12 items-center">
-          {back && <Button variant="ghost" size="icon" aria-label="Go back" className="-ml-2" onClick={() => router.history.back()}><ArrowLeft /></Button>}
+          {back && (
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Go back"
+              className="-ml-2"
+              onClick={() => router.history.back()}
+            >
+              <ArrowLeft />
+            </Button>
+          )}
         </div>
         <div className="enter mx-auto flex w-full max-w-sm flex-1 flex-col pt-4 lg:justify-center lg:pt-0">
           <h1 className="text-2xl font-semibold">{title}</h1>
@@ -36,12 +68,36 @@ export function AuthLayout({ title, subtitle, children, back = true, footer }: {
   );
 }
 
-export function Field({ id, label, hint, error, ...props }: React.ComponentProps<typeof Input> & { id: string; label: string; hint?: ReactNode; error?: string }) {
+export function Field({
+  id,
+  label,
+  hint,
+  error,
+  ...props
+}: React.ComponentProps<typeof Input> & {
+  id: string;
+  label: string;
+  hint?: ReactNode;
+  error?: string;
+}) {
   return (
     <div className="space-y-1.5">
-      <div className="flex items-baseline justify-between"><Label htmlFor={id}>{label}</Label>{hint}</div>
-      <Input id={id} aria-invalid={!!error} aria-describedby={error ? `${id}-err` : undefined} className="h-12 rounded-lg bg-surface text-base md:text-sm" {...props} />
-      {error && <p id={`${id}-err`} className="text-xs text-destructive">{error}</p>}
+      <div className="flex items-baseline justify-between">
+        <Label htmlFor={id}>{label}</Label>
+        {hint}
+      </div>
+      <Input
+        id={id}
+        aria-invalid={!!error}
+        aria-describedby={error ? `${id}-err` : undefined}
+        className="h-12 rounded-lg bg-surface text-base md:text-sm"
+        {...props}
+      />
+      {error && (
+        <p id={`${id}-err`} className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
@@ -50,11 +106,18 @@ export function SocialButtons() {
   return (
     <>
       <div className="grid gap-2">
-        <Button variant="secondary" size="lg" type="button">Continue with Apple</Button>
-        <Button variant="secondary" size="lg" type="button">Continue with Google</Button>
+        <Button variant="secondary" size="lg" type="button">
+          Continue with Apple
+        </Button>
+        <Button variant="secondary" size="lg" type="button">
+          Continue with Google
+        </Button>
       </div>
-      <div className="my-6 flex items-center gap-3 text-xs text-muted-foreground"><span className="h-px flex-1 bg-border" />or with email<span className="h-px flex-1 bg-border" /></div>
+      <div className="my-6 flex items-center gap-3 text-xs text-muted-foreground">
+        <span className="h-px flex-1 bg-border" />
+        or with email
+        <span className="h-px flex-1 bg-border" />
+      </div>
     </>
   );
 }
-
