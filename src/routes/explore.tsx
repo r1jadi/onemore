@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ChevronRight, Search } from "lucide-react";
+import type { ReactNode } from "react";
 import { EmptyState, GridSkeleton, Page, PageHeader, Section } from "@/components/common";
 import { GameArt } from "@/components/game/GameArt";
 import { GameCard } from "@/components/game/GameCard";
@@ -22,6 +23,29 @@ function More({ to }: { to: string }) {
 }
 
 /**
+ * One section whose read failed.
+ *
+ * The sections that did load stay, the failed one says so, and it offers the
+ * only action that can help. It never fills the gap with a different set of
+ * games — there is nothing to fall back to, and a plausible-looking grid under
+ * a heading that failed would be indistinguishable from a real one.
+ */
+function SectionError({ children, onRetry }: { children: ReactNode; onRetry: () => void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+      <p className="text-muted-foreground">{children}</p>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="font-medium underline underline-offset-4 transition-colors hover:text-primary"
+      >
+        Retry
+      </button>
+    </div>
+  );
+}
+
+/**
  * Explore.
  *
  * The daily challenge and the category list are real. "Trending" and "Popular"
@@ -29,7 +53,7 @@ function More({ to }: { to: string }) {
  * heading: both need play counts, and nothing records a play yet. Showing the
  * catalogue in publication order under "Trending" would be a fabricated ranking.
  */
-function Explore() {
+export function Explore() {
   const daily = useGames({ category: "daily", limit: 1 });
   const newest = useGames({ limit: 5 });
   const categories = useCategories();
@@ -56,7 +80,13 @@ function Explore() {
           <Search className="size-4" />
           Search games
         </Link>
-        {challenge && (
+        {daily.status === "error" ? (
+          <div className="mt-4">
+            <SectionError onRetry={daily.retry}>
+              Today's challenge is unavailable right now.
+            </SectionError>
+          </div>
+        ) : challenge ? (
           <Link
             to="/games/$id"
             params={{ id: challenge.slug }}
@@ -74,7 +104,7 @@ function Explore() {
               className="size-24 shrink-0 rounded-xl [&_span.text-6xl]:text-2xl [&>div>div]:size-20 [&>div>div]:border-4 [&>div>span]:hidden"
             />
           </Link>
-        )}
+        ) : null}
       </div>
 
       <Section title="Categories" action={<More to="/categories" />}>
@@ -83,9 +113,11 @@ function Explore() {
             <GridSkeleton count={3} />
           </div>
         ) : categories.status === "error" ? (
-          <p className="px-4 text-sm text-muted-foreground md:px-0">
-            Categories are unavailable right now.
-          </p>
+          <div className="px-4 md:px-0">
+            <SectionError onRetry={categories.retry}>
+              Categories are unavailable right now.
+            </SectionError>
+          </div>
         ) : (
           <div className="no-scrollbar flex gap-2 overflow-x-auto px-4 md:flex-wrap md:px-0">
             {categories.items.map((c) => (
@@ -106,9 +138,11 @@ function Explore() {
         {newest.status === "loading" ? (
           <GridSkeleton count={3} />
         ) : newest.status === "error" ? (
-          <p className="px-4 text-sm text-muted-foreground md:px-0">
-            The catalogue is unavailable right now.
-          </p>
+          <div className="px-4 md:px-0">
+            <SectionError onRetry={newest.retry}>
+              The catalogue is unavailable right now.
+            </SectionError>
+          </div>
         ) : newest.items.length === 0 ? (
           <EmptyState title="No games published yet" />
         ) : (
