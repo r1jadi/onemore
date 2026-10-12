@@ -19,13 +19,13 @@ suite, and five CI workflows.
 
 Two slices are implemented end to end; the rest are contract-only.
 
-| Area | State |
-| --- | --- |
-| Web app (routing, SEO, PWA, design system) | Complete, served from the production domain |
-| Session lifecycle (`auth`) | **Implemented** — sign-up, sign-in, refresh, session exchange, sign-out |
-| The caller's own profile (`users`) | **Implemented** — read and update the signed-in `public.profiles` row |
-| Everything else (games, sessions, scores, leaderboards, feed, recommendations, social, notifications, search, moderation, analytics, admin) | Scaffolded: each has a published contract and answers `501` |
-| Payments (RaiAccept) | Designed, not built — see [0005](docs/decisions/0005-payments.md) |
+| Area                                                                                                                                        | State                                                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Web app (routing, SEO, PWA, design system)                                                                                                  | Complete, served from the production domain                             |
+| Session lifecycle (`auth`)                                                                                                                  | **Implemented** — sign-up, sign-in, refresh, session exchange, sign-out |
+| The caller's own profile (`users`)                                                                                                          | **Implemented** — read and update the signed-in `public.profiles` row   |
+| Everything else (games, sessions, scores, leaderboards, feed, recommendations, social, notifications, search, moderation, analytics, admin) | Scaffolded: each has a published contract and answers `501`             |
+| Payments (RaiAccept)                                                                                                                        | Designed, not built — see [0005](docs/decisions/0005-payments.md)       |
 
 A scaffolded endpoint is deliberate, not missing: the route exists, authenticates,
 is rate limited and is documented, so a client fails predictably (`501`) instead of
@@ -63,7 +63,7 @@ Mock data is never used as a fallback for the authenticated user.
 1. The web service renders the page. Public pages are server rendered with
    canonical URLs and structured data; private pages are `noindex`.
 2. The browser calls `/api/v1/...` with `Authorization: Bearer <supabase access
-   token>` and nothing else. The rewrite table in [`vercel.json`](vercel.json)
+token>` and nothing else. The rewrite table in [`vercel.json`](vercel.json)
    sends every `/api/v1/*` path to the API service.
 3. The gateway strips any client-supplied identity header, applies security
    headers, the CORS allowlist, a per-IP rate limit and a 1 MiB body limit, then
@@ -72,7 +72,7 @@ Mock data is never used as a fallback for the authenticated user.
    and enforces its route tier (`public`, `optional`, `authenticated`,
    `moderator`, `admin`).
 5. Domain logic talks to Postgres. `service_role` is used only for work a user
-   cannot be trusted to do; anything a user may legitimately do is *additionally*
+   cannot be trusted to do; anything a user may legitimately do is _additionally_
    constrained by RLS, so a bug in one layer does not become a data breach.
 6. Errors are one envelope everywhere: `{"error":{"code","message","request_id"}}`.
 
@@ -81,16 +81,16 @@ Full detail, including the request path end to end, is in
 
 ## Stack
 
-| Layer | Choice |
-| --- | --- |
-| Web | TanStack Start + TanStack Router, React 19, Vite, TypeScript |
-| Styling | Tailwind CSS v4, shadcn/ui on Radix primitives |
-| Web tests | Vitest + Testing Library (jsdom) |
-| Web tooling | bun (lockfile of record), ESLint + Prettier |
-| API | Go 1.27, stdlib `net/http` with one thin router, two modules in one workspace |
-| Database | Supabase Postgres, RLS, migrations as the only schema history |
-| Deployment | Vercel services mode: one container image for the gateway, Go runtime for the internal services |
-| CI | GitHub Actions — web, go, database, api-contract, security |
+| Layer       | Choice                                                                                          |
+| ----------- | ----------------------------------------------------------------------------------------------- |
+| Web         | TanStack Start + TanStack Router, React 19, Vite, TypeScript                                    |
+| Styling     | Tailwind CSS v4, shadcn/ui on Radix primitives                                                  |
+| Web tests   | Vitest + Testing Library (jsdom)                                                                |
+| Web tooling | bun (lockfile of record), ESLint + Prettier                                                     |
+| API         | Go 1.27, stdlib `net/http` with one thin router, two modules in one workspace                   |
+| Database    | Supabase Postgres, RLS, migrations as the only schema history                                   |
+| Deployment  | Vercel services mode: one container image for the gateway, Go runtime for the internal services |
+| CI          | GitHub Actions — web, go, database, api-contract, security                                      |
 
 ## Quick start
 
@@ -128,18 +128,18 @@ Step-by-step setup, ports and per-service commands: [local-setup.md](docs/develo
 
 ## Repository layout
 
-| Path | What lives there |
-| --- | --- |
-| `src/`, `public/` | The web app: routes, components, SEO/PWA assets. |
-| `services/` | One Go module holding every service, each with `cmd/<service>`. |
-| `packages/go/platform` | Shared Go library: config, logging, errors, HTTP conventions, JWT verification, health. |
-| `packages/api-contracts` | The OpenAPI 3.1 contract for `/api/v1`. |
-| `supabase/` | `config.toml`, `migrations/`, `seed.sql`. Migrations are the only way the schema changes. |
-| `tests/` | Contract, e2e, integration, load, security and smoke suites. `tests/security/rls_test.sql` is live today. |
-| `scripts/` | Operational helpers: `test-rls.sh`, `check-api-contract.mjs`, `generate-sitemap.mjs`, `env-from-supabase.mjs`. |
-| `docs/` | Architecture, development, deployment, security and the decision records. |
-| `.github/workflows/` | CI: web, go, database, api-contract, security. |
-| `vercel.json`, `Dockerfile.vercel` | The deployment: four services, the `/api/v1` rewrites and the two service bindings. |
+| Path                                                         | What lives there                                                                                                                                                          |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/`, `public/`                                            | The web app: routes, components, SEO/PWA assets.                                                                                                                          |
+| `services/`                                                  | One Go module holding every service, each with `cmd/<service>`.                                                                                                           |
+| `packages/go/platform`                                       | Shared Go library: config, logging, errors, HTTP conventions, JWT verification, health.                                                                                   |
+| `packages/api-contracts`                                     | The OpenAPI 3.1 contract for `/api/v1`.                                                                                                                                   |
+| `supabase/`                                                  | `config.toml`, `migrations/`, `seed.sql`. Migrations are the only way the schema changes.                                                                                 |
+| `tests/`                                                     | Contract, e2e, integration, load, security and smoke suites. `tests/security/rls_test.sql` is live today.                                                                 |
+| `scripts/`                                                   | Operational helpers: `test-rls.sh`, `check-api-contract.mjs`, `generate-sitemap.mjs`, `env-from-supabase.mjs`.                                                            |
+| `docs/`                                                      | Architecture, development, deployment, security and the decision records.                                                                                                 |
+| `.github/workflows/`                                         | CI: web, go, database, api-contract, security.                                                                                                                            |
+| `vercel.json`, `Dockerfile.vercel`                           | The deployment: four services, the `/api/v1` rewrites and the two service bindings.                                                                                       |
 | `apps/`, `config/`, `database/`, `games/`, `infrastructure/` | Placeholders for future work (mobile apps, environment config, SQL artifacts, game catalogues, infrastructure). `supabase/migrations` stays authoritative for the schema. |
 
 ## Services
@@ -150,23 +150,23 @@ cannot be opted out of — validated fail-fast configuration, structured logging
 verification, the full middleware chain, `/healthz` and `/readyz`, and graceful
 shutdown with readiness draining.
 
-| Service | Owns | State |
-| --- | --- | --- |
-| `gateway` | The only public entry point; owns `/api/v1` and proxies by prefix | Implemented |
-| `auth` | Session lifecycle on top of Supabase Auth | **Implemented** |
-| `users` | Profiles | **Implemented** (own profile) |
-| `games` | Catalogue and game metadata | Scaffolded |
-| `game-sessions` | Play sessions; the only path to a score | Scaffolded |
-| `scores` | Score records (read-only to clients) | Scaffolded |
-| `leaderboards` | Global and friends boards | Scaffolded |
-| `feed` | The personalised feed | Scaffolded |
-| `recommendations` | Suggestions | Scaffolded |
-| `social` | Comments, follows, likes | Scaffolded |
-| `notifications` | In-app and push | Scaffolded |
-| `search` | Games, creators, players | Scaffolded |
-| `moderation` | Reports and moderation actions | Scaffolded |
-| `analytics` | Product events and dashboards | Scaffolded |
-| `admin` | The operations API behind the admin dashboard | Scaffolded |
+| Service           | Owns                                                              | State                         |
+| ----------------- | ----------------------------------------------------------------- | ----------------------------- |
+| `gateway`         | The only public entry point; owns `/api/v1` and proxies by prefix | Implemented                   |
+| `auth`            | Session lifecycle on top of Supabase Auth                         | **Implemented**               |
+| `users`           | Profiles                                                          | **Implemented** (own profile) |
+| `games`           | Catalogue and game metadata                                       | Scaffolded                    |
+| `game-sessions`   | Play sessions; the only path to a score                           | Scaffolded                    |
+| `scores`          | Score records (read-only to clients)                              | Scaffolded                    |
+| `leaderboards`    | Global and friends boards                                         | Scaffolded                    |
+| `feed`            | The personalised feed                                             | Scaffolded                    |
+| `recommendations` | Suggestions                                                       | Scaffolded                    |
+| `social`          | Comments, follows, likes                                          | Scaffolded                    |
+| `notifications`   | In-app and push                                                   | Scaffolded                    |
+| `search`          | Games, creators, players                                          | Scaffolded                    |
+| `moderation`      | Reports and moderation actions                                    | Scaffolded                    |
+| `analytics`       | Product events and dashboards                                     | Scaffolded                    |
+| `admin`           | The operations API behind the admin dashboard                     | Scaffolded                    |
 
 Adding one: create `services/<name>/cmd/<name>/main.go`, add its prefix to
 `internal/apiroutes/routes.go`, document it in the OpenAPI contract, add its
@@ -217,15 +217,15 @@ The full picture: [the authorization matrix](docs/security/data-access.md), the
 
 ## Testing
 
-| Suite | Command |
-| --- | --- |
-| Web unit tests | `bun run test` |
-| Web type check / lint / build | `bun run typecheck` · `bun run lint` · `bun run build` |
-| Sitemap drift | `bun run sitemap:check` |
-| Contract drift | `node scripts/check-api-contract.mjs` |
-| Go tests (both modules) | `cd services && go test ./...` · `cd packages/go/platform && go test ./...` |
-| Go static checks | `go vet ./...` and `gofmt -l` |
-| Database security | `./scripts/test-rls.sh` |
+| Suite                         | Command                                                                     |
+| ----------------------------- | --------------------------------------------------------------------------- |
+| Web unit tests                | `bun run test`                                                              |
+| Web type check / lint / build | `bun run typecheck` · `bun run lint` · `bun run build`                      |
+| Sitemap drift                 | `bun run sitemap:check`                                                     |
+| Contract drift                | `node scripts/check-api-contract.mjs`                                       |
+| Go tests (both modules)       | `cd services && go test ./...` · `cd packages/go/platform && go test ./...` |
+| Go static checks              | `go vet ./...` and `gofmt -l`                                               |
+| Database security             | `./scripts/test-rls.sh`                                                     |
 
 CI adds `go test -race` (which needs cgo, so it runs on Linux rather than this
 repository's Windows checkout), `govulncheck`, `gitleaks` and `bun audit`.
@@ -238,13 +238,13 @@ contract tests against a running service, no fuzzing — is listed explicitly in
 
 Five workflows, all read-only with respect to the repository:
 
-| Workflow | Jobs |
-| --- | --- |
-| [`web.yml`](.github/workflows/web.yml) | `verify` — frozen install, typecheck, lint, unit tests, sitemap check, production build, `bun audit` |
-| [`go.yml`](.github/workflows/go.yml) | `verify` — gofmt, vet, `go test -race`, build every binary · `vulnerabilities` — govulncheck on both modules |
-| [`database.yml`](.github/workflows/database.yml) | `migrations-and-rls` — every migration, the RLS suite and seed idempotency on Postgres 16 |
-| [`api-contract.yml`](.github/workflows/api-contract.yml) | `verify` — contract/routing drift and a Redocly lint of the OpenAPI document |
-| [`security.yml`](.github/workflows/security.yml) | `secret-scan` (gitleaks with [`.gitleaks.toml`](.gitleaks.toml)) · `dependency-review` (PRs) · `workflow-integrity` (pinned actions, least-privilege permissions) |
+| Workflow                                                 | Jobs                                                                                                                                                              |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`web.yml`](.github/workflows/web.yml)                   | `verify` — frozen install, typecheck, lint, unit tests, sitemap check, production build, `bun audit`                                                              |
+| [`go.yml`](.github/workflows/go.yml)                     | `verify` — gofmt, vet, `go test -race`, build every binary · `vulnerabilities` — govulncheck on both modules                                                      |
+| [`database.yml`](.github/workflows/database.yml)         | `migrations-and-rls` — every migration, the RLS suite and seed idempotency on Postgres 16                                                                         |
+| [`api-contract.yml`](.github/workflows/api-contract.yml) | `verify` — contract/routing drift and a Redocly lint of the OpenAPI document                                                                                      |
+| [`security.yml`](.github/workflows/security.yml)         | `secret-scan` (gitleaks with [`.gitleaks.toml`](.gitleaks.toml)) · `dependency-review` (PRs) · `workflow-integrity` (pinned actions, least-privilege permissions) |
 
 ## Deployment
 
@@ -290,17 +290,17 @@ Linux and is unaffected. Do not commit a repo-wide reformat to silence it.
 
 [docs/README.md](docs/README.md) is the map. The shortest path from here:
 
-| Read it when you need to… | Document |
-| --- | --- |
-| Understand the system shape | [architecture/overview.md](docs/architecture/overview.md) |
-| Add or change an endpoint, or understand the gateway | [architecture/api.md](docs/architecture/api.md) |
-| Change the schema, or understand ownership and row access | [architecture/data-model.md](docs/architecture/data-model.md) |
-| Work on the web app (SSR, SEO, PWA, performance) | [architecture/web-app.md](docs/architecture/web-app.md) |
-| Get a working checkout | [development/local-setup.md](docs/development/local-setup.md) |
-| Configure an environment | [development/environments.md](docs/development/environments.md) |
-| Know which control answers which threat | [security/threat-model.md](docs/security/threat-model.md) |
-| Deploy or verify the API | [deployment/vercel.md](docs/deployment/vercel.md) |
-| Know why something is the way it is | [decisions/](docs/decisions/README.md) |
+| Read it when you need to…                                 | Document                                                        |
+| --------------------------------------------------------- | --------------------------------------------------------------- |
+| Understand the system shape                               | [architecture/overview.md](docs/architecture/overview.md)       |
+| Add or change an endpoint, or understand the gateway      | [architecture/api.md](docs/architecture/api.md)                 |
+| Change the schema, or understand ownership and row access | [architecture/data-model.md](docs/architecture/data-model.md)   |
+| Work on the web app (SSR, SEO, PWA, performance)          | [architecture/web-app.md](docs/architecture/web-app.md)         |
+| Get a working checkout                                    | [development/local-setup.md](docs/development/local-setup.md)   |
+| Configure an environment                                  | [development/environments.md](docs/development/environments.md) |
+| Know which control answers which threat                   | [security/threat-model.md](docs/security/threat-model.md)       |
+| Deploy or verify the API                                  | [deployment/vercel.md](docs/deployment/vercel.md)               |
+| Know why something is the way it is                       | [decisions/](docs/decisions/README.md)                          |
 
 ## License
 
