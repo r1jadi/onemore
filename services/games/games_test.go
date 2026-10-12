@@ -345,6 +345,14 @@ func TestGetGameReturnsThePublishedRecord(t *testing.T) {
 	if category["slug"] != "puzzle" {
 		t.Fatalf("category = %#v, want puzzle", category)
 	}
+	// The embedded reference is a link target, not a category listing: it may not
+	// carry a count, because a game response does not count anything.
+	if len(category) != 2 {
+		t.Fatalf("embedded category = %#v, want only slug and name", category)
+	}
+	if _, ok := category["gameCount"]; ok {
+		t.Fatalf("embedded category carries a count: %#v", category)
+	}
 }
 
 func TestGetGameAnswers404ForAnUnknownSlug(t *testing.T) {

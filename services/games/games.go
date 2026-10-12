@@ -114,13 +114,23 @@ type categoryView struct {
 	GameCount int64 `json:"gameCount"`
 }
 
+// categoryRefView is the trimmed category a game embeds: a slug to link by and
+// a name to render. It is deliberately a different type from categoryView — a
+// game response must not carry a `gameCount`, because it did not count one, and
+// a zero standing in for "not measured here" reads as a real measurement.
+// Counts belong to `/categories`, where they are computed in the database.
+type categoryRefView struct {
+	Slug string `json:"slug"`
+	Name string `json:"name"`
+}
+
 type gameView struct {
-	Slug         string        `json:"slug"`
-	Title        string        `json:"title"`
-	Tagline      *string       `json:"tagline"`
-	Description  *string       `json:"description"`
-	Instructions *string       `json:"instructions"`
-	Category     *categoryView `json:"category"`
+	Slug         string           `json:"slug"`
+	Title        string           `json:"title"`
+	Tagline      *string          `json:"tagline"`
+	Description  *string          `json:"description"`
+	Instructions *string          `json:"instructions"`
+	Category     *categoryRefView `json:"category"`
 	// Runtime names the client runtime that plays this game, or null when none
 	// exists. Playable is false for every game today.
 	Runtime    *string `json:"runtime"`
@@ -133,13 +143,11 @@ type gameView struct {
 	UpdatedAt   time.Time  `json:"updatedAt"`
 }
 
-// categoryRef is the trimmed category a game embeds: a slug to link by and a
-// name to render. The count belongs to `/categories`, not to every game.
-func categoryRef(category *supabasegames.Category) *categoryView {
+func categoryRef(category *supabasegames.Category) *categoryRefView {
 	if category == nil {
 		return nil
 	}
-	return &categoryView{Slug: category.Slug, Name: category.Name}
+	return &categoryRefView{Slug: category.Slug, Name: category.Name}
 }
 
 func view(game supabasegames.Game) gameView {

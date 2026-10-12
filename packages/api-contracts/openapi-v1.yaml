@@ -1323,7 +1323,10 @@ components:
           oneOf:
             - $ref: "#/components/schemas/CategoryRef"
             - type: "null"
-          description: Null when the game is not in a category.
+          description: |
+            Null when the game is not in a category. A reference to link and label
+            by — the counts live on `Category`, which is what `/categories`
+            returns.
         runtime:
           type: [string, "null"]
           description: |
