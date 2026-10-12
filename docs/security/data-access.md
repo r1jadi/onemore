@@ -12,11 +12,11 @@ A bug in one layer does not open the table. Both are exercised by
 
 ## The roles
 
-| Role | Who holds it | Reaches the database |
-| --- | --- | --- |
-| `anon` | the publishable key without a session | yes, with no identity |
-| `authenticated` | a signed-in user's access token | yes, identity from `auth.uid()` |
-| `service_role` | the server (Go services, admin tooling) | yes, bypasses RLS |
+| Role                 | Who holds it                                   | Reaches the database                              |
+| -------------------- | ---------------------------------------------- | ------------------------------------------------- |
+| `anon`               | the publishable key without a session          | yes, with no identity                             |
+| `authenticated`      | a signed-in user's access token                | yes, identity from `auth.uid()`                   |
+| `service_role`       | the server (Go services, admin tooling)        | yes, bypasses RLS                                 |
 | `moderator`, `admin` | not Postgres roles — a `user_roles.role` value | as `authenticated`, with policies that consult it |
 
 Staff status is not a database role. It is a row in `user_roles`, read by the
@@ -29,64 +29,95 @@ function parameterised by user id would let anyone probe who is an administrator
 `✓` allowed, `—` no grant, `own` scoped to the caller's row, `staff` requires the
 moderator or admin role.
 
-| Table | anon | authenticated | service_role |
-| --- | --- | --- | --- |
-| `categories` | select | select | all |
-| `games` | select (published only) | select (published + own + staff), insert own (draft/review), update own (draft/review), delete own (draft), update staff | all |
-| `profiles` | select public columns | select public columns, update own presentation columns | all |
-| `user_roles` | — | select own, select staff | all (the only writer) |
-| `game_sessions` | — | select own (**no insert**: the server issues the row, the seed and the timestamps) | all |
-| `scores` | select (visible games) | select (visible games) | all (the only writer) |
-| `game_stats` (view) | select aggregates (`slug`, `plays`, `players`, `best_score`, `last_completed_at`) | select aggregates | all |
-| `comments` | select (not hidden) | select (not hidden + own + staff), insert own (published games), update own body, delete own or staff | all (hides comments) |
-| `likes` | select | select, insert own, delete own | all |
-| `follows` | select | select, insert own, delete own | all |
-| `reports` | — | insert own, select own, select/update staff | all |
-| `moderation_actions` | — | select staff, insert staff (as `auth.uid()`) | all |
-| `notifications` | — | select own, update own `read_at` | all |
-| `analytics_events` | — | — (no grant at all) | all |
-| `storage.objects` | select public buckets | select, insert/update/delete under `<own-user-id>/` in a writable bucket | all |
+| Table                | anon                                                                              | authenticated                                                                                                            | service_role          |
+| -------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------- |
+| `categories`         | select                                                                            | select                                                                                                                   | all                   |
+| `games`              | select (published only)                                                           | select (published + own + staff), insert own (draft/review), update own (draft/review), delete own (draft), update staff | all                   |
+| `profiles`           | select public columns                                                             | select public columns, update own presentation columns                                                                   | all                   |
+| `user_roles`         | —                                                                                 | select own, select staff                                                                                                 | all (the only writer) |
+| `game_sessions`      | —                                                                                 | select own (**no insert**: the server issues the row, the seed and the timestamps)                                       | all                   |
+| `scores`             | select (visible games)                                                            | select (visible games)                                                                                                   | all (the only writer) |
+| `game_stats` (view)  | select aggregates (`slug`, `plays`, `players`, `best_score`, `last_completed_at`) | select aggregates                                                                                                        | all                   |
+| `comments`           | select (not hidden)                                                               | select (not hidden + own + staff), insert own (published games), update own body, delete own or staff                    | all (hides comments)  |
+| `likes`              | select                                                                            | select, insert own, delete own                                                                                           | all                   |
+| `follows`            | select                                                                            | select, insert own, delete own                                                                                           | all                   |
+| `reports`            | —                                                                                 | insert own, select own, select/update staff                                                                              | all                   |
+| `moderation_actions` | —                                                                                 | select staff, insert staff (as `auth.uid()`)                                                                             | all                   |
+| `notifications`      | —                                                                                 | select own, update own `read_at`                                                                                         | all                   |
+| `analytics_events`   | —                                                                                 | — (no grant at all)                                                                                                      | all                   |
+| `storage.objects`    | select public buckets                                                             | select, insert/update/delete under `<own-user-id>/` in a writable bucket                                                 | all                   |
 
 ## Rules the matrix encodes
 
-* **No client-written privilege.** No `INSERT`/`UPDATE` grant on `user_roles` for
+- **No client-written privilege.** No `INSERT`/`UPDATE` grant on `user_roles` for
   `authenticated`; role changes require the service key.
-* **No client-written scores.** No `INSERT` grant on `scores`; the only writer is
+- **No client-written scores.** No `INSERT` grant on `scores`; the only writer is
   `public.complete_stack10_run`, which inserts a row after replaying the submitted
   run and deriving the score itself. The game-sessions service passes the caller's
   token through and cannot name a score at all — see
   [0012](../decisions/0012-server-verified-scores.md).
-* **No client-written sessions.** The `INSERT` grant and policy on `game_sessions`
+- **No client-written sessions.** The `INSERT` grant and policy on `game_sessions`
   were revoked: a client that could write its own session row could choose its own
   seed, and every score would then be verified against a deck the player stacked.
   `public.start_game_session` is `security definer`, reads the caller from
   `auth.uid()`, and is the only path in.
-* **Aggregates, not rows, and only granted columns.** `game_stats` is a
+- **Aggregates, not rows, and only granted columns.** `game_stats` is a
   `security definer` view — `game_sessions` is readable only by its owner, so a
   count of everybody's runs cannot come from a view that runs as the caller. It
   exposes counts and the `slug`; `game_id` is deliberately not granted, because the
   uuid is internal everywhere else in this API.
-* **No client-written moderation state.** `comments.is_hidden` and
+- **No client-written moderation state.** `comments.is_hidden` and
   `profiles.is_suspended` have no `UPDATE` grant for `authenticated`. Postgres
   column grants are additive, so a column granted "for staff" would be granted to
   everyone — hiding a comment or suspending an account is a service action.
-* **No client-written lifecycle state.** A creator may hold a game in
+- **No client-written lifecycle state.** A creator may hold a game in
   `draft`/`review` only; `published` and `rejected` come from a moderator.
-* **Immutable columns.** `games.owner_id` cannot change, for anyone (trigger), so
+- **Immutable columns.** `games.owner_id` cannot change, for anyone (trigger), so
   moderation cannot silently reassign authorship.
-* **Stamped facts.** `games.published_at` and `reports.resolved_by`/`resolved_at`
+- **Stamped facts.** `games.published_at` and `reports.resolved_by`/`resolved_at`
   are written by database triggers from the database clock and `auth.uid()`, so
   they cannot be forged by a request body.
-* **Least data.** `profiles` exposes only public columns to the Data API;
+- **Least data.** `profiles` exposes only public columns to the Data API;
   `analytics_events` is unreachable from the browser; lists are capped.
+
+## The admin surface
+
+The dashboard's reads and moderation writes are `security definer` functions,
+not grants, and they are the one place where a function's own check _is_ the
+boundary: a definer function runs with the owner's rights and therefore bypasses
+Row Level Security.
+
+| Function family                                                                             | anon | authenticated                                                                     | service_role |
+| ------------------------------------------------------------------------------------------- | ---- | --------------------------------------------------------------------------------- | ------------ |
+| `admin_identity()`                                                                          | —    | execute (the caller's own row: role, username, suspension state)                  | all          |
+| `admin_overview()`, `admin_analytics()`                                                     | —    | execute, then `admin_guard_staff()` re-checks the caller's role                   | all          |
+| `admin_*_directory()` (games, users, reports, comments, scores, categories, moderation log) | —    | execute, then `admin_guard_staff()`                                               | all          |
+| `admin_set_game_status()`, `admin_set_report_status()`, `admin_set_comment_hidden()`        | —    | execute, then `admin_guard_staff()`; writes the audit row in the same transaction | all          |
+| `admin_set_suspension()`                                                                    | —    | execute, then `admin_guard_admin()` — a moderator is refused                      | all          |
+
+What those functions guarantee:
+
+- **the caller is never a parameter.** Each derives the actor from `auth.uid()`
+  through `public.current_role()`; a request body can name the _target_ and
+  nothing else, so a body cannot forge an actor or a role;
+- **a refusal raises `42501`**, the same SQLSTATE a missing grant raises, so a
+  refusal cannot be told apart from a table the caller was never granted;
+- **the decision and its audit are one write.** Publishing a game, resolving a
+  report, hiding a comment and suspending an account each set the state and insert
+  the `moderation_actions` row in one transaction, stamped from the token's
+  `auth.uid()`;
+- **no role can be granted.** `user_roles` still has no `INSERT`/`UPDATE` grant
+  for `authenticated`; the admin service cannot write it either, because it holds
+  no service key. Granting a role is an operator action — see
+  [ADR 0013](../decisions/0013-admin-authorization.md).
 
 ## Storage
 
-| Bucket | Public read | Write | Limits |
-| --- | --- | --- | --- |
-| `avatars` | yes | owner folder only | 2 MiB, png/jpeg/webp |
-| `game-assets` | yes | owner folder only | 10 MiB, png/jpeg/webp/avif |
-| `game-builds` | no | owner folder only | 50 MiB, zip/json/html/js/css |
+| Bucket        | Public read | Write             | Limits                       |
+| ------------- | ----------- | ----------------- | ---------------------------- |
+| `avatars`     | yes         | owner folder only | 2 MiB, png/jpeg/webp         |
+| `game-assets` | yes         | owner folder only | 10 MiB, png/jpeg/webp/avif   |
+| `game-builds` | no          | owner folder only | 50 MiB, zip/json/html/js/css |
 
 The folder must be the uploader's user id, so guessing a path does not grant
 write access to someone else's object. Objects are served as static bytes; a HTML
@@ -96,11 +127,14 @@ file inside a private bucket is never executed by the origin.
 
 It bypasses RLS. Therefore:
 
-* it exists only in server-side environments (Vercel SSR env, the API's secret
+- it exists only in server-side environments (Vercel SSR env, the API's secret
   store) — never in a `VITE_` variable, never in a client bundle, never in a log;
-* each use should be justified by "a user cannot be trusted to do this";
-* the admin and moderation services are the only intended holders;
-* leaking it means a full database compromise: rotate it immediately
+- each use should be justified by "a user cannot be trusted to do this";
+- **no service holds it today.** Auth, users, games, the play sessions and the
+  admin API all pass the _caller's_ token to the Data API, so RLS stays the
+  boundary and a service bug cannot read a table no policy allows; the migrations
+  and an operator's SQL console are the only writers of privileged state;
+- leaking it means a full database compromise: rotate it immediately
   (see [env-and-secrets.md](env-and-secrets.md)).
 
 ## Changing the model

@@ -546,6 +546,11 @@ set local role authenticated;
 
 select rls_test.ok(public.is_staff(), 'a moderator is staff');
 select rls_test.ok(not public.is_admin(), 'a moderator is not an administrator');
+select rls_test.ok(
+  (public.admin_identity() ->> 'isStaff') = 'true'
+    and (public.admin_identity() ->> 'isAdmin') = 'false',
+  'a moderator reads staff status from the database rather than from a claim'
+);
 select rls_test.visible($$select id from public.reports$$, 1, 'a moderator sees the report queue');
 select rls_test.visible($$select id from public.comments$$, 3, 'a moderator sees hidden comments');
 select rls_test.allow(
@@ -588,9 +593,336 @@ set local role authenticated;
 
 select rls_test.ok(public.is_admin(), 'an administrator is an administrator');
 select rls_test.ok(public.is_staff(), 'an administrator is also staff');
+select rls_test.ok(
+  (public.admin_identity() ->> 'isAdmin') = 'true',
+  'an administrator reads the administrator role from the database'
+);
 select rls_test.denied(
   $$update public.profiles set is_suspended = true where id = '22222222-2222-4222-8222-222222222222'$$,
   'suspension is not writable through the Data API, even for an administrator'
+);
+
+reset role;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Admin operations (the staff-gated definer functions)
+-- ─────────────────────────────────────────────────────────────────────────────
+--
+-- These run as the definer and therefore bypass RLS, so the role check inside
+-- each one is the only control. What matters here is the *denied* direction:
+-- a signed-in stranger must not be able to read the directory, the queue or the
+-- aggregates, and must not be able to moderate anything.
+--
+-- `denied(...)` is for the refusals the guard raises (a missing privilege and a
+-- guard both answer 42501, so a stranger cannot tell a closed table from a
+-- forbidden function). `raises(...)` is for the validation refusals, which are
+-- the caller's own mistake and carry their own SQLSTATE.
+
+-- Two rows with known ids, so the write assertions below can name them. A
+-- report is created by the owner rather than by a service, exactly as a real
+-- report would be before staff ever see it, and the draft game exists only so a
+-- staff read can be shown returning a row no other role can see.
+\set admin_report 'dddddddd-1111-4111-8111-dddddddddddd'
+\set admin_draft  'aaaaaaaa-9999-4999-8999-aaaaaaaaaaaa'
+insert into public.reports (id, reporter_id, target_kind, target_id, reason)
+values (:'admin_report', :'bob', 'comment', :'bob_comment', 'admin suite fixture');
+insert into public.games (id, owner_id, slug, title, status)
+values (:'admin_draft', :'bob', 'fixture-admin-only', 'Fixture Admin Only', 'draft');
+
+select set_config('request.jwt.claims', json_build_object('role', 'anon')::text, true);
+set local role anon;
+
+select rls_test.denied(
+  $$select public.admin_identity()$$,
+  'an anonymous caller has no identity row to read'
+);
+select rls_test.denied(
+  $$select public.admin_overview()$$,
+  'an anonymous caller cannot read the admin overview'
+);
+select rls_test.denied(
+  $$select * from public.admin_user_directory()$$,
+  'an anonymous caller cannot read the account directory'
+);
+select rls_test.denied(
+  $$select * from public.admin_report_directory()$$,
+  'an anonymous caller cannot read the moderation queue'
+);
+select rls_test.denied(
+  $$select public.admin_set_comment_hidden('bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb', true, 'x')$$,
+  'an anonymous caller cannot hide a comment'
+);
+
+reset role;
+
+-- An ordinary signed-in player is refused by the guard inside each function,
+-- which raises the same SQLSTATE a missing grant does.
+select set_config('request.jwt.claims',
+  json_build_object('sub', :'alice', 'role', 'authenticated')::text, true);
+set local role authenticated;
+
+select rls_test.ok(
+  (public.admin_identity() ->> 'role') = 'user'
+    and (public.admin_identity() ->> 'isStaff') = 'false'
+    and (public.admin_identity() ->> 'userId') = '11111111-1111-4111-8111-111111111111'
+    -- The username in the answer is the caller's own profile, not a name from
+    -- anywhere else: it is read with `auth.uid()`, never with a parameter.
+    and (public.admin_identity() ->> 'username')
+        = (select username::text from public.profiles where id = '11111111-1111-4111-8111-111111111111'),
+  'a player reads their own role and identity from the database, and is not staff'
+);
+select rls_test.denied($$select public.admin_overview()$$,
+  'a player cannot read the admin overview');
+select rls_test.denied($$select public.admin_analytics()$$,
+  'a player cannot read platform analytics');
+select rls_test.denied($$select * from public.admin_user_directory()$$,
+  'a player cannot read the account directory');
+select rls_test.denied($$select * from public.admin_game_directory()$$,
+  'a player cannot list every game, published or not');
+select rls_test.visible(
+  $$select id from public.games where slug = 'fixture-admin-only'$$,
+  0,
+  'an unpublished game another account owns is invisible to a player'
+);
+select rls_test.denied($$select * from public.admin_report_directory()$$,
+  'a player cannot read the moderation queue');
+select rls_test.denied($$select * from public.admin_comment_directory()$$,
+  'a player cannot read the comment moderation list');
+select rls_test.denied($$select * from public.admin_score_directory()$$,
+  'a player cannot read every verified score');
+select rls_test.denied($$select * from public.admin_moderation_log()$$,
+  'a player cannot read the audit trail');
+select rls_test.denied(
+  $$select public.admin_set_game_status('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', 'archived', 'x')$$,
+  'a player cannot archive a game'
+);
+select rls_test.denied(
+  $$select public.admin_set_report_status('dddddddd-1111-4111-8111-dddddddddddd', 'dismissed', 'x')$$,
+  'a player cannot dismiss a report'
+);
+select rls_test.denied(
+  $$select public.admin_set_comment_hidden('bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb', true, 'x')$$,
+  'a player cannot hide a comment'
+);
+select rls_test.denied(
+  $$select public.admin_set_suspension('22222222-2222-4222-8222-222222222222', true, 'x')$$,
+  'a player cannot suspend another account'
+);
+
+reset role;
+
+select set_config('request.jwt.claims',
+  json_build_object('sub', :'carol', 'role', 'authenticated')::text, true);
+set local role authenticated;
+
+-- A moderator may read the directory, and through it the restricted columns the
+-- Data API deliberately withholds.
+select rls_test.ok(
+  rls_test.count_rows($$
+    select 1 from public.admin_user_directory()
+    where id = '55555555-5555-4555-8555-555555555555'
+      and is_suspended and email = 'erin@example.com'$$) = 1,
+  'a moderator can see a suspended account''s email and suspension state through the directory'
+);
+select rls_test.denied(
+  $$select is_suspended from public.profiles limit 1$$,
+  'the same column is still unreachable directly through the Data API'
+);
+select rls_test.ok(
+  (public.admin_overview() ->> 'totalUsers')::bigint >= 5,
+  'the overview counts the real profile rows and requires staff'
+);
+select rls_test.ok(
+  (public.admin_overview() ->> 'series') is not null
+    and jsonb_array_length(public.admin_overview() -> 'series') = 14,
+  'the overview series is fourteen real days, not a fabricated projection'
+);
+select rls_test.ok(
+  rls_test.count_rows($$
+    select 1 from public.admin_game_directory()
+    where slug = 'fixture-admin-only' and status = 'draft'$$) = 1,
+  'the game directory includes a draft that no other role can see'
+);
+select rls_test.ok(
+  rls_test.count_rows($$
+    select 1 from public.admin_game_directory()
+    where slug = 'fixture-stack' and plays = 0 and players = 0$$) = 1,
+  'the game directory counts completed runs only: an unfinished session is not a play'
+);
+select rls_test.ok(
+  rls_test.count_rows($$
+    select 1 from public.admin_report_directory()
+    where reporter_username is not null$$) >= 1,
+  'the report queue resolves its reporter through a join the Data API cannot do'
+);
+select rls_test.ok(
+  rls_test.count_rows($$
+    select 1 from public.admin_comment_directory()
+    where is_hidden$$) >= 1,
+  'the comment list carries hidden comments, which staff alone may see'
+);
+
+-- Moderation writes: the decision and its audit land together, and the audit
+-- names the caller from the token. Each call happens once (`says_field` reads one
+-- field of one call) because every one of them has a side effect.
+select rls_test.ok(
+  (select public.admin_set_game_status('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', 'archived', 'Retired fixture')
+     ->> 'status') = 'archived',
+  'a moderator can archive a published game'
+);
+select rls_test.ok(
+  (select status = 'archived' and published_at is null from public.games
+     where id = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa'),
+  'archiving clears the publication timestamp in the database'
+);
+select rls_test.ok(
+  rls_test.count_rows($$select 1 from public.moderation_actions
+    where action = 'archive_game' and moderator_id = '33333333-3333-4333-8333-333333333333'$$) = 1,
+  'the archive is recorded against the moderator who made the decision'
+);
+select rls_test.raises(
+  $$select public.admin_set_game_status('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', 'draft', 'Back to draft')$$,
+  '22023',
+  'staff cannot move a game back to draft — that is the creator''s own state'
+);
+select rls_test.raises(
+  $$select public.admin_set_game_status('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', 'archived', 'Again')$$,
+  '22023',
+  'a game already in that status is refused rather than silently rewritten'
+);
+select rls_test.raises(
+  $$select public.admin_set_game_status('aaaaaaaa-2222-4222-8222-aaaaaaaaaaaa', 'rejected', null)$$,
+  '22023',
+  'rejecting a game without a reason is refused'
+);
+select rls_test.raises(
+  $$select public.admin_set_game_status('aaaaaaaa-1111-4111-8111-999999999999', 'published', null)$$,
+  'P0002',
+  'moderating a game that does not exist is refused, not ignored'
+);
+select rls_test.ok(
+  (select public.admin_set_game_status('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', 'published', null)
+     ->> 'status') = 'published',
+  'republishing an archived game restores it'
+);
+select rls_test.ok(
+  (select status = 'published' and published_at is not null from public.games
+     where id = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa'),
+  'republishing re-stamps published_at from the database clock'
+);
+
+select rls_test.raises(
+  $$select public.admin_set_comment_hidden('bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb', true, null)$$,
+  '22023',
+  'hiding a comment without a reason is refused'
+);
+select rls_test.ok(
+  (select public.admin_set_comment_hidden('bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb', true, 'Abuse')
+     ->> 'hidden') = 'true',
+  'a moderator can hide a comment through the function, not the Data API'
+);
+select rls_test.ok(
+  (select is_hidden from public.comments where id = 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb'),
+  'the hidden comment is hidden in the table, not only in the answer'
+);
+select rls_test.ok(
+  rls_test.count_rows($$select 1 from public.moderation_actions
+    where action = 'hide_comment' and moderator_id = '33333333-3333-4333-8333-333333333333'$$) = 1,
+  'hiding a comment records who hid it'
+);
+select rls_test.ok(
+  (select public.admin_set_comment_hidden('bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb', false, null)
+     ->> 'hidden') = 'false',
+  'and restore it without a reason'
+);
+select rls_test.raises(
+  $$select public.admin_set_comment_hidden('99999999-9999-4999-8999-999999999999', true, 'Nope')$$,
+  'P0002',
+  'hiding a comment that does not exist is refused'
+);
+
+-- Reopening a report has to clear the resolution, or the table's own constraint
+-- would refuse the change.
+select rls_test.raises(
+  $$select public.admin_set_report_status('dddddddd-1111-4111-8111-dddddddddddd', 'dismissed', null)$$,
+  '22023',
+  'dismissing a report without a reason is refused'
+);
+select rls_test.ok(
+  (select public.admin_set_report_status('dddddddd-1111-4111-8111-dddddddddddd', 'dismissed', 'Not a real report')
+     ->> 'status') = 'dismissed',
+  'a moderator can dismiss a report'
+);
+select rls_test.ok(
+  (select resolved_by = '33333333-3333-4333-8333-333333333333'::uuid and resolved_at is not null
+     from public.reports where id = 'dddddddd-1111-4111-8111-dddddddddddd'),
+  'the resolver is stamped from the token, not from the request'
+);
+select rls_test.ok(
+  (select public.admin_set_report_status('dddddddd-1111-4111-8111-dddddddddddd', 'reviewing', 'Reopened')
+     ->> 'status') = 'reviewing',
+  'a moderator can reopen a report'
+);
+select rls_test.ok(
+  (select resolved_by is null and resolved_at is null from public.reports
+     where id = 'dddddddd-1111-4111-8111-dddddddddddd'),
+  'reopening clears the recorded resolution'
+);
+select rls_test.denied(
+  $$select public.admin_set_suspension('22222222-2222-4222-8222-222222222222', true, 'Abuse')$$,
+  'a moderator cannot suspend an account — that is an administrator decision'
+);
+
+reset role;
+
+select set_config('request.jwt.claims',
+  json_build_object('sub', :'dave', 'role', 'authenticated')::text, true);
+set local role authenticated;
+
+select rls_test.raises(
+  $$select public.admin_set_suspension('22222222-2222-4222-8222-222222222222', true, null)$$,
+  '22023',
+  'suspending an account without a reason is refused'
+);
+select rls_test.ok(
+  (select public.admin_set_suspension('22222222-2222-4222-8222-222222222222', true, 'Abusive comments')
+     ->> 'suspended') = 'true',
+  'an administrator can suspend an account through the function'
+);
+select rls_test.ok(
+  rls_test.count_rows($$select 1 from public.admin_user_directory()
+    where id = '22222222-2222-4222-8222-222222222222' and is_suspended$$) = 1,
+  'the suspension is written to the column the Data API cannot read or update'
+);
+select rls_test.ok(
+  rls_test.count_rows($$select 1 from public.moderation_actions
+    where action = 'suspend_account' and moderator_id = '44444444-4444-4444-8444-444444444444'$$) = 1,
+  'the suspension is recorded against the administrator who made it'
+);
+select rls_test.raises(
+  $$select public.admin_set_suspension('44444444-4444-4444-8444-444444444444', true, 'Locking myself out')$$,
+  '22023',
+  'an administrator cannot suspend their own account'
+);
+select rls_test.raises(
+  $$select public.admin_set_suspension('99999999-9999-4999-8999-999999999999', true, 'No such account')$$,
+  'P0002',
+  'suspending an account that does not exist is refused'
+);
+select rls_test.ok(
+  (select public.admin_set_suspension('22222222-2222-4222-8222-222222222222', false, null)
+     ->> 'suspended') = 'false',
+  'an administrator can restore an account'
+);
+select rls_test.ok(
+  rls_test.count_rows($$select 1 from public.admin_user_directory()
+    where id = '22222222-2222-4222-8222-222222222222' and not is_suspended$$) = 1,
+  'the restored account reads as restored through the same directory'
+);
+select rls_test.visible(
+  $$select * from public.admin_moderation_log() where action = 'suspend_account'$$,
+  1,
+  'the audit trail lists the decision that was just made'
 );
 
 reset role;

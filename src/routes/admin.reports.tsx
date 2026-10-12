@@ -1,42 +1,36 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Ban, Check, ChevronRight, EyeOff, Flag, MoreHorizontal, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { ArrowUpRight, Eye, RotateCcw, ShieldCheck, X } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 import {
   AdminListStates,
   AdminPage,
   AdminTable,
-  ConfirmDialog,
   FilterSelect,
-  MetaRow,
   MobileRow,
-  Pager,
-  SearchField,
+  OffsetPager,
+  PromptDialog,
+  SectionCard,
+  StatCard,
   StatusBadge,
-  Toolbar,
   statusTone,
-  usePaged,
   type Column,
+  type BadgeTone,
 } from "@/components/admin/ui";
-import { Avatar, ErrorState, ListSkeleton, StateSwitcher, useMockLoad } from "@/components/common";
-import { GameArt } from "@/components/game/GameArt";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { adminReports, type AdminReport } from "@/lib/admin-mock";
-import { cn } from "@/lib/utils";
+  ADMIN_LIMIT,
+  asApiError,
+  formatAgo,
+  formatStamp,
+  moderateReport,
+  useAdminModerationLog,
+  useAdminOverview,
+  useAdminReports,
+  type AdminModerationEntry,
+  type AdminReport,
+  type ReportStatus,
+} from "@/lib/admin/api";
 
 export const Route = createFileRoute("/admin/reports")({
   head: () => ({
@@ -45,160 +39,100 @@ export const Route = createFileRoute("/admin/reports")({
   component: ReportsAdmin,
 });
 
-const targets = [
-  { value: "all", label: "All" },
-  { value: "user", label: "Users" },
-  { value: "game", label: "Games" },
-  { value: "comment", label: "Comments" },
-] as const;
+const statusOptions = [
+  { value: "", label: "All reports" },
+  { value: "open", label: "Open" },
+  { value: "reviewing", label: "Being reviewed" },
+  { value: "resolved", label: "Resolved" },
+  { value: "dismissed", label: "Dismissed" },
+];
 
-const severityTone = { low: "muted", medium: "warning", high: "destructive" } as const;
+/** The decision a moderator is about to record, and the dialog it needs. */
+type Pending =
+  | { report: AdminReport; status: ReportStatus; prompt: false }
+  | { report: AdminReport; status: ReportStatus; prompt: true }
+  | null;
 
-function ReportsAdmin() {
-  const loading = useMockLoad(500);
-  const [reports, setReports] = useState(adminReports);
-  const [target, setTarget] = useState<string>("all");
-  const [status, setStatus] = useState("open");
-  const [q, setQ] = useState("");
-  const [state, setState] = useState("ready");
-  const [detail, setDetail] = useState<AdminReport | null>(null);
-  const [action, setAction] = useState<{
-    report: AdminReport;
-    kind: "suspend" | "unpublish" | "hide";
-  } | null>(null);
+const targetTone: Record<AdminReport["targetKind"], BadgeTone> = {
+  game: "info",
+  comment: "muted",
+  profile: "primary",
+};
 
-  const counts = useMemo(
-    () => ({
-      open: reports.filter((r) => r.status === "open").length,
-      resolved: reports.filter((r) => r.status === "resolved").length,
-      dismissed: reports.filter((r) => r.status === "dismissed").length,
-    }),
-    [reports],
-  );
+/**
+ * The moderation queue, and the trail of what has already been decided.
+ *
+ * Both sections are reads of the database: the queue is the `reports` table
+ * filtered by status, and the log below it is `moderation_actions`, which is
+ * written in the same transaction as every decision taken here or on the games,
+ * comments and accounts screens.
+ */
+export function ReportsAdmin() {
+  const [status, setStatus] = useState("");
+  const [page, setPage] = useState(0);
+  const reports = useAdminReports({
+    status: status ? (status as ReportStatus) : undefined,
+    limit: ADMIN_LIMIT,
+    offset: page * ADMIN_LIMIT,
+  });
+  const overview = useAdminOverview();
 
-  const filtered = useMemo(() => {
-    const term = q.trim().toLowerCase();
-    return reports.filter((r) => {
-      const hit =
-        !term ||
-        r.targetLabel.toLowerCase().includes(term) ||
-        r.reason.toLowerCase().includes(term) ||
-        r.reporter.toLowerCase().includes(term) ||
-        r.id.toLowerCase().includes(term);
-      return (
-        hit &&
-        (target === "all" || r.target === target) &&
-        (status === "all" || r.status === status)
-      );
-    });
-  }, [reports, q, target, status]);
+  const [logPage, setLogPage] = useState(0);
+  const log = useAdminModerationLog({ limit: ADMIN_LIMIT, offset: logPage * ADMIN_LIMIT });
 
-  const { page, setPage, pages, slice, total, perPage } = usePaged(filtered, 8);
-  const s = loading ? "loading" : state;
+  const [pending, setPending] = useState<Pending>(null);
+  const [busy, setBusy] = useState<string | null>(null);
 
-  const setReportStatus = (id: string, next: AdminReport["status"], message: string) => {
-    setReports((list) =>
-      list.map((r) => (r.id === id ? { ...r, status: next, assignee: "kira" } : r)),
-    );
-    setDetail((d) => (d && d.id === id ? { ...d, status: next, assignee: "kira" } : d));
-    toast.success(message);
+  const rows = reports.status === "ready" ? reports.data.items : [];
+  const hasMore = reports.status === "ready" ? reports.data.hasMore : false;
+
+  const decide = (report: AdminReport, next: ReportStatus, reason?: string) => {
+    setBusy(report.id);
+    moderateReport(report.id, next, reason)
+      .then((result) => {
+        toast.success(`Report is now ${result.status ?? next}.`);
+        reports.retry();
+        log.retry();
+      })
+      .catch((error: unknown) => toast.error(asApiError(error).message))
+      .finally(() => setBusy(null));
   };
 
-  const columns: Column<AdminReport>[] = [
+  const logColumns: Column<AdminModerationEntry>[] = [
     {
-      key: "report",
-      head: "Report",
-      cell: (r) => (
-        <div className="min-w-0">
-          <p className="flex items-center gap-2 text-sm font-medium">
-            <span
-              className={cn(
-                "inline-flex size-6 shrink-0 items-center justify-center rounded-md",
-                r.severity === "high"
-                  ? "bg-destructive/15 text-destructive"
-                  : r.severity === "medium"
-                    ? "bg-warning/15 text-warning"
-                    : "bg-surface-2 text-muted-foreground",
-              )}
-            >
-              <Flag className="size-3" />
-            </span>
-            {r.reason}
-          </p>
-          <p className="truncate text-xs text-muted-foreground">
-            {r.id} · reported by @{r.reporter} · {r.time}
-          </p>
-        </div>
+      key: "when",
+      head: "When",
+      className: "w-40",
+      cell: (entry) => (
+        <span className="text-xs text-muted-foreground">{formatStamp(entry.createdAt) ?? "—"}</span>
       ),
+    },
+    {
+      key: "moderator",
+      head: "Moderator",
+      cell: (entry) => <span className="text-sm">@{entry.moderatorUsername}</span>,
+    },
+    {
+      key: "action",
+      head: "Action",
+      cell: (entry) => <StatusBadge tone="muted">{entry.action.replace(/_/g, " ")}</StatusBadge>,
     },
     {
       key: "target",
       head: "Target",
-      cell: (r) => (
-        <div className="min-w-0">
-          <p className="truncate text-sm">{r.targetLabel}</p>
-          <p className="truncate text-xs text-muted-foreground">
-            <span className="capitalize">{r.target}</span> · {r.targetDetail}
-          </p>
-        </div>
+      cell: (entry) => (
+        <span className="text-sm text-muted-foreground">
+          {entry.targetKind} ·{" "}
+          <span className="font-mono text-xs">{entry.targetId.slice(0, 8)}</span>
+        </span>
       ),
     },
     {
-      key: "severity",
-      head: "Severity",
-      cell: (r) => <StatusBadge tone={severityTone[r.severity]}>{r.severity}</StatusBadge>,
-    },
-    {
-      key: "status",
-      head: "Status",
-      cell: (r) => <StatusBadge tone={statusTone(r.status)}>{r.status}</StatusBadge>,
-    },
-    {
-      key: "assignee",
-      head: "Handled by",
-      cell: (r) => (
-        <span className="text-sm text-muted-foreground">{r.assignee ? `@${r.assignee}` : "—"}</span>
-      ),
-    },
-    {
-      key: "actions",
-      head: <span className="sr-only">Actions</span>,
-      className: "w-12 text-right",
-      cell: (r) => (
-        <div onClick={(e) => e.stopPropagation()}>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" aria-label={`Actions for ${r.id}`}>
-                <MoreHorizontal />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setDetail(r)}>Open report</DropdownMenuItem>
-              <DropdownMenuItem
-                disabled={r.status !== "open"}
-                onClick={() => setReportStatus(r.id, "resolved", `${r.id} resolved`)}
-              >
-                <Check />
-                Resolve
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                disabled={r.status !== "open"}
-                onClick={() => setReportStatus(r.id, "dismissed", `${r.id} dismissed`)}
-              >
-                <X />
-                Dismiss
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                className="text-destructive"
-                disabled={r.status !== "open"}
-                onClick={() => setReportStatus(r.id, "dismissed", `${r.id} escalated and closed`)}
-              >
-                Escalate to trust & safety
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+      key: "reason",
+      head: "Reason",
+      className: "min-w-64",
+      cell: (entry) => (
+        <span className="line-clamp-2 text-sm text-muted-foreground">{entry.reason ?? "—"}</span>
       ),
     },
   ];
@@ -206,309 +140,250 @@ function ReportsAdmin() {
   return (
     <AdminPage
       title="Reports"
-      subtitle={`${counts.open} open · ${counts.resolved} resolved · ${counts.dismissed} dismissed. Reports from players about users, games and comments.`}
-      actions={
-        <div className="hidden md:block">
-          <StateSwitcher value={state} onChange={setState} />
-        </div>
-      }
+      subtitle="Player reports and the decisions recorded against them. Both lists are the database's."
     >
-      <div
-        className="no-scrollbar mb-3 flex gap-2 overflow-x-auto pb-1"
-        role="tablist"
-        aria-label="Report target"
-      >
-        {targets.map((t) => (
-          <button
-            key={t.value}
-            role="tab"
-            aria-selected={target === t.value}
-            onClick={() => {
-              setTarget(t.value);
-              setPage(1);
-            }}
-            className={cn(
-              "press shrink-0 rounded-full px-3.5 py-1.5 text-sm",
-              target === t.value
-                ? "bg-foreground font-medium text-background"
-                : "bg-surface text-muted-foreground",
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
+      <div className="mb-4 grid gap-3 sm:grid-cols-3">
+        <StatCard
+          label="Open"
+          value={overview.status === "ready" ? String(overview.data.openReports) : "—"}
+          tone={overview.status === "ready" && overview.data.openReports > 0 ? "warning" : "muted"}
+        />
+        <StatCard
+          label="Being reviewed"
+          value={overview.status === "ready" ? String(overview.data.reviewingReports) : "—"}
+        />
+        <StatCard
+          label="Hidden comments"
+          value={overview.status === "ready" ? String(overview.data.hiddenComments) : "—"}
+          delta={
+            overview.status === "ready" ? `${overview.data.comments} comments in total` : undefined
+          }
+        />
       </div>
 
-      <Toolbar>
-        <SearchField
-          value={q}
-          onChange={(v) => {
-            setQ(v);
-            setPage(1);
-          }}
-          placeholder="Search report id, target or reason"
-          label="Search reports"
-        />
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <FilterSelect
           label="Report status"
           value={status}
-          onChange={(v) => {
-            setStatus(v);
-            setPage(1);
+          onChange={(value) => {
+            setStatus(value);
+            setPage(0);
           }}
-          options={[
-            { value: "open", label: "Open" },
-            { value: "resolved", label: "Resolved" },
-            { value: "dismissed", label: "Dismissed" },
-            { value: "all", label: "All statuses" },
-          ]}
+          options={statusOptions}
         />
-      </Toolbar>
+      </div>
 
-      {s === "loading" ? (
-        <ListSkeleton rows={8} />
-      ) : s === "error" ? (
-        <ErrorState onRetry={() => setState("ready")} />
-      ) : s === "empty" || filtered.length === 0 ? (
-        <AdminListStates
-          state="empty"
-          emptyTitle="No reports match"
-          emptyBody="Try another status or clear the search."
-          action={
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setQ("");
-                setStatus("all");
-                setTarget("all");
-              }}
-            >
-              Clear filters
-            </Button>
-          }
-        />
+      {reports.status === "error" ? (
+        <SectionCard>
+          <AdminListStates
+            state="error"
+            onRetry={reports.retry}
+            emptyTitle=""
+            emptyBody={reports.error.message}
+          />
+        </SectionCard>
+      ) : reports.status === "loading" ? (
+        <AdminListStates state="loading" emptyTitle="" rows={6} />
+      ) : rows.length === 0 ? (
+        <SectionCard>
+          <AdminListStates
+            state="ready"
+            emptyTitle={status ? "Nothing with that status" : "No reports"}
+            emptyBody={
+              status
+                ? "Choose another status, or clear the filter."
+                : "No player has reported anything. New reports appear here the moment they are filed."
+            }
+          />
+        </SectionCard>
       ) : (
         <>
-          <AdminTable
-            columns={columns}
-            rows={slice}
-            rowKey={(r) => r.id}
-            onRow={(r) => setDetail(r)}
-            mobileRow={(r) => (
-              <MobileRow ariaLabel={`Open report ${r.id}`} onClick={() => setDetail(r)}>
-                <span
-                  className={cn(
-                    "flex size-9 shrink-0 items-center justify-center rounded-lg",
-                    r.severity === "high"
-                      ? "bg-destructive/15 text-destructive"
-                      : r.severity === "medium"
-                        ? "bg-warning/15 text-warning"
-                        : "bg-surface-2 text-muted-foreground",
-                  )}
-                >
-                  <Flag className="size-4" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{r.reason}</p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {r.targetLabel} · {r.time}
-                  </p>
+          <ul className="space-y-3">
+            {rows.map((report) => (
+              <li key={report.id} className="rounded-xl border border-border bg-surface p-4">
+                <div className="flex flex-wrap items-start gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusBadge tone={statusTone(report.status)}>{report.status}</StatusBadge>
+                      <StatusBadge tone={targetTone[report.targetKind]}>
+                        {report.targetKind}
+                      </StatusBadge>
+                      <span className="text-sm font-medium">
+                        {report.targetLabel ?? report.targetDetail ?? "(deleted content)"}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-sm">
+                      <span className="font-medium">{report.reason}</span>
+                      {report.details && (
+                        <span className="text-muted-foreground"> — {report.details}</span>
+                      )}
+                    </p>
+                    <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      <span>
+                        Reported by <span className="font-medium">@{report.reporterUsername}</span>
+                      </span>
+                      <span>Filed {formatAgo(report.createdAt) ?? "—"}</span>
+                      {report.resolvedByUsername && (
+                        <span>
+                          Decided by{" "}
+                          <span className="font-medium">@{report.resolvedByUsername}</span>
+                          {report.resolvedAt ? ` · ${formatAgo(report.resolvedAt)}` : ""}
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    {report.targetKind === "game" && report.targetDetail && (
+                      <Button asChild variant="secondary" size="sm">
+                        {/* targetDetail is the game's slug: the API resolves the target
+                            so the dashboard does not have to join three tables. */}
+                        <Link to="/games/$id" params={{ id: report.targetDetail }}>
+                          <ArrowUpRight />
+                          Open game
+                        </Link>
+                      </Button>
+                    )}
+                    {report.status === "open" && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={busy === report.id}
+                        onClick={() => decide(report, "reviewing")}
+                      >
+                        <Eye />
+                        Start review
+                      </Button>
+                    )}
+                    {report.status !== "resolved" && (
+                      <Button
+                        size="sm"
+                        disabled={busy === report.id}
+                        onClick={() => setPending({ report, status: "resolved", prompt: true })}
+                      >
+                        <ShieldCheck />
+                        Resolve
+                      </Button>
+                    )}
+                    {report.status !== "dismissed" && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={busy === report.id}
+                        onClick={() => setPending({ report, status: "dismissed", prompt: true })}
+                      >
+                        <X />
+                        Dismiss
+                      </Button>
+                    )}
+                    {report.status !== "open" && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={busy === report.id}
+                        onClick={() => setPending({ report, status: "open", prompt: false })}
+                      >
+                        <RotateCcw />
+                        Reopen
+                      </Button>
+                    )}
+                  </div>
                 </div>
-                <StatusBadge tone={statusTone(r.status)}>{r.status}</StatusBadge>
-                <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
-              </MobileRow>
-            )}
-          />
-          <Pager
+              </li>
+            ))}
+          </ul>
+          <OffsetPager
             page={page}
-            pages={pages}
             setPage={setPage}
-            total={total}
-            perPage={perPage}
+            perPage={ADMIN_LIMIT}
+            rows={rows.length}
+            hasMore={hasMore}
             label="reports"
           />
         </>
       )}
 
-      {/* Report detail */}
-      <Dialog open={!!detail} onOpenChange={(o) => !o && setDetail(null)}>
-        <DialogContent className="max-h-[88dvh] max-w-lg overflow-y-auto">
-          {detail && (
-            <>
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                  {detail.reason}
-                  <StatusBadge tone={severityTone[detail.severity]}>
-                    {detail.severity} severity
-                  </StatusBadge>
-                </DialogTitle>
-                <DialogDescription>
-                  {detail.id} · {detail.target} report · {detail.time}
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="rounded-xl border border-border bg-surface p-4">
-                {" "}
-                <p className="text-xs text-muted-foreground capitalize">Reported {detail.target}</p>
-                {detail.target === "user" && (
-                  <div className="mt-2 flex items-center gap-3">
-                    <Avatar name={detail.targetLabel.replace("@", "")} />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium">{detail.targetLabel}</p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {detail.targetDetail}
-                      </p>
-                    </div>
-                    <Button asChild size="sm" variant="secondary">
-                      <Link
-                        to="/u/$username"
-                        params={{ username: detail.targetLabel.replace("@", "") }}
-                      >
-                        Profile
-                      </Link>
-                    </Button>
-                  </div>
-                )}
-                {detail.target === "game" && (
-                  <div className="mt-2 flex items-center gap-3">
-                    <span className="relative block size-12 shrink-0 overflow-hidden rounded-lg border border-glass-border">
-                      {detail.game && (
-                        <GameArt
-                          id={detail.game}
-                          className="absolute top-0 left-0 size-36 origin-top-left scale-[0.34]"
-                        />
-                      )}
+      <SectionCard
+        title="Decisions recorded"
+        className="mt-5"
+        bodyClassName="p-0"
+        action={
+          <span className="text-xs text-muted-foreground">
+            Every moderation action, newest first
+          </span>
+        }
+      >
+        {log.status === "error" ? (
+          <AdminListStates
+            state="error"
+            onRetry={log.retry}
+            emptyTitle=""
+            emptyBody={log.error.message}
+          />
+        ) : log.status === "loading" ? (
+          <AdminListStates state="loading" emptyTitle="" rows={5} />
+        ) : log.data.items.length === 0 ? (
+          <AdminListStates
+            state="ready"
+            emptyTitle="No decisions yet"
+            emptyBody="Approving a game, resolving a report, hiding a comment or suspending an account is recorded here with the moderator's name."
+          />
+        ) : (
+          <>
+            <AdminTable
+              columns={logColumns}
+              rows={log.data.items}
+              rowKey={(entry) => entry.id}
+              mobileRow={(entry) => (
+                <MobileRow>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">
+                      {entry.action.replace(/_/g, " ")}
                     </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">{detail.targetLabel}</p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {detail.targetDetail}
-                      </p>
-                    </div>
-                    {detail.game && (
-                      <Button asChild size="sm" variant="secondary">
-                        <Link to="/games/$id" params={{ id: detail.game }}>
-                          Open
-                        </Link>
-                      </Button>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      @{entry.moderatorUsername} · {entry.targetKind} ·{" "}
+                      {formatStamp(entry.createdAt) ?? "—"}
+                    </span>
+                    {entry.reason && (
+                      <span className="mt-1 block truncate text-xs text-muted-foreground">
+                        {entry.reason}
+                      </span>
                     )}
-                  </div>
-                )}
-                {detail.target === "comment" && (
-                  <div className="mt-2">
-                    <p className="text-sm italic">“{detail.targetDetail.replace(/^"|"$/g, "")}”</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      by {detail.targetLabel}
-                      {detail.game ? ` · on ${detail.game.replace(/-/g, " ")}` : ""}
-                    </p>
-                  </div>
-                )}
-              </div>
+                  </span>
+                </MobileRow>
+              )}
+            />
+            <div className="px-4 pb-2">
+              <OffsetPager
+                page={logPage}
+                setPage={setLogPage}
+                perPage={ADMIN_LIMIT}
+                rows={log.data.items.length}
+                hasMore={log.data.hasMore}
+                label="decisions"
+              />
+            </div>
+          </>
+        )}
+      </SectionCard>
 
-              <dl className="divide-y divide-border rounded-xl border border-border bg-surface px-4 py-1">
-                <MetaRow label="Reported by">@{detail.reporter}</MetaRow>
-                <MetaRow label="Status">
-                  <StatusBadge tone={statusTone(detail.status)}>{detail.status}</StatusBadge>
-                </MetaRow>
-                <MetaRow label="Handled by">
-                  {detail.assignee ? `@${detail.assignee}` : "Unassigned"}
-                </MetaRow>
-              </dl>
-
-              <p className="text-sm text-muted-foreground">{detail.detail}</p>
-
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  disabled={detail.status !== "open"}
-                  onClick={() => setReportStatus(detail.id, "resolved", `${detail.id} resolved`)}
-                >
-                  <Check />
-                  Resolve
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={detail.status !== "open"}
-                  onClick={() => setReportStatus(detail.id, "dismissed", `${detail.id} dismissed`)}
-                >
-                  <X />
-                  Dismiss
-                </Button>
-                {detail.target === "user" && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-destructive"
-                    onClick={() => setAction({ report: detail, kind: "suspend" })}
-                  >
-                    <Ban />
-                    Suspend user
-                  </Button>
-                )}
-                {detail.target === "game" && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-destructive"
-                    onClick={() => setAction({ report: detail, kind: "unpublish" })}
-                  >
-                    <EyeOff />
-                    Unpublish game
-                  </Button>
-                )}
-                {detail.target === "comment" && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-destructive"
-                    onClick={() => setAction({ report: detail, kind: "hide" })}
-                  >
-                    <EyeOff />
-                    Hide comment
-                  </Button>
-                )}
-              </div>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      <ConfirmDialog
-        open={!!action}
-        onOpenChange={(o) => !o && setAction(null)}
-        title={
-          action?.kind === "suspend"
-            ? "Suspend this user?"
-            : action?.kind === "unpublish"
-              ? "Unpublish this game?"
-              : "Hide this comment?"
-        }
+      <PromptDialog
+        open={pending?.prompt === true}
+        onOpenChange={(open) => !open && setPending(null)}
+        title={pending?.status === "resolved" ? "Resolve this report" : "Dismiss this report"}
         description={
-          action?.kind === "suspend"
-            ? `${action?.report.targetLabel} will be signed out and blocked from playing or posting.`
-            : action?.kind === "unpublish"
-              ? `${action?.report.targetLabel} will be removed from the feed until it is fixed.`
-              : "The comment stays on record but is hidden from other players."
+          pending
+            ? `The decision is stored with your username, and the reason is kept with it.`
+            : undefined
         }
-        confirmLabel={
-          action?.kind === "suspend"
-            ? "Suspend"
-            : action?.kind === "unpublish"
-              ? "Unpublish"
-              : "Hide comment"
+        label="Reason for the decision"
+        placeholder={
+          pending?.status === "resolved" ? "What was done about it?" : "Why is no action needed?"
         }
-        destructive
-        onConfirm={() => {
-          if (!action) return;
-          const message =
-            action.kind === "suspend"
-              ? `${action.report.targetLabel} suspended`
-              : action.kind === "unpublish"
-                ? `${action.report.targetLabel} unpublished`
-                : "Comment hidden";
-          setReportStatus(action.report.id, "resolved", message);
-          setAction(null);
+        confirmLabel={pending?.status === "resolved" ? "Resolve" : "Dismiss"}
+        destructive={pending?.status === "dismissed"}
+        onConfirm={(reason) => {
+          if (pending) decide(pending.report, pending.status, reason);
+          setPending(null);
         }}
       />
     </AdminPage>

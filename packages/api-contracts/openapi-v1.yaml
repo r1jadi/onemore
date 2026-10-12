@@ -1171,28 +1171,458 @@ paths:
         "429": { $ref: "#/components/responses/RateLimited" }
         "501": { $ref: "#/components/responses/NotImplemented" }
 
+  # The admin surface. Every operation requires a verified token, and every one
+  # of them also checks the caller's role in the database (`public.user_roles`)
+  # with the caller's own token, so a token claim alone grants nothing. The role
+  # named in each description is the role the database must report.
+  /admin/session:
+    get:
+      operationId: getAdminSession
+      tags: [admin]
+      summary: Read the caller's own role and account state
+      description: |
+        Answers what the database says the caller is: their role from
+        `public.user_roles`, their username and whether the account is suspended.
+        This is the one admin route an ordinary signed-in account may call — the
+        dashboard needs it to decide what to show, and an account that is not
+        staff must be able to learn that. It exposes the caller's own row and
+        nothing else, and the role it reports is never taken from the request.
+      x-status: available
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: The caller's own identity and role.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminSession" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /admin/overview:
+    get:
+      operationId: getAdminOverview
+      tags: [admin]
+      summary: Platform numbers and recent activity
+      description: |
+        Counts and a fourteen-day series, every one of them measured from
+        persisted rows. A value that cannot be computed is `null` rather than
+        zero: `avgRunSeconds` is null until a run has actually been completed.
+        The activity feed contains moderation decisions, published games and
+        verified scores, and nothing else — there is no line in it that does not
+        correspond to a row. Requires the moderator or administrator role.
+      x-status: available
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: The dashboard aggregate.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminOverview" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /admin/analytics:
+    get:
+      operationId: getAdminAnalytics
+      tags: [admin]
+      summary: Real activity aggregates over a window
+      description: |
+        Signups, players, completed runs, verified scores and the games and
+        players with the most real activity. Requires the moderator or
+        administrator role.
+      x-status: available
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: days
+          in: query
+          schema: { type: integer, minimum: 7, maximum: 90, default: 28 }
+      responses:
+        "200":
+          description: The activity aggregate.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminAnalytics" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /admin/games:
+    get:
+      operationId: listAdminGames
+      tags: [admin]
+      summary: Every game, published or not
+      description: |
+        The moderation list: drafts, submissions in review, rejected and archived
+        games as well as published ones, each with its real completed-run count,
+        distinct players, best verified score and comment count. Requires the
+        moderator or administrator role.
+      x-status: available
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [draft, review, published, rejected, archived] }
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 100 }
+        - $ref: "#/components/parameters/AdminLimit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: A page of games.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminGamePage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /admin/games/{gameID}:
+    patch:
+      operationId: moderateGame
+      tags: [admin]
+      summary: Decide a game's status
+      description: |
+        Publishes, rejects, archives or returns a game to review. Only the
+        transitions the platform defines are allowed, rejecting or archiving
+        requires a reason, and the decision is recorded in `moderation_actions`
+        in the same transaction, attributed to the caller's token. Requires the
+        moderator or administrator role.
+      x-status: available
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/GameID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [status]
+              properties:
+                status: { type: string, enum: [review, published, rejected, archived] }
+                reason: { type: string, maxLength: 500 }
+      responses:
+        "200":
+          description: The new state and the recorded action.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminModerationResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /admin/categories:
+    get:
+      operationId: listAdminCategories
+      tags: [admin]
+      summary: Categories with both real counts
+      description: |
+        Every category with the number of *published* games in it (what the
+        catalogue shows) and the number that exist at all, which includes games
+        the public count cannot see. Requires the moderator or administrator
+        role.
+      x-status: available
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: The category list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminCategoryList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /admin/reports:
+    get:
+      operationId: listAdminReports
+      tags: [admin]
+      summary: The moderation queue
+      description: |
+        Reports newest first, open ones before resolved ones, each with the
+        reported game, comment or profile resolved to a title, an excerpt or a
+        username. The queue is empty until a report is filed; it is never padded.
+        Requires the moderator or administrator role.
+      x-status: available
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [open, reviewing, resolved, dismissed] }
+        - $ref: "#/components/parameters/AdminLimit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: A page of reports.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminReportPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /admin/reports/{reportID}:
+    patch:
+      operationId: moderateReport
+      tags: [admin]
+      summary: Move a report through its workflow
+      description: |
+        Triages, resolves, dismisses or reopens a report. Resolving and
+        dismissing require a reason, the resolver is stamped from the caller's
+        token (never from the body), reopening clears the recorded resolution, and
+        the decision is written to `moderation_actions` in the same transaction.
+        Requires the moderator or administrator role.
+      x-status: available
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ReportID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [status]
+              properties:
+                status: { type: string, enum: [open, reviewing, resolved, dismissed] }
+                reason: { type: string, maxLength: 500 }
+      responses:
+        "200":
+          description: The new state and the recorded action.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminModerationResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /admin/comments:
+    get:
+      operationId: listAdminComments
+      tags: [admin]
+      summary: Comments, hidden ones included
+      description: |
+        The comment moderation list with its real like and report counts and its
+        hidden state. Requires the moderator or administrator role.
+      x-status: available
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: state
+          in: query
+          schema: { type: string, enum: [all, visible, hidden], default: all }
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 100 }
+        - $ref: "#/components/parameters/AdminLimit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: A page of comments.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminCommentPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /admin/comments/{commentID}:
+    patch:
+      operationId: moderateComment
+      tags: [admin]
+      summary: Hide or restore a comment
+      description: |
+        Sets `comments.is_hidden`, which has no UPDATE grant for the Data API at
+        all, so this operation is the only path to it. Hiding requires a reason
+        and is recorded in `moderation_actions` in the same transaction. Requires
+        the moderator or administrator role.
+      x-status: available
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CommentID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [hidden]
+              properties:
+                hidden: { type: boolean }
+                reason: { type: string, maxLength: 500 }
+      responses:
+        "200":
+          description: The new state and the recorded action.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminModerationResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
   /admin/users:
     get:
-      operationId: listUsers
+      operationId: listAdminUsers
       tags: [admin]
-      summary: List users
-      x-status: planned
+      summary: The account directory
+      description: |
+        Accounts with the two fields the Data API withholds from every other
+        caller — the email address and the suspension flag — plus the role, the
+        real activity counts and the number of reports filed against the account.
+        Requires the moderator or administrator role; suspending an account does
+        not (see the PATCH below).
+      x-status: available
+      security: [{ bearerAuth: [] }]
       parameters:
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Cursor"
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 100 }
+        - name: role
+          in: query
+          schema: { type: string, enum: [user, moderator, admin] }
+        - $ref: "#/components/parameters/AdminLimit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: A page of accounts.
           content:
             application/json:
-              schema:
-                type: object
-                properties:
-                  items:
-                    type: array
-                    items: { $ref: "#/components/schemas/Profile" }
+              schema: { $ref: "#/components/schemas/AdminUserPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "501": { $ref: "#/components/responses/NotImplemented" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /admin/users/{userID}:
+    patch:
+      operationId: setAccountSuspension
+      tags: [admin]
+      summary: Suspend or restore an account
+      description: |
+        Sets `profiles.is_suspended`, which has no UPDATE grant for the Data API,
+        so this operation is the only path to it. **Administrator only**: the
+        route requires the administrator claim and the database re-checks
+        `is_admin()`, and the caller cannot suspend their own account. A
+        suspension requires a reason and is recorded in `moderation_actions`.
+      x-status: available
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [suspended]
+              properties:
+                suspended: { type: boolean }
+                reason: { type: string, maxLength: 500 }
+      responses:
+        "200":
+          description: The new state and the recorded action.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminModerationResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /admin/leaderboards:
+    get:
+      operationId: listAdminScores
+      tags: [admin]
+      summary: Verified scores with the run behind each one
+      description: |
+        Every recorded score with the game, the player and the run it was
+        verified against — evidence, not just a number. Requires the moderator or
+        administrator role.
+      x-status: available
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: game
+          in: query
+          schema: { type: string, pattern: "^[a-z0-9-]{2,48}$" }
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 100 }
+        - $ref: "#/components/parameters/AdminLimit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: A page of scores.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminScorePage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /admin/moderation-log:
+    get:
+      operationId: listModerationLog
+      tags: [admin]
+      summary: The audit trail of staff decisions
+      description: |
+        Every recorded moderation action, newest first, with the moderator who
+        made it. Requires the moderator or administrator role.
+      x-status: available
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/AdminLimit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: A page of decisions.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminModerationPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /admin/system/services:
+    get:
+      operationId: listSystemServices
+      tags: [admin]
+      summary: Which services the platform is made of
+      description: |
+        The platform's routing table: what exists, not what is healthy. This
+        deployment collects no uptime or latency, so every entry reports
+        `unmeasured` and the response says so — a fabricated percentage here would
+        be indistinguishable from a measured one. Requires the moderator or
+        administrator role.
+      x-status: available
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: The service list and what is not measured.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminSystemReport" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
 
 components:
   securitySchemes:
@@ -1219,6 +1649,32 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    GameID:
+      name: gameID
+      in: path
+      required: true
+      description: The game's uuid, which is internal — slugs are the public identifier.
+      schema: { type: string, format: uuid }
+    ReportID:
+      name: reportID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    CommentID:
+      name: commentID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Offset:
+      name: offset
+      in: query
+      description: How many rows to skip. A ranking is not paged this way; a moderation list is.
+      schema: { type: integer, minimum: 0, maximum: 100000, default: 0 }
+    AdminLimit:
+      name: limit
+      in: query
+      description: The page size. The answer carries `hasMore` rather than a total.
+      schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
     GameSlug:
       name: slug
       in: path
@@ -1522,8 +1978,7 @@ components:
         categoryId: { type: string, format: uuid }
     PlaySession:
       type: object
-      required:
-        [id, gameSlug, rulesVersion, seed, tileCount, startedAt, expiresAt, ranked]
+      required: [id, gameSlug, rulesVersion, seed, tileCount, startedAt, expiresAt, ranked]
       description: |
         An issued run. The id and the seed are the server's, and the seed is sent
         as a decimal string: it is a 64-bit integer, and a JSON number would round
@@ -1553,7 +2008,17 @@ components:
     RunResult:
       type: object
       required:
-        [sessionId, gameSlug, score, clearedColumns, tilesPlaced, durationMs, ranked, recordedAt, duplicate]
+        [
+          sessionId,
+          gameSlug,
+          score,
+          clearedColumns,
+          tilesPlaced,
+          durationMs,
+          ranked,
+          recordedAt,
+          duplicate,
+        ]
       description: |
         A verified run. `score` is the server's own arithmetic from replaying the
         submitted actions — not the number the client sent, which was compared with
@@ -1688,3 +2153,376 @@ components:
         status: { type: string, enum: [open, reviewing, resolved, dismissed] }
         createdAt: { type: string, format: date-time }
         resolvedAt: { type: [string, "null"], format: date-time }
+
+    # ── Admin ──────────────────────────────────────────────────────────────
+    #
+    # The admin views are separate schemas from the public ones on purpose: a
+    # moderation row carries a state a visitor must never see (a draft's status, a
+    # hidden comment, an account's email), so reusing `Profile` or `Game` here
+    # would let a field added to the public view leak into the admin one.
+
+    AdminSession:
+      type: object
+      required: [userId, username, displayName, role, isStaff, isAdmin, isSuspended]
+      description: What the database says the caller is, for the caller alone.
+      properties:
+        userId: { type: string, format: uuid }
+        username: { type: string }
+        displayName: { type: string }
+        role: { type: string, enum: [user, moderator, admin] }
+        isStaff:
+          {
+            type: boolean,
+            description: "The moderator or administrator role, read from `public.user_roles`.",
+          }
+        isAdmin: { type: boolean }
+        isSuspended: { type: boolean }
+
+    AdminSeriesPoint:
+      type: object
+      required: [day, runs, scores, signups, players]
+      description: |
+        One day of real activity. A quiet day is present with zeros — an absent
+        day would read as missing data, and it is not missing, it is zero.
+      properties:
+        day: { type: string, example: "2026-10-13" }
+        runs: { type: integer, description: Completed runs that day. }
+        scores: { type: integer, description: Ranked scores recorded that day. }
+        signups: { type: integer }
+        players: { type: integer, description: Distinct accounts that started a run that day. }
+
+    AdminActivity:
+      type: object
+      required: [kind, at, actor, action, subjectKind, subject]
+      description: One line of the dashboard feed, built from a row that exists.
+      properties:
+        kind: { type: string, enum: [moderation, game, score] }
+        at: { type: string, format: date-time }
+        actor: { type: string }
+        action: { type: string }
+        subjectKind: { type: string }
+        subject: { type: string }
+        href: { type: [string, "null"], description: A public path when the subject has one. }
+
+    AdminTopGame:
+      type: object
+      required: [slug, title, runs]
+      properties:
+        slug: { type: string }
+        title: { type: string }
+        runs: { type: integer }
+
+    AdminOverview:
+      type: object
+      required:
+        [totalUsers, activeUsers, games, gamesPlayed, openReports, series, activity, topGames]
+      properties:
+        totalUsers: { type: integer }
+        activeUsers:
+          { type: integer, description: Distinct accounts that started a run in the last 24 hours. }
+        games: { type: integer }
+        publishedGames: { type: integer }
+        playableGames: { type: integer }
+        gamesPlayed:
+          {
+            type: integer,
+            description: "Completed runs, which is what this platform means by a play.",
+          }
+        runsOpen: { type: integer, description: Runs in progress that have not expired. }
+        scoresRecorded: { type: integer }
+        players: { type: integer, description: Distinct accounts with a recorded score. }
+        openReports: { type: integer }
+        pendingReview: { type: integer, description: Games submitted and waiting for a decision. }
+        reviewingReports: { type: integer }
+        comments: { type: integer }
+        hiddenComments: { type: integer }
+        newUsersToday: { type: integer }
+        avgRunSeconds:
+          {
+            type: [number, "null"],
+            description: Null until a run has been completed — an unmeasured average is not zero.,
+          }
+        runsMeasured: { type: integer, description: How many runs the average covers. }
+        series: { type: array, items: { $ref: "#/components/schemas/AdminSeriesPoint" } }
+        activity: { type: array, items: { $ref: "#/components/schemas/AdminActivity" } }
+        topGames: { type: array, items: { $ref: "#/components/schemas/AdminTopGame" } }
+
+    AdminAnalyticsGame:
+      type: object
+      required: [slug, title, runs, players, bestScore]
+      properties:
+        slug: { type: string }
+        title: { type: string }
+        runs: { type: integer }
+        players: { type: integer }
+        bestScore: { type: integer }
+
+    AdminTopPlayer:
+      type: object
+      required: [username, bestScore, scores]
+      properties:
+        username: { type: string }
+        bestScore: { type: integer }
+        scores: { type: integer }
+        lastScoredAt: { type: [string, "null"], format: date-time }
+
+    AdminAnalytics:
+      type: object
+      required: [days, totalUsers, runs, players, series, topGames, topPlayers]
+      properties:
+        days: { type: integer }
+        totalUsers: { type: integer }
+        newUsers: { type: integer, description: Accounts created inside the window. }
+        runs: { type: integer }
+        players: { type: integer }
+        scores: { type: integer }
+        comments: { type: integer }
+        avgRunSeconds: { type: [number, "null"] }
+        series: { type: array, items: { $ref: "#/components/schemas/AdminSeriesPoint" } }
+        topGames: { type: array, items: { $ref: "#/components/schemas/AdminAnalyticsGame" } }
+        topPlayers: { type: array, items: { $ref: "#/components/schemas/AdminTopPlayer" } }
+
+    AdminGame:
+      type: object
+      required:
+        [
+          id,
+          slug,
+          title,
+          status,
+          isOfficial,
+          playable,
+          plays,
+          players,
+          comments,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        slug: { type: string }
+        title: { type: string }
+        tagline: { type: [string, "null"] }
+        status: { type: string, enum: [draft, review, published, rejected, archived] }
+        isOfficial: { type: boolean }
+        playable: { type: boolean }
+        runtime: { type: [string, "null"] }
+        categorySlug: { type: [string, "null"] }
+        categoryName: { type: [string, "null"] }
+        ownerUsername:
+          {
+            type: [string, "null"],
+            description: "Null for a first-party game, which has no owning account.",
+          }
+        plays: { type: integer, description: Completed runs. }
+        players: { type: integer, description: Distinct accounts that completed a run. }
+        bestScore:
+          { type: [integer, "null"], description: Null when the game has no verified score yet. }
+        comments: { type: integer, description: "Comments written, hidden ones included." }
+        createdAt: { type: string, format: date-time }
+        publishedAt: { type: [string, "null"], format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    AdminGamePage:
+      type: object
+      required: [items, hasMore]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/AdminGame" } }
+        hasMore:
+          {
+            type: boolean,
+            description: True when a further page exists. The service reads one row more than the page rather than counting the table.,
+          }
+
+    AdminUser:
+      type: object
+      required: [id, username, displayName, role, isSuspended, createdAt, plays, reportsAgainst]
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        displayName: { type: string }
+        email:
+          {
+            type: [string, "null"],
+            description: Readable only through this endpoint; the Data API withholds it from every other caller.,
+          }
+        role: { type: string, enum: [user, moderator, admin] }
+        isSuspended: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        lastActiveAt:
+          {
+            type: [string, "null"],
+            format: date-time,
+            description: When the account last started a run. Null when it never has.,
+          }
+        plays: { type: integer }
+        bestScore: { type: [integer, "null"] }
+        reportsAgainst:
+          { type: integer, description: "Reports filed about this account, by anyone." }
+
+    AdminUserPage:
+      type: object
+      required: [items, hasMore]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/AdminUser" } }
+        hasMore: { type: boolean }
+
+    AdminReport:
+      type: object
+      required: [id, status, targetKind, targetId, reason, reporterUsername, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [open, reviewing, resolved, dismissed] }
+        targetKind: { type: string, enum: [game, comment, profile] }
+        targetId: { type: string, format: uuid }
+        targetLabel:
+          {
+            type: [string, "null"],
+            description: "The reported game's title, the reported comment's author or the reported account's username.",
+          }
+        targetDetail:
+          {
+            type: [string, "null"],
+            description: "A slug, a display name or an excerpt of the reported comment.",
+          }
+        reason: { type: string }
+        details: { type: [string, "null"] }
+        reporterUsername: { type: string }
+        resolvedByUsername: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        resolvedAt: { type: [string, "null"], format: date-time }
+
+    AdminReportPage:
+      type: object
+      required: [items, hasMore]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/AdminReport" } }
+        hasMore: { type: boolean }
+
+    AdminComment:
+      type: object
+      required:
+        [
+          id,
+          body,
+          authorUsername,
+          gameSlug,
+          gameTitle,
+          isHidden,
+          isReply,
+          likes,
+          reports,
+          createdAt,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        body: { type: string }
+        authorUsername: { type: string }
+        gameSlug: { type: string }
+        gameTitle: { type: string }
+        isHidden: { type: boolean, description: Hidden comments are visible here and nowhere else. }
+        isReply: { type: boolean }
+        likes: { type: integer, description: "Real likes, counted from `public.likes`." }
+        reports: { type: integer, description: Real reports filed about this comment. }
+        createdAt: { type: string, format: date-time }
+
+    AdminCommentPage:
+      type: object
+      required: [items, hasMore]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/AdminComment" } }
+        hasMore: { type: boolean }
+
+    AdminScore:
+      type: object
+      required: [id, gameSlug, gameTitle, username, score, createdAt]
+      description: A verified score with the run it was verified against.
+      properties:
+        id: { type: string, format: uuid }
+        gameSlug: { type: string }
+        gameTitle: { type: string }
+        username: { type: string }
+        score: { type: integer }
+        sessionStartedAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+
+    AdminScorePage:
+      type: object
+      required: [items, hasMore]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/AdminScore" } }
+        hasMore: { type: boolean }
+
+    AdminCategory:
+      type: object
+      required: [slug, name, sortOrder, publishedGames, totalGames]
+      properties:
+        slug: { type: string }
+        name: { type: string }
+        description: { type: [string, "null"] }
+        sortOrder: { type: integer }
+        publishedGames: { type: integer, description: What the public catalogue counts. }
+        totalGames:
+          { type: integer, description: "Published, drafts, rejected and archived together." }
+
+    AdminCategoryList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/AdminCategory" } }
+
+    AdminModerationEntry:
+      type: object
+      required: [id, moderatorUsername, targetKind, targetId, action, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        moderatorUsername: { type: string }
+        targetKind: { type: string, enum: [game, comment, profile] }
+        targetId: { type: string, format: uuid }
+        action:
+          {
+            type: string,
+            description: "One of publish_game, reject_game, archive_game, review_game, resolve_report, dismiss_report, review_report, reopen_report, hide_comment, unhide_comment, suspend_account, restore_account.",
+          }
+        reason: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+
+    AdminModerationPage:
+      type: object
+      required: [items, hasMore]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/AdminModerationEntry" } }
+        hasMore: { type: boolean }
+
+    AdminModerationResult:
+      type: object
+      required: [id, action]
+      description: What a moderation write changed, and the action recorded for it.
+      properties:
+        id: { type: string, format: uuid }
+        previousStatus: { type: [string, "null"] }
+        status: { type: [string, "null"] }
+        hidden: { type: [boolean, "null"] }
+        suspended: { type: [boolean, "null"] }
+        action: { type: string }
+
+    AdminServiceStatus:
+      type: object
+      required: [name, status, note]
+      properties:
+        name: { type: string }
+        status:
+          {
+            type: string,
+            enum: [unmeasured],
+            description: "This deployment measures no service health, and does not pretend to.",
+          }
+        note: { type: string }
+
+    AdminSystemReport:
+      type: object
+      required: [measured, note, items]
+      properties:
+        measured: { type: boolean, enum: [false] }
+        note: { type: string }
+        items: { type: array, items: { $ref: "#/components/schemas/AdminServiceStatus" } }

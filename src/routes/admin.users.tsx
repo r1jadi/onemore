@@ -1,55 +1,35 @@
 import { createFileRoute } from "@tanstack/react-router";
-import {
-  BadgeCheck,
-  Ban,
-  ChevronRight,
-  MoreHorizontal,
-  RotateCcw,
-  ShieldCheck,
-  Trash2,
-} from "lucide-react";
-import { useMemo, useState } from "react";
+import { ShieldAlert, ShieldCheck, UserCog } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 import {
   AdminListStates,
   AdminPage,
   AdminTable,
-  ConfirmDialog,
   FilterSelect,
-  MetaRow,
   MobileRow,
-  Pager,
+  OffsetPager,
+  PromptDialog,
   SearchField,
+  SectionCard,
   StatusBadge,
-  statusTone,
   Toolbar,
-  usePaged,
+  useDebounced,
   type Column,
 } from "@/components/admin/ui";
-import {
-  Avatar,
-  ErrorState,
-  ListSkeleton,
-  StateSwitcher,
-  UserName,
-  useMockLoad,
-} from "@/components/common";
+import { Avatar } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { adminReports, adminUsers, type AdminUser } from "@/lib/admin-mock";
+  ADMIN_LIMIT,
+  asApiError,
+  formatAgo,
+  formatWhen,
+  setAccountSuspension,
+  useAdminSession,
+  useAdminUsers,
+  type AdminRole,
+  type AdminUser,
+} from "@/lib/admin/api";
 import { fmt } from "@/lib/format";
 
 export const Route = createFileRoute("/admin/users")({
@@ -59,407 +39,320 @@ export const Route = createFileRoute("/admin/users")({
   component: UsersAdmin,
 });
 
-function UsersAdmin() {
-  const loading = useMockLoad(500);
-  const [users, setUsers] = useState(adminUsers);
+const roleOptions = [
+  { value: "", label: "All roles" },
+  { value: "user", label: "Players" },
+  { value: "moderator", label: "Moderators" },
+  { value: "admin", label: "Administrators" },
+];
+
+const roleTone: Record<AdminRole, "muted" | "warning" | "primary"> = {
+  user: "muted",
+  moderator: "warning",
+  admin: "primary",
+};
+
+/** A suspension or restoration, waiting on its reason. */
+type Pending = { user: AdminUser; suspended: boolean } | null;
+
+/**
+ * The account directory.
+ *
+ * Suspension is the one action here, and it belongs to administrators: the route
+ * is behind `AdminFunc` and the database function re-checks the role, so a
+ * moderator's own session is refused even if this screen offered the button. The
+ * button is therefore shown only to an administrator and explains itself when a
+ * moderator is looking: a disabled control with a reason is honest, a hidden one
+ * that reappears after a role change is not.
+ *
+ * Editing a role is not offered at all. Roles live in a table the API cannot
+ * write, and they are changed with the documented procedure rather than from the
+ * dashboard.
+ */
+export function UsersAdmin() {
+  const [role, setRole] = useState("");
   const [q, setQ] = useState("");
-  const [status, setStatus] = useState("all");
-  const [role, setRole] = useState("all");
-  const [state, setState] = useState("ready");
-  const [detail, setDetail] = useState<AdminUser | null>(null);
-  const [confirm, setConfirm] = useState<{
-    user: AdminUser;
-    kind: "suspend" | "restore" | "delete";
-  } | null>(null);
+  const [page, setPage] = useState(0);
+  const term = useDebounced(q.trim());
 
-  const filtered = useMemo(() => {
-    const term = q.trim().toLowerCase();
-    return users.filter((u) => {
-      const hit =
-        !term ||
-        u.username.toLowerCase().includes(term) ||
-        u.name.toLowerCase().includes(term) ||
-        u.email.toLowerCase().includes(term);
-      const statusHit = status === "all" || u.status === status;
-      const roleHit = role === "all" || u.role === role;
-      return hit && statusHit && roleHit;
-    });
-  }, [users, q, status, role]);
+  const users = useAdminUsers({
+    role: role ? (role as AdminRole) : undefined,
+    q: term || undefined,
+    limit: ADMIN_LIMIT,
+    offset: page * ADMIN_LIMIT,
+  });
+  const session = useAdminSession();
+  const isAdmin = session.status === "ready" && session.data.isAdmin;
 
-  const { page, setPage, pages, slice, total, perPage } = usePaged(filtered, 8);
-  const s = loading ? "loading" : state;
+  const [pending, setPending] = useState<Pending>(null);
+  const [busy, setBusy] = useState<string | null>(null);
 
-  const patch = (username: string, next: Partial<AdminUser>, message: string) => {
-    setUsers((list) => list.map((u) => (u.username === username ? { ...u, ...next } : u)));
-    setDetail((d) => (d && d.username === username ? { ...d, ...next } : d));
-    toast.success(message);
+  const rows = users.status === "ready" ? users.data.items : [];
+  const hasMore = users.status === "ready" ? users.data.hasMore : false;
+
+  const decide = (user: AdminUser, suspended: boolean, reason?: string) => {
+    setBusy(user.id);
+    setAccountSuspension(user.id, suspended, reason)
+      .then((result) => {
+        toast.success(
+          result.suspended
+            ? `@${user.username} is suspended.`
+            : `@${user.username} is active again.`,
+        );
+        users.retry();
+      })
+      .catch((error: unknown) => toast.error(asApiError(error).message))
+      .finally(() => setBusy(null));
   };
 
   const columns: Column<AdminUser>[] = [
     {
-      key: "user",
-      head: "User",
+      key: "account",
+      head: "Account",
+      className: "min-w-56",
       cell: (u) => (
         <div className="flex min-w-0 items-center gap-3">
           <Avatar name={u.username} size="sm" />
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium">{u.name}</p>
-            <p className="truncate text-xs text-muted-foreground">
-              @{u.username} · {u.email}
-            </p>
-          </div>
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-medium">{u.displayName}</span>
+            <span className="block truncate text-xs text-muted-foreground">
+              @{u.username}
+              {u.email ? ` · ${u.email}` : ""}
+            </span>
+          </span>
         </div>
       ),
     },
     {
       key: "role",
       head: "Role",
-      cell: (u) => <span className="text-sm capitalize text-muted-foreground">{u.role}</span>,
+      cell: (u) => <StatusBadge tone={roleTone[u.role]}>{u.role}</StatusBadge>,
     },
     {
       key: "status",
       head: "Status",
-      cell: (u) => <StatusBadge tone={statusTone(u.status)}>{u.status}</StatusBadge>,
-    },
-    {
-      key: "plays",
-      head: "Plays",
-      className: "text-right",
-      cell: (u) => <span className="font-mono text-sm tabular">{fmt(u.plays)}</span>,
-    },
-    {
-      key: "reports",
-      head: "Reports",
-      className: "text-right",
-      cell: (u) =>
-        u.reports > 0 ? (
-          <StatusBadge tone="destructive">{u.reports}</StatusBadge>
-        ) : (
-          <span className="text-sm text-muted-foreground tabular">0</span>
-        ),
+      cell: (u) => (
+        <StatusBadge tone={u.isSuspended ? "destructive" : "success"}>
+          {u.isSuspended ? "suspended" : "active"}
+        </StatusBadge>
+      ),
     },
     {
       key: "joined",
       head: "Joined",
-      cell: (u) => <span className="text-xs text-muted-foreground">{u.joined}</span>,
+      cell: (u) => (
+        <span className="text-xs text-muted-foreground">{formatWhen(u.createdAt) ?? "—"}</span>
+      ),
     },
     {
       key: "active",
       head: "Last active",
-      cell: (u) => <span className="text-xs text-muted-foreground">{u.lastActive}</span>,
+      cell: (u) => (
+        <span className="text-xs text-muted-foreground">
+          {u.lastActiveAt ? (formatAgo(u.lastActiveAt) ?? "—") : "never"}
+        </span>
+      ),
+    },
+    {
+      key: "plays",
+      head: "Runs",
+      className: "text-right",
+      cell: (u) => <span className="font-mono text-sm tabular">{fmt(u.plays)}</span>,
+    },
+    {
+      key: "best",
+      head: "Best score",
+      className: "text-right",
+      cell: (u) => (
+        <span className="font-mono text-sm tabular">
+          {u.bestScore === null ? "—" : fmt(u.bestScore)}
+        </span>
+      ),
+    },
+    {
+      key: "reports",
+      head: "Reports against",
+      className: "text-right",
+      cell: (u) => (
+        <span
+          className={
+            u.reportsAgainst > 0
+              ? "font-mono text-sm text-warning tabular"
+              : "font-mono text-sm text-muted-foreground tabular"
+          }
+        >
+          {fmt(u.reportsAgainst)}
+        </span>
+      ),
     },
     {
       key: "actions",
-      head: <span className="sr-only">Actions</span>,
-      className: "w-12 text-right",
+      head: "",
+      className: "w-40 text-right",
       cell: (u) => (
-        <div onClick={(e) => e.stopPropagation()}>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" aria-label={`Actions for @${u.username}`}>
-                <MoreHorizontal />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setDetail(u)}>View details</DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() =>
-                  patch(
-                    u.username,
-                    { verified: !u.verified },
-                    u.verified
-                      ? `Verification removed from @${u.username}`
-                      : `@${u.username} verified`,
-                  )
-                }
-              >
-                {u.verified ? "Remove verification" : "Verify user"}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              {u.status === "suspended" ? (
-                <DropdownMenuItem onClick={() => setConfirm({ user: u, kind: "restore" })}>
-                  Restore account
-                </DropdownMenuItem>
-              ) : (
-                <DropdownMenuItem onClick={() => setConfirm({ user: u, kind: "suspend" })}>
-                  Suspend account
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem
-                className="text-destructive"
-                onClick={() => setConfirm({ user: u, kind: "delete" })}
-              >
-                Delete user
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+        <SuspendButton user={u} isAdmin={isAdmin} busy={busy === u.id} onDecide={setPending} />
       ),
     },
   ];
 
-  const userReports = detail
-    ? adminReports.filter(
-        (r) => r.targetLabel === `@${detail.username}` || r.reporter === detail.username,
-      )
-    : [];
-
   return (
     <AdminPage
       title="Users"
-      subtitle={`${total} accounts${status !== "all" || role !== "all" ? " matching filters" : ""}. Moderation actions apply instantly in this prototype.`}
-      actions={
-        <div className="hidden md:block">
-          <StateSwitcher value={state} onChange={setState} />
-        </div>
-      }
+      subtitle="Real accounts from the database. Sensitive fields are excluded server-side: no session tokens, no password material."
     >
       <Toolbar>
         <SearchField
           value={q}
-          onChange={(v) => {
-            setQ(v);
-            setPage(1);
+          onChange={(value) => {
+            setQ(value);
+            setPage(0);
           }}
-          placeholder="Search name, username or email"
-          label="Search users"
-        />
-        <FilterSelect
-          label="Account status"
-          value={status}
-          onChange={(v) => {
-            setStatus(v);
-            setPage(1);
-          }}
-          options={[
-            { value: "all", label: "All statuses" },
-            { value: "active", label: "Active" },
-            { value: "flagged", label: "Flagged" },
-            { value: "suspended", label: "Suspended" },
-            { value: "pending", label: "Pending" },
-          ]}
+          label="Search accounts"
+          placeholder="Search username, name or email"
         />
         <FilterSelect
           label="Account role"
           value={role}
-          onChange={(v) => {
-            setRole(v);
-            setPage(1);
+          onChange={(value) => {
+            setRole(value);
+            setPage(0);
           }}
-          options={[
-            { value: "all", label: "All roles" },
-            { value: "player", label: "Players" },
-            { value: "creator", label: "Creators" },
-            { value: "moderator", label: "Moderators" },
-          ]}
+          options={roleOptions}
         />
       </Toolbar>
 
-      {s === "loading" ? (
-        <ListSkeleton rows={8} />
-      ) : s === "error" ? (
-        <ErrorState onRetry={() => setState("ready")} />
-      ) : s === "empty" || filtered.length === 0 ? (
-        <AdminListStates
-          state="empty"
-          emptyTitle="No users match"
-          emptyBody="Try a different search term or clear the filters."
-          action={
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setQ("");
-                setStatus("all");
-                setRole("all");
-              }}
-            >
-              Clear filters
-            </Button>
-          }
-        />
+      {!isAdmin && session.status === "ready" && (
+        <p className="mb-4 flex items-start gap-2 rounded-xl border border-border bg-surface px-4 py-3 text-xs text-muted-foreground">
+          <UserCog className="mt-0.5 size-4 shrink-0" />
+          You are signed in as a moderator. Suspending or restoring an account requires an
+          administrator; the server refuses it regardless of what this page shows.
+        </p>
+      )}
+
+      {users.status === "error" ? (
+        <SectionCard>
+          <AdminListStates
+            state="error"
+            onRetry={users.retry}
+            emptyTitle=""
+            emptyBody={users.error.message}
+          />
+        </SectionCard>
+      ) : users.status === "loading" ? (
+        <AdminListStates state="loading" emptyTitle="" rows={8} />
+      ) : rows.length === 0 ? (
+        <SectionCard>
+          <AdminListStates
+            state="ready"
+            emptyTitle={term || role ? "No account matches" : "No accounts"}
+            emptyBody={
+              term || role
+                ? "Clear the search or choose another role."
+                : "No account has been created yet."
+            }
+          />
+        </SectionCard>
       ) : (
         <>
           <AdminTable
             columns={columns}
-            rows={slice}
+            rows={rows}
             rowKey={(u) => u.id}
-            onRow={(u) => setDetail(u)}
             mobileRow={(u) => (
-              <MobileRow ariaLabel={`Open @${u.username}`} onClick={() => setDetail(u)}>
+              <MobileRow>
                 <Avatar name={u.username} size="sm" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{u.name}</p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    @{u.username} · {fmt(u.plays)} plays
-                  </p>
-                </div>
-                <StatusBadge tone={statusTone(u.status)}>{u.status}</StatusBadge>
-                <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium">{u.displayName}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    @{u.username} · {u.role}
+                    {u.isSuspended ? " · suspended" : ""}
+                  </span>
+                </span>
+                <SuspendButton
+                  user={u}
+                  isAdmin={isAdmin}
+                  busy={busy === u.id}
+                  onDecide={setPending}
+                />
               </MobileRow>
             )}
           />
-          <Pager
+          <OffsetPager
             page={page}
-            pages={pages}
             setPage={setPage}
-            total={total}
-            perPage={perPage}
-            label="users"
+            perPage={ADMIN_LIMIT}
+            rows={rows.length}
+            hasMore={hasMore}
+            label="accounts"
           />
         </>
       )}
 
-      {/* User details */}
-      <Dialog open={!!detail} onOpenChange={(o) => !o && setDetail(null)}>
-        <DialogContent className="max-h-[88dvh] max-w-lg overflow-y-auto">
-          {detail && (
-            <>
-              <DialogHeader>
-                <DialogTitle className="sr-only">User details</DialogTitle>
-                <DialogDescription className="sr-only">
-                  Profile, activity and moderation for @{detail.username}
-                </DialogDescription>
-              </DialogHeader>
-              <div className="flex items-center gap-3">
-                <Avatar name={detail.username} size="lg" />
-                <div className="min-w-0 flex-1">
-                  <p className="flex items-center gap-1.5 font-semibold">
-                    {detail.name}
-                    {detail.verified && (
-                      <BadgeCheck className="size-4 text-info" aria-label="Verified" />
-                    )}
-                  </p>
-                  <p className="text-sm text-muted-foreground">@{detail.username}</p>
-                </div>
-                <div className="flex flex-col items-end gap-1">
-                  <StatusBadge tone={statusTone(detail.status)}>{detail.status}</StatusBadge>
-                  <span className="text-xs capitalize text-muted-foreground">{detail.role}</span>
-                </div>
-              </div>
-
-              <dl className="divide-y divide-border rounded-xl border border-border bg-surface px-4 py-1">
-                <MetaRow label="Email">{detail.email}</MetaRow>
-                <MetaRow label="Country">{detail.country}</MetaRow>
-                <MetaRow label="Joined">{detail.joined}</MetaRow>
-                <MetaRow label="Last active">{detail.lastActive}</MetaRow>
-                <MetaRow label="Followers">{fmt(detail.followers)}</MetaRow>
-                <MetaRow label="Games played">{fmt(detail.plays)}</MetaRow>
-                <MetaRow label="Reports">
-                  {detail.reports === 0 ? "None" : `${detail.reports} reports`}
-                </MetaRow>
-              </dl>
-
-              <section>
-                <h3 className="mb-2 text-sm font-semibold">Moderation history</h3>
-                {userReports.length === 0 ? (
-                  <p className="rounded-xl border border-border bg-surface px-4 py-3 text-sm text-muted-foreground">
-                    No reports or moderation actions for this account.
-                  </p>
-                ) : (
-                  <ul className="divide-y divide-border rounded-xl border border-border bg-surface">
-                    {userReports.map((r) => (
-                      <li key={r.id} className="flex items-center gap-3 px-4 py-3">
-                        <StatusBadge tone={statusTone(r.status)}>{r.status}</StatusBadge>
-                        <span className="min-w-0 flex-1 truncate text-sm">{r.reason}</span>
-                        <span className="shrink-0 text-xs text-muted-foreground">{r.time}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
-
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() =>
-                    patch(
-                      detail.username,
-                      { verified: !detail.verified },
-                      detail.verified ? "Verification removed" : "User verified",
-                    )
-                  }
-                >
-                  <ShieldCheck />
-                  {detail.verified ? "Unverify" : "Verify"}
-                </Button>
-                {detail.status === "suspended" ? (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setConfirm({ user: detail, kind: "restore" })}
-                  >
-                    <RotateCcw />
-                    Restore
-                  </Button>
-                ) : (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setConfirm({ user: detail, kind: "suspend" })}
-                  >
-                    <Ban />
-                    Suspend
-                  </Button>
-                )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-destructive"
-                  onClick={() => setConfirm({ user: detail, kind: "delete" })}
-                >
-                  <Trash2 />
-                  Delete
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Signed in as <UserName username="kira" /> · moderator
-              </p>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      <ConfirmDialog
-        open={!!confirm}
-        onOpenChange={(o) => !o && setConfirm(null)}
-        title={
-          confirm?.kind === "delete"
-            ? "Delete this account?"
-            : confirm?.kind === "restore"
-              ? "Restore this account?"
-              : "Suspend this account?"
-        }
+      <PromptDialog
+        open={pending !== null}
+        onOpenChange={(open) => !open && setPending(null)}
+        title={pending?.suspended ? "Suspend this account" : "Restore this account"}
         description={
-          confirm?.kind === "delete"
-            ? `@${confirm.user.username}'s profile, scores and comments will be removed after 30 days. This can't be undone.`
-            : confirm?.kind === "restore"
-              ? `@${confirm?.user.username} will be able to play and comment again.`
-              : `@${confirm?.user.username} will be signed out and blocked from playing or posting.`
+          pending ? (
+            <>
+              <span className="block font-medium">
+                {pending.user.displayName} (@{pending.user.username})
+              </span>
+              <span className="mt-1 block">
+                {pending.suspended
+                  ? "The account keeps its data and history. Whoever holds the account is refused everywhere until it is restored, and the reason is recorded against your name."
+                  : "The account can sign in and play again. The reason is recorded against your name."}
+              </span>
+            </>
+          ) : undefined
         }
-        confirmLabel={
-          confirm?.kind === "delete"
-            ? "Delete account"
-            : confirm?.kind === "restore"
-              ? "Restore"
-              : "Suspend"
-        }
-        destructive={confirm?.kind !== "restore"}
-        onConfirm={() => {
-          if (!confirm) return;
-          const { user, kind } = confirm;
-          if (kind === "delete") {
-            setUsers((list) => list.filter((u) => u.username !== user.username));
-            setDetail(null);
-            toast.success(`@${user.username} deleted`);
-          } else if (kind === "suspend") {
-            patch(user.username, { status: "suspended" }, `@${user.username} suspended`);
-          } else {
-            patch(user.username, { status: "active" }, `@${user.username} restored`);
-          }
-          setConfirm(null);
+        label={pending?.suspended ? "Reason for suspension" : "Reason for restoring"}
+        confirmLabel={pending?.suspended ? "Suspend" : "Restore"}
+        destructive={pending?.suspended}
+        onConfirm={(reason) => {
+          if (pending) decide(pending.user, pending.suspended, reason);
+          setPending(null);
         }}
       />
     </AdminPage>
+  );
+}
+
+function SuspendButton({
+  user,
+  isAdmin,
+  busy,
+  onDecide,
+}: {
+  user: AdminUser;
+  isAdmin: boolean;
+  busy: boolean;
+  onDecide: (pending: Pending) => void;
+}) {
+  if (!isAdmin) {
+    return (
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled
+        title="Suspending an account requires an administrator."
+        className="text-muted-foreground"
+      >
+        <ShieldAlert />
+        Admin only
+      </Button>
+    );
+  }
+
+  return (
+    <Button
+      variant={user.isSuspended ? "secondary" : "ghost"}
+      size="sm"
+      disabled={busy}
+      onClick={() => onDecide({ user, suspended: !user.isSuspended })}
+    >
+      {user.isSuspended ? <ShieldCheck /> : <ShieldAlert />}
+      {user.isSuspended ? "Restore" : "Suspend"}
+    </Button>
   );
 }

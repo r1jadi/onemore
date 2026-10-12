@@ -56,28 +56,37 @@ Rules that hold everywhere:
 - when a service has no auth material configured, protected routes answer `503`
   (fail closed) rather than allowing anonymous access.
 
+One group goes further than the tiers. `/api/v1/admin` keeps its tier — so a token
+without a staff claim never reaches a handler — and then checks the **database**,
+per request, for the role the caller actually holds in `public.user_roles`. A
+claim and a row can disagree, and the row wins, so revoking a role takes effect on
+the caller's next request rather than when the token expires. Nothing on that
+surface reads a role, a user id or an admin flag from a body or query string, and
+the admin service holds no service-role key. See
+[0013](../decisions/0013-admin-authorization.md).
+
 ## Gateway routing
 
 `services/internal/apiroutes/routes.go` is the single source of truth:
 
-| Prefix                                   | Service         | Notes                                                                    |
-| ---------------------------------------- | --------------- | ------------------------------------------------------------------------ |
-| `/api/v1/auth`                           | auth            | sessions on top of Supabase Auth — **implemented**                       |
-| `/api/v1/games/{slug}/leaderboard`       | games           | a game's persisted ranking — **implemented** (optional auth: adds `me`)   |
-| `/api/v1/users`                          | users           | the caller's own profile — **implemented** (`GET`/`PATCH /users/me`)     |
-| `/api/v1/games`                          | games           | the published catalogue — **implemented** (list, search, detail by slug, and per-game leaderboard) |
-| `/api/v1/categories`                     | games           | categories with real published-game counts — **implemented**             |
-| `/api/v1/sessions`                       | game-sessions   | play sessions; the only door to a score — **implemented** (`POST`, and `POST /{id}/complete`) |
-| `/api/v1/scores`                         | scores          | read-only to clients                                                     |
-| `/api/v1/leaderboards`                   | leaderboards    | projections over scores                                                  |
-| `/api/v1/feed`                           | feed            | personalised feed                                                        |
-| `/api/v1/recommendations`                | recommendations | suggestions                                                              |
-| `/api/v1/comments`, `/follows`, `/likes` | social          | comments, follows, likes                                                 |
-| `/api/v1/notifications`                  | notifications   | in-app and push                                                          |
-| `/api/v1/search`                         | search          | games, creators, players                                                 |
-| `/api/v1/moderation`                     | moderation      | reports and actions                                                      |
-| `/api/v1/analytics`                      | analytics       | product analytics                                                        |
-| `/api/v1/admin`                          | admin           | operations API                                                           |
+| Prefix                                   | Service         | Notes                                                                                                                                                                                                |
+| ---------------------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/api/v1/auth`                           | auth            | sessions on top of Supabase Auth — **implemented**                                                                                                                                                   |
+| `/api/v1/games/{slug}/leaderboard`       | games           | a game's persisted ranking — **implemented** (optional auth: adds `me`)                                                                                                                              |
+| `/api/v1/users`                          | users           | the caller's own profile — **implemented** (`GET`/`PATCH /users/me`)                                                                                                                                 |
+| `/api/v1/games`                          | games           | the published catalogue — **implemented** (list, search, detail by slug, and per-game leaderboard)                                                                                                   |
+| `/api/v1/categories`                     | games           | categories with real published-game counts — **implemented**                                                                                                                                         |
+| `/api/v1/sessions`                       | game-sessions   | play sessions; the only door to a score — **implemented** (`POST`, and `POST /{id}/complete`)                                                                                                        |
+| `/api/v1/scores`                         | scores          | read-only to clients                                                                                                                                                                                 |
+| `/api/v1/leaderboards`                   | leaderboards    | projections over scores                                                                                                                                                                              |
+| `/api/v1/feed`                           | feed            | personalised feed                                                                                                                                                                                    |
+| `/api/v1/recommendations`                | recommendations | suggestions                                                                                                                                                                                          |
+| `/api/v1/comments`, `/follows`, `/likes` | social          | comments, follows, likes                                                                                                                                                                             |
+| `/api/v1/notifications`                  | notifications   | in-app and push                                                                                                                                                                                      |
+| `/api/v1/search`                         | search          | games, creators, players                                                                                                                                                                             |
+| `/api/v1/moderation`                     | moderation      | reports and actions                                                                                                                                                                                  |
+| `/api/v1/analytics`                      | analytics       | product analytics                                                                                                                                                                                    |
+| `/api/v1/admin`                          | admin           | the operations dashboard's API — **implemented** (staff-gated reads, moderation writes; the `admin` package is served by the games deployment, see [0013](../decisions/0013-admin-authorization.md)) |
 
 The gateway proxies a group only when its `UPSTREAM_<SERVICE>_URL` is configured.
 An unconfigured group answers `503` with the standard envelope; it is never

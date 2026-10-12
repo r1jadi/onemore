@@ -1,19 +1,27 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { Activity, BarChart3, Gamepad2, Play, Timer, UserCheck } from "lucide-react";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { MeterRow, MiniBars, RankedBars, TrendArea } from "@/components/admin/charts";
-import { AdminPage, SectionCard, StatCard, StatusBadge } from "@/components/admin/ui";
-import { ErrorState, StateSwitcher, useMockLoad } from "@/components/common";
+import { TrendArea } from "@/components/admin/charts";
+import {
+  AdminListStates,
+  AdminPage,
+  AdminTable,
+  FilterSelect,
+  MobileRow,
+  SectionCard,
+  StatCard,
+  Toolbar,
+  type Column,
+} from "@/components/admin/ui";
+import { Avatar } from "@/components/common";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  analyticsSeries,
-  engagement,
-  playsByHour,
-  popularGames,
-  retention,
-} from "@/lib/admin-mock";
+  formatAgo,
+  formatSeconds,
+  useAdminAnalytics,
+  type AdminAnalyticsGame,
+  type AdminTopPlayer,
+} from "@/lib/admin/api";
 import { fmt } from "@/lib/format";
-import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/admin/analytics")({
   head: () => ({
@@ -22,227 +30,257 @@ export const Route = createFileRoute("/admin/analytics")({
   component: AnalyticsAdmin,
 });
 
-const metrics = [
-  { key: "users", label: "Users", color: "var(--chart-2)" },
-  { key: "sessions", label: "Sessions", color: "var(--chart-1)" },
-  { key: "plays", label: "Games played", color: "var(--chart-3)" },
-] as const;
+const windows = [
+  { value: "7", label: "Last 7 days" },
+  { value: "28", label: "Last 28 days" },
+  { value: "90", label: "Last 90 days" },
+];
 
-function AnalyticsAdmin() {
-  const loading = useMockLoad(600);
-  const [metric, setMetric] = useState<(typeof metrics)[number]["key"]>("plays");
-  const [state, setState] = useState("ready");
-  const s = loading ? "loading" : state;
-  const active = metrics.find((m) => m.key === metric)!;
+/**
+ * Activity over a window, measured from rows the platform already keeps.
+ *
+ * The chart plots the API's own daily series — one point per day, with the days
+ * the database returned rather than a gap-filled range invented here. Every total
+ * beside it is that series' sum, so the number and the picture cannot disagree.
+ */
+export function AnalyticsAdmin() {
+  const [days, setDays] = useState("28");
+  const analytics = useAdminAnalytics(Number(days));
 
-  const totals = {
-    users: analyticsSeries.reduce((sum, d) => sum + d.users, 0),
-    sessions: analyticsSeries.reduce((sum, d) => sum + d.sessions, 0),
-    plays: analyticsSeries.reduce((sum, d) => sum + d.plays, 0),
-  };
+  const data = analytics.status === "ready" ? analytics.data : undefined;
+  const loading = analytics.status === "loading";
+
+  const series =
+    data?.series.map((point) => ({
+      day: point.day,
+      runs: point.runs,
+      scores: point.scores,
+      signups: point.signups,
+      players: point.players,
+    })) ?? [];
+
+  const chartSeries = [
+    { key: "runs", label: "Runs", color: "var(--chart-1)" },
+    { key: "players", label: "Players", color: "var(--chart-2)" },
+    { key: "scores", label: "Scores", color: "var(--chart-3)" },
+    { key: "signups", label: "Signups", color: "var(--chart-4)" },
+  ];
+
+  const gameColumns: Column<AdminAnalyticsGame>[] = [
+    {
+      key: "game",
+      head: "Game",
+      className: "min-w-56",
+      cell: (g) => (
+        <Link
+          to="/games/$id"
+          params={{ id: g.slug }}
+          className="truncate text-sm font-medium hover:underline"
+        >
+          {g.title}
+        </Link>
+      ),
+    },
+    {
+      key: "runs",
+      head: "Runs",
+      className: "text-right",
+      cell: (g) => <span className="font-mono text-sm tabular">{fmt(g.runs)}</span>,
+    },
+    {
+      key: "players",
+      head: "Players",
+      className: "text-right",
+      cell: (g) => <span className="font-mono text-sm tabular">{fmt(g.players)}</span>,
+    },
+    {
+      key: "best",
+      head: "Best score",
+      className: "text-right",
+      cell: (g) => <span className="font-mono text-sm tabular">{fmt(g.bestScore)}</span>,
+    },
+  ];
+
+  const playerColumns: Column<AdminTopPlayer>[] = [
+    {
+      key: "player",
+      head: "Player",
+      className: "min-w-48",
+      cell: (p) => (
+        <span className="flex min-w-0 items-center gap-3">
+          <Avatar name={p.username} size="sm" />
+          <span className="truncate text-sm font-medium">@{p.username}</span>
+        </span>
+      ),
+    },
+    {
+      key: "best",
+      head: "Best score",
+      className: "text-right",
+      cell: (p) => (
+        <span className="font-mono text-sm font-semibold tabular">{fmt(p.bestScore)}</span>
+      ),
+    },
+    {
+      key: "scores",
+      head: "Scores",
+      className: "text-right",
+      cell: (p) => <span className="font-mono text-sm tabular">{fmt(p.scores)}</span>,
+    },
+    {
+      key: "last",
+      head: "Last score",
+      cell: (p) => (
+        <span className="text-xs text-muted-foreground">{formatAgo(p.lastScoredAt) ?? "—"}</span>
+      ),
+    },
+  ];
+
+  const avgRun = data ? formatSeconds(data.avgRunSeconds) : null;
 
   return (
     <AdminPage
       title="Analytics"
-      subtitle="Mock data for the prototype. Numbers update when the real pipeline is connected."
+      subtitle="Activity measured from recorded rows: play sessions, verified scores, accounts and comments."
       actions={
-        <div className="hidden md:block">
-          <StateSwitcher value={state} onChange={setState} />
-        </div>
+        <FilterSelect
+          label="Window"
+          value={days}
+          onChange={setDays}
+          options={windows}
+          className="h-9"
+        />
       }
     >
-      {s === "error" ? (
-        <ErrorState onRetry={() => setState("ready")} />
+      {analytics.status === "error" ? (
+        <SectionCard>
+          <AdminListStates
+            state="error"
+            onRetry={analytics.retry}
+            emptyTitle=""
+            emptyBody={analytics.error.message}
+          />
+        </SectionCard>
       ) : (
         <div className="space-y-4 md:space-y-5">
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-            {s === "loading" ? (
-              Array.from({ length: 6 }, (_, i) => (
-                <Skeleton key={i} className="h-[104px] rounded-xl" />
-              ))
-            ) : (
-              <>
-                <StatCard
-                  label="Daily active users"
-                  value={fmt(analyticsSeries.at(-1)!.users)}
-                  delta="+1.4% week over week"
-                  tone="success"
-                  icon={UserCheck}
-                />
-                <StatCard
-                  label="Sessions"
-                  value={fmt(analyticsSeries.at(-1)!.sessions)}
-                  delta="+2.8% week over week"
-                  tone="success"
-                  icon={Activity}
-                />
-                <StatCard
-                  label="Games played"
-                  value={fmt(analyticsSeries.at(-1)!.plays)}
-                  delta="+5.8% week over week"
-                  tone="success"
-                  icon={Play}
-                />
-                <StatCard
-                  label="Avg session"
-                  value={engagement.avgSession}
-                  delta="-2s week over week"
-                  icon={Timer}
-                />
-                <StatCard
-                  label="Sessions per user"
-                  value={engagement.sessionsPerUser}
-                  delta="+0.2 week over week"
-                  tone="success"
-                  icon={BarChart3}
-                />
-                <StatCard
-                  label="DAU / MAU"
-                  value={engagement.dauMau}
-                  delta="Stable"
-                  icon={Gamepad2}
-                />
-              </>
-            )}
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <StatCard
+              label={`New accounts · ${days}d`}
+              value={loading ? "—" : fmt(data!.newUsers)}
+              delta={loading ? undefined : `${fmt(data!.totalUsers)} accounts in total`}
+            />
+            <StatCard
+              label={`Runs · ${days}d`}
+              value={loading ? "—" : fmt(data!.runs)}
+              delta={loading ? undefined : `${fmt(data!.players)} players played`}
+            />
+            <StatCard label={`Scores · ${days}d`} value={loading ? "—" : fmt(data!.scores)} />
+            <StatCard
+              label="Average run"
+              value={loading ? "—" : (avgRun ?? "not measured yet")}
+              tone={!loading && avgRun === null ? "warning" : "muted"}
+              delta={
+                !loading && avgRun === null ? "no run has been completed in this window" : undefined
+              }
+            />
+            <StatCard label={`Comments · ${days}d`} value={loading ? "—" : fmt(data!.comments)} />
+            <StatCard
+              label="Players in the window"
+              value={loading ? "—" : fmt(data!.players)}
+              delta={loading ? undefined : "distinct accounts that started a run"}
+            />
           </div>
 
           <SectionCard
-            title="Activity over time"
-            action={
-              <div
-                className="flex gap-1 rounded-lg bg-surface-2 p-1 text-xs"
-                role="group"
-                aria-label="Chart metric"
-              >
-                {metrics.map((m) => (
-                  <button
-                    key={m.key}
-                    onClick={() => setMetric(m.key)}
-                    aria-pressed={metric === m.key}
-                    className={cn(
-                      "press rounded-md px-2 py-1",
-                      metric === m.key ? "bg-surface text-foreground" : "text-muted-foreground",
-                    )}
-                  >
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-            }
+            title={`Daily activity · last ${data?.days ?? days} days`}
             bodyClassName="p-4"
           >
-            {s === "loading" ? (
-              <Skeleton className="h-56 w-full md:h-64" />
+            {loading ? (
+              <Skeleton className="h-56 w-full rounded-xl md:h-64" />
+            ) : series.length === 0 ? (
+              <p className="py-16 text-center text-sm text-muted-foreground">
+                Nothing has been recorded in this window yet.
+              </p>
             ) : (
-              <TrendArea
-                data={analyticsSeries}
-                series={[{ key: active.key, label: active.label, color: active.color }]}
-              />
+              <>
+                <TrendArea data={series} series={chartSeries} />
+                <p className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                  <span>Runs: {fmt(data!.runs)}</span>
+                  <span>Scores: {fmt(data!.scores)}</span>
+                  <span>Signups: {fmt(data!.newUsers)}</span>
+                  <span>Players: {fmt(data!.players)}</span>
+                </p>
+              </>
             )}
-            <p className="mt-2 text-xs text-muted-foreground tabular">
-              Total over 14 days: {fmt(totals[metric])} {active.label.toLowerCase()}
-            </p>
           </SectionCard>
 
-          <div className="grid gap-4 lg:grid-cols-3">
-            <SectionCard
-              title="Retention"
-              className="lg:col-span-1"
-              action={<span className="text-xs text-muted-foreground">Cohort average</span>}
-            >
-              {s === "loading" ? (
-                <Skeleton className="h-40 w-full" />
+          <div className="grid gap-4 xl:grid-cols-2">
+            <SectionCard title={`Most played · ${days} days`} bodyClassName="p-0">
+              {loading ? (
+                <AdminListStates state="loading" emptyTitle="" rows={5} />
+              ) : data!.topGames.length === 0 ? (
+                <AdminListStates
+                  state="ready"
+                  emptyTitle="No runs in this window"
+                  emptyBody="A game appears here once somebody has played it."
+                />
               ) : (
-                <div className="divide-y divide-border">
-                  {retention.map((r) => (
-                    <MeterRow key={r.label} label={r.label} value={r.value} hint={r.change} />
-                  ))}
-                </div>
-              )}
-              <p className="mt-3 text-xs text-muted-foreground">
-                Share of new players who return after signing up.
-              </p>
-            </SectionCard>
-
-            <SectionCard title="Engagement" className="lg:col-span-2" bodyClassName="p-4">
-              {s === "loading" ? (
-                <Skeleton className="h-40 w-full" />
-              ) : (
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                  {[
-                    { label: "Weekly new users", value: fmt(engagement.weeklyNewUsers) },
-                    { label: "Streak keepers", value: fmt(engagement.streakKeepers) },
-                    { label: "Creator submissions", value: String(engagement.creatorSubmissions) },
-                    { label: "Avg session", value: engagement.avgSession },
-                    { label: "Sessions / user", value: engagement.sessionsPerUser },
-                    { label: "DAU / MAU", value: engagement.dauMau },
-                  ].map((item) => (
-                    <div key={item.label} className="rounded-xl bg-surface-2 p-3">
-                      <p className="text-xs text-muted-foreground">{item.label}</p>
-                      <p className="mt-1 font-mono text-lg font-semibold tabular">{item.value}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </SectionCard>
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            <SectionCard
-              title="Popular games"
-              action={<span className="text-xs text-muted-foreground">Plays · 7 days</span>}
-            >
-              {s === "loading" ? (
-                <Skeleton className="h-60 w-full" />
-              ) : (
-                <>
-                  <RankedBars
-                    data={popularGames.map((g) => ({
-                      ...g,
-                      short: g.title.length > 14 ? `${g.title.slice(0, 13)}…` : g.title,
-                    }))}
-                    xKey="short"
-                    valueKey="plays"
-                    label="Plays"
-                  />
-                  <ul className="mt-3 divide-y divide-border">
-                    {popularGames.slice(0, 4).map((g) => (
-                      <li key={g.id} className="flex items-center gap-3 py-2 text-sm">
-                        <span className="min-w-0 flex-1 truncate">{g.title}</span>
-                        <span className="font-mono text-xs text-muted-foreground tabular">
-                          {fmt(g.plays)}
+                <AdminTable
+                  columns={gameColumns}
+                  rows={data!.topGames}
+                  rowKey={(g) => g.slug}
+                  mobileRow={(g) => (
+                    <MobileRow>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium">{g.title}</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {fmt(g.runs)} runs · {fmt(g.players)} players
                         </span>
-                        <StatusBadge tone={g.change.startsWith("+") ? "success" : "muted"}>
-                          {g.change}
-                        </StatusBadge>
-                      </li>
-                    ))}
-                  </ul>
-                </>
+                      </span>
+                      <span className="font-mono text-sm tabular">{fmt(g.bestScore)}</span>
+                    </MobileRow>
+                  )}
+                />
               )}
             </SectionCard>
 
-            <SectionCard
-              title="Activity by hour"
-              action={<span className="text-xs text-muted-foreground">UTC · plays</span>}
-            >
-              {s === "loading" ? (
-                <Skeleton className="h-60 w-full" />
+            <SectionCard title={`Top players · ${days} days`} bodyClassName="p-0">
+              {loading ? (
+                <AdminListStates state="loading" emptyTitle="" rows={5} />
+              ) : data!.topPlayers.length === 0 ? (
+                <AdminListStates
+                  state="ready"
+                  emptyTitle="No scores in this window"
+                  emptyBody="A player appears here once a run of theirs has been verified."
+                />
               ) : (
-                <>
-                  <MiniBars
-                    data={playsByHour}
-                    xKey="hour"
-                    series={[{ key: "plays", label: "Plays", color: "var(--chart-2)" }]}
-                    height={220}
-                  />
-                  <p className="mt-3 text-xs text-muted-foreground">
-                    Peak window is 18:00–21:00 UTC — the daily challenge drops at 08:00.
-                  </p>
-                </>
+                <AdminTable
+                  columns={playerColumns}
+                  rows={data!.topPlayers}
+                  rowKey={(p) => p.username}
+                  mobileRow={(p) => (
+                    <MobileRow>
+                      <Avatar name={p.username} size="sm" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium">@{p.username}</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {fmt(p.scores)} scores · {formatAgo(p.lastScoredAt) ?? "—"}
+                        </span>
+                      </span>
+                      <span className="font-mono text-sm font-semibold tabular">
+                        {fmt(p.bestScore)}
+                      </span>
+                    </MobileRow>
+                  )}
+                />
               )}
             </SectionCard>
           </div>
+
+          <p className="text-xs text-muted-foreground">
+            Figures cover the selected window and come from the same query as the chart above.
+            Nothing on this page is projected, estimated or sampled.
+          </p>
         </div>
       )}
     </AdminPage>

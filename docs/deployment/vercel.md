@@ -4,21 +4,21 @@ One Vercel project serves the whole product on one domain: the TanStack Start we
 app, the Go API gateway, the Go auth service and the Go users service. There is no
 second host and no `api.` subdomain.
 
-|                    |                                                                                                        |
-| ------------------ | ------------------------------------------------------------------------------------------------------ |
-| Project            | `onemorestartup` → `https://onemorestartup.vercel.app`                                                 |
-| Configuration      | [`vercel.json`](../../vercel.json) (services + rewrites + two service bindings)                        |
-| Web service        | `web` — repository root, framework `tanstack-start-lovable` (TanStack Start + Vite, SSR through Nitro) |
-| API service        | `api` — **container image**, `Dockerfile.vercel` at the repository root; this is the Go gateway        |
-| Auth service       | `auth` — `services/`, framework `go`, entrypoint `services/cmd/server/main.go`                         |
-| Users service      | `users` — `services/`, framework `go`, entrypoint `services/cmd/api/main.go`                           |
-| Games service      | `games` — `services/`, framework `go`, entrypoint `services/main.go`; serves the catalogue **and** the play sessions (one remaining preset entrypoint name, two packages) |
-| Reachability       | `auth`, `users` and `games` are internal: no rewrite targets them, so only the gateway can reach them   |
-| Local API          | `http://localhost:8080/api/v1` (`go run ./gateway/cmd/gateway`, `HTTP_ADDR=:8080`)                     |
-| Production API     | `https://onemorestartup.vercel.app/api/v1`                                                             |
-| Production auth    | `https://onemorestartup.vercel.app/api/v1/auth/*`                                                      |
-| Production profile | `https://onemorestartup.vercel.app/api/v1/users/me`                                                    |
-| Health             | `https://onemorestartup.vercel.app/api/v1/health`                                                      |
+|                    |                                                                                                                                                                                            |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Project            | `onemorestartup` → `https://onemorestartup.vercel.app`                                                                                                                                     |
+| Configuration      | [`vercel.json`](../../vercel.json) (services + rewrites + two service bindings)                                                                                                            |
+| Web service        | `web` — repository root, framework `tanstack-start-lovable` (TanStack Start + Vite, SSR through Nitro)                                                                                     |
+| API service        | `api` — **container image**, `Dockerfile.vercel` at the repository root; this is the Go gateway                                                                                            |
+| Auth service       | `auth` — `services/`, framework `go`, entrypoint `services/cmd/server/main.go`                                                                                                             |
+| Users service      | `users` — `services/`, framework `go`, entrypoint `services/cmd/api/main.go`                                                                                                               |
+| Games service      | `games` — `services/`, framework `go`, entrypoint `services/main.go`; serves the catalogue, the play sessions **and** the admin API (one remaining preset entrypoint name, three packages) |
+| Reachability       | `auth`, `users` and `games` are internal: no rewrite targets them, so only the gateway can reach them                                                                                      |
+| Local API          | `http://localhost:8080/api/v1` (`go run ./gateway/cmd/gateway`, `HTTP_ADDR=:8080`)                                                                                                         |
+| Production API     | `https://onemorestartup.vercel.app/api/v1`                                                                                                                                                 |
+| Production auth    | `https://onemorestartup.vercel.app/api/v1/auth/*`                                                                                                                                          |
+| Production profile | `https://onemorestartup.vercel.app/api/v1/users/me`                                                                                                                                        |
+| Health             | `https://onemorestartup.vercel.app/api/v1/health`                                                                                                                                          |
 
 ## The four services
 
@@ -162,12 +162,12 @@ That is the only reason the users service is reached through a file called
 `cmd/api`: the slot name is Vercel's fixed list, not a description of what the
 service does. The mapping follows what each service needs:
 
-| Service     | Entrypoint                     | Why that one                                                                                                                                  |
-| ----------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `auth`      | `services/cmd/server/main.go`  | Built by the Go preset, so it needs one of the three names                                                                                    |
-| `users`     | `services/cmd/api/main.go`     | Also built by the Go preset, so it takes the remaining name                                                                                   |
-| `games`     | `services/main.go`             | The Go preset's third and last name. It sits at the module root because that is where the preset looks; the file is a slot, not a description |
-| The gateway | `services/gateway/cmd/gateway` | Built by `Dockerfile.vercel`, which has no naming rule to satisfy, so its own command is used                                                 |
+| Service     | Entrypoint                     | Why that one                                                                                                                                                                                                                |
+| ----------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auth`      | `services/cmd/server/main.go`  | Built by the Go preset, so it needs one of the three names                                                                                                                                                                  |
+| `users`     | `services/cmd/api/main.go`     | Also built by the Go preset, so it takes the remaining name                                                                                                                                                                 |
+| `games`     | `services/main.go`             | The Go preset's third and last name. It sits at the module root because that is where the preset looks; the file is a slot, not a description. It mounts three packages: the catalogue, the play sessions and the admin API |
+| The gateway | `services/gateway/cmd/gateway` | Built by `Dockerfile.vercel`, which has no naming rule to satisfy, so its own command is used                                                                                                                               |
 
 All four run the same `servicekit.MustRun(<service>.Options())` as their local
 `cmd/<name>` binary, so no entrypoint is a second implementation:
@@ -180,17 +180,18 @@ and `services/gateway/cmd/gateway` are the local shells for the same wiring.
 order, and routing into a service is final: a request routed to the API service
 never falls back to the web app, whatever path it is.
 
-| Request                                 | Service         | Notes                                                                                      |
-| --------------------------------------- | --------------- | ------------------------------------------------------------------------------------------ |
-| `/api/v1/health`                        | `api`           | Liveness of the gateway; no auth, no dependency checks                                     |
-| `/api/v1`                               | `api`           | Version discovery                                                                          |
-| `/api/v1/auth/…`                        | `api` → `auth`  | The gateway proxies it over the binding to the deployed auth service                       |
-| `/api/v1/users/…`                       | `api` → `users` | The same, over the users binding — `/api/v1/users/me` is the profile                       |
-| `/api/v1/games/…`, `/api/v1/categories` | `api` → `games` | The same, over the games binding — the public catalogue and each game's leaderboard         |
-| `/api/v1/sessions/…`                    | `api` → `games` | The same binding: the play-session routes are mounted in the games deployment               |
-| `/api/v1/<other group>/…`               | `api`           | The gateway proxies a group only when its `UPSTREAM_<SERVICE>_URL` is set; otherwise `503` |
-| `/healthz`, `/readyz`                   | `api`           | The Go probes, so they stay usable in production                                           |
-| everything else                         | `web`           | `/`, `/explore`, `/games/…`, `/categories/…`, `/profile/…`, `/settings`, assets, sitemap   |
+| Request                                 | Service         | Notes                                                                                                    |
+| --------------------------------------- | --------------- | -------------------------------------------------------------------------------------------------------- |
+| `/api/v1/health`                        | `api`           | Liveness of the gateway; no auth, no dependency checks                                                   |
+| `/api/v1`                               | `api`           | Version discovery                                                                                        |
+| `/api/v1/auth/…`                        | `api` → `auth`  | The gateway proxies it over the binding to the deployed auth service                                     |
+| `/api/v1/users/…`                       | `api` → `users` | The same, over the users binding — `/api/v1/users/me` is the profile                                     |
+| `/api/v1/games/…`, `/api/v1/categories` | `api` → `games` | The same, over the games binding — the public catalogue and each game's leaderboard                      |
+| `/api/v1/sessions/…`                    | `api` → `games` | The same binding: the play-session routes are mounted in the games deployment                            |
+| `/api/v1/admin/…`                       | `api` → `games` | The same binding again: the admin routes are mounted in the games deployment, and stay fully staff-gated |
+| `/api/v1/<other group>/…`               | `api`           | The gateway proxies a group only when its `UPSTREAM_<SERVICE>_URL` is set; otherwise `503`               |
+| `/healthz`, `/readyz`                   | `api`           | The Go probes, so they stay usable in production                                                         |
+| everything else                         | `web`           | `/`, `/explore`, `/games/…`, `/categories/…`, `/profile/…`, `/settings`, assets, sitemap                 |
 
 A service receives the **original** request path (`/api/v1/auth/sign-in`, not
 `/auth/sign-in`), which is why both the gateway's own routes and the auth

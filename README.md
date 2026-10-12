@@ -17,16 +17,18 @@ will be built on is in place: one public gateway, a middleware chain every servi
 inherits, a published API contract, an RLS-governed database with a live security
 suite, and five CI workflows.
 
-Three slices are implemented end to end; the rest are contract-only.
+Five slices are implemented end to end; the rest are contract-only.
 
-| Area                                                                                                                                 | State                                                                   |
-| ------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
-| Web app (routing, SEO, PWA, design system)                                                                                           | Complete, served from the production domain                             |
-| Session lifecycle (`auth`)                                                                                                           | **Implemented** — sign-up, sign-in, refresh, session exchange, sign-out |
-| The caller's own profile (`users`)                                                                                                   | **Implemented** — read and update the signed-in `public.profiles` row   |
-| The game catalogue (`games`)                                                                                                         | **Implemented** — published games, search, categories with real counts  |
-| Everything else (sessions, scores, leaderboards, feed, recommendations, social, notifications, search, moderation, analytics, admin) | Scaffolded: each has a published contract and answers `501`             |
-| Payments (RaiAccept)                                                                                                                 | Designed, not built — see [0005](docs/decisions/0005-payments.md)       |
+| Area                                                                                                                | State                                                                      |
+| ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Web app (routing, SEO, PWA, design system)                                                                          | Complete, served from the production domain                                |
+| Session lifecycle (`auth`)                                                                                          | **Implemented** — sign-up, sign-in, refresh, session exchange, sign-out    |
+| The caller's own profile (`users`)                                                                                  | **Implemented** — read and update the signed-in `public.profiles` row      |
+| The game catalogue (`games`)                                                                                        | **Implemented** — published games, search, categories with real counts     |
+| Play sessions and server-verified scores (`game-sessions`)                                                          | **Implemented** — a score exists only if the database replays the run      |
+| The admin dashboard's API (`admin`)                                                                                 | **Implemented** — staff-gated reads and moderation writes, no fixture data |
+| Everything else (scores, leaderboards, feed, recommendations, social, notifications, search, moderation, analytics) | Scaffolded: each has a published contract and answers `501`                |
+| Payments (RaiAccept)                                                                                                | Designed, not built — see [0005](docs/decisions/0005-payments.md)          |
 
 A scaffolded endpoint is deliberate, not missing: the route exists, authenticates,
 is rate limited and is documented, so a client fails predictably (`501`) instead of
@@ -41,8 +43,10 @@ does not return.
 
 What remains on fixtures is what has no backend yet, and it is now empty states
 rather than invented content: [`src/lib/mock.ts`](src/lib/mock.ts) holds only the
-unimplemented features (public profiles, comments, notifications, achievements,
-and the internal admin console's demo tables). Screens whose data would be a
+unimplemented features (public profiles, comments, notifications, achievements).
+The internal admin console no longer appears here: its fixtures are deleted and
+its screens read the admin API or say plainly that a feature has no backend yet.
+Screens whose data would be a
 personal history — liked, saved, recently played, activity, leaderboards — say they
 are unavailable instead of showing fabricated rows.
 
@@ -175,7 +179,7 @@ shutdown with readiness draining.
 | `search`          | Games, creators, players                                          | Scaffolded                    |
 | `moderation`      | Reports and moderation actions                                    | Scaffolded                    |
 | `analytics`       | Product events and dashboards                                     | Scaffolded                    |
-| `admin`           | The operations API behind the admin dashboard                     | Scaffolded                    |
+| `admin`           | The operations API behind the admin dashboard                     | **Implemented**               |
 
 Adding one: create `services/<name>/cmd/<name>/main.go`, add its prefix to
 `internal/apiroutes/routes.go`, document it in the OpenAPI contract, add its

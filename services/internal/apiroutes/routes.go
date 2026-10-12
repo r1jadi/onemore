@@ -47,7 +47,13 @@ func Groups() []Group {
 		{Prefix: BasePath + "/search", Service: "search"},
 		{Prefix: BasePath + "/moderation", Service: "moderation"},
 		{Prefix: BasePath + "/analytics", Service: "analytics"},
-		{Prefix: BasePath + "/admin", Service: "admin"},
+		// The admin group is served by the `admin` package, which the `games`
+		// deployment mounts for the same reason the play sessions are mounted
+		// there: the Go preset's three entrypoint names are all taken, and a
+		// second container service at the same root is not detected (see
+		// docs/deployment/vercel.md). The prefix names the service that answers
+		// it, so the gateway's upstream lookup cannot drift from what runs.
+		{Prefix: BasePath + "/admin", Service: "games"},
 	}
 }
 

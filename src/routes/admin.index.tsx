@@ -10,18 +10,16 @@ import {
   Timer,
   Users,
 } from "lucide-react";
-import { useState } from "react";
 import { TrendArea } from "@/components/admin/charts";
 import { AdminPage, SectionCard, StatCard, StatusBadge, statusTone } from "@/components/admin/ui";
-import { Avatar, ListSkeleton, StateSwitcher, useMockLoad } from "@/components/common";
+import { Avatar, ErrorState, ListSkeleton } from "@/components/common";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  adminActivity,
-  analyticsSeries,
-  overviewStats,
-  popularGames,
-  systemServices,
-} from "@/lib/admin-mock";
+  formatAgo,
+  formatSeconds,
+  useAdminOverview,
+  useAdminSystemServices,
+} from "@/lib/admin/api";
 import { fmt } from "@/lib/format";
 
 export const Route = createFileRoute("/admin/")({
@@ -32,59 +30,68 @@ export const Route = createFileRoute("/admin/")({
 });
 
 const kindIcon = {
-  user: Users,
+  moderation: Flag,
   game: Gamepad2,
-  report: Flag,
-  comment: Activity,
-  system: Activity,
+  score: Activity,
 } as const;
 
-function Overview() {
-  const loading = useMockLoad(600);
-  const [state, setState] = useState("ready");
-  const s = loading ? "loading" : state;
+/**
+ * The dashboard, on the API's real numbers.
+ *
+ * Every figure below is a count of persisted rows, and every one that cannot be
+ * computed is shown as such: `avgRunSeconds` is null until a run has been
+ * completed, and the card says "not measured yet" instead of "0s". There is no
+ * comparison against a previous period, because the API does not compute one —
+ * an invented "+3.1%" is indistinguishable from a measured one.
+ */
+export function Overview() {
+  const overview = useAdminOverview();
+  const services = useAdminSystemServices();
+
+  if (overview.status === "error") {
+    return (
+      <AdminPage title="Overview" subtitle="Platform health, moderation queue and activity.">
+        <SectionCard>
+          <ErrorState onRetry={overview.retry} body={overview.error.message} />
+        </SectionCard>
+      </AdminPage>
+    );
+  }
+
+  const data = overview.status === "ready" ? overview.data : undefined;
+  const loading = overview.status === "loading";
+  const avgSession = data ? formatSeconds(data.avgRunSeconds) : null;
 
   const stats = [
-    {
-      label: "Total users",
-      value: fmt(overviewStats.totalUsers),
-      delta: overviewStats.deltas.totalUsers,
-      tone: "success" as const,
-      icon: Users,
-    },
+    { label: "Accounts", value: data ? fmt(data.totalUsers) : "—", icon: Users },
     {
       label: "Active today",
-      value: fmt(overviewStats.activeUsers),
-      delta: overviewStats.deltas.activeUsers,
-      tone: "success" as const,
+      value: data ? fmt(data.activeUsers) : "—",
+      hint: data ? "started a run in 24h" : undefined,
       icon: Activity,
     },
     {
       label: "Games",
-      value: String(overviewStats.games),
-      delta: "+4 this week",
-      tone: "muted" as const,
+      value: data ? String(data.games) : "—",
+      hint: data ? `${data.publishedGames} published · ${data.playableGames} playable` : undefined,
       icon: Gamepad2,
     },
     {
       label: "Games played",
-      value: fmt(overviewStats.gamesPlayed),
-      delta: overviewStats.deltas.gamesPlayed,
-      tone: "success" as const,
+      value: data ? fmt(data.gamesPlayed) : "—",
+      hint: data ? `${fmt(data.runsOpen)} runs in progress` : undefined,
       icon: Play,
     },
     {
-      label: "Avg session",
-      value: overviewStats.avgSession,
-      delta: overviewStats.deltas.avgSession,
-      tone: "muted" as const,
+      label: "Avg run",
+      value: avgSession ?? "not measured yet",
+      hint: data && data.runsMeasured > 0 ? `over ${fmt(data.runsMeasured)} runs` : undefined,
       icon: Timer,
     },
     {
       label: "Open reports",
-      value: String(overviewStats.openReports),
-      delta: overviewStats.deltas.openReports,
-      tone: "warning" as const,
+      value: data ? String(data.openReports) : "—",
+      hint: data ? `${data.reviewingReports} being reviewed` : undefined,
       icon: Flag,
     },
   ];
@@ -93,24 +100,24 @@ function Overview() {
     {
       to: "/admin/reports",
       label: "Open reports",
-      value: overviewStats.openReports,
-      hint: "3 high severity",
+      value: data?.openReports,
+      hint: data ? `${data.reviewingReports} in review` : "loading",
       icon: Flag,
       tone: "warning" as const,
     },
     {
       to: "/admin/review",
       label: "Games in review",
-      value: overviewStats.pendingReview,
-      hint: "Oldest waits 1 day",
+      value: data?.pendingReview,
+      hint: "waiting for a decision",
       icon: ClipboardCheck,
       tone: "info" as const,
     },
     {
       to: "/admin/comments",
-      label: "Reported comments",
-      value: 4,
-      hint: "1 already hidden",
+      label: "Hidden comments",
+      value: data?.hiddenComments,
+      hint: data ? `${fmt(data.comments)} written in total` : "loading",
       icon: AlertTriangle,
       tone: "destructive" as const,
     },
@@ -119,189 +126,189 @@ function Overview() {
   return (
     <AdminPage
       title="Overview"
-      subtitle="Platform health, moderation queue and activity at a glance."
+      subtitle="Platform health, moderation queue and real activity."
       actions={
-        <div className="hidden md:block">
-          <StateSwitcher value={state} onChange={setState} />
-        </div>
+        <button
+          type="button"
+          onClick={overview.retry}
+          className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+        >
+          Refresh
+        </button>
       }
     >
-      {s === "error" ? (
-        <SectionCard>
-          <p className="py-10 text-center text-sm text-muted-foreground">
-            Couldn’t load the overview.{" "}
-            <button className="underline" onClick={() => setState("ready")}>
-              Retry
-            </button>
-          </p>
-        </SectionCard>
-      ) : s === "empty" ? (
-        <SectionCard>
-          <p className="py-10 text-center text-sm text-muted-foreground">
-            No activity recorded yet.
-          </p>
-        </SectionCard>
-      ) : (
-        <div className="space-y-4 md:space-y-5">
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-            {s === "loading"
-              ? Array.from({ length: 6 }, (_, i) => (
-                  <Skeleton key={i} className="h-[104px] rounded-xl" />
-                ))
-              : stats.map((st) => (
-                  <StatCard
-                    key={st.label}
-                    label={st.label}
-                    value={st.value}
-                    delta={st.delta}
-                    tone={st.tone}
-                    icon={st.icon}
-                  />
-                ))}
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-3">
-            <SectionCard
-              title="Activity over time"
-              className="lg:col-span-2"
-              action={<span className="text-xs text-muted-foreground">Last 14 days · plays</span>}
-            >
-              {s === "loading" ? (
-                <Skeleton className="h-56 w-full md:h-64" />
-              ) : (
-                <TrendArea
-                  data={analyticsSeries}
-                  series={[{ key: "plays", label: "Games played", color: "var(--chart-1)" }]}
+      <div className="space-y-4 md:space-y-5">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+          {loading
+            ? Array.from({ length: 6 }, (_, i) => (
+                <Skeleton key={i} className="h-[104px] rounded-xl" />
+              ))
+            : stats.map((st) => (
+                <StatCard
+                  key={st.label}
+                  label={st.label}
+                  value={st.value}
+                  delta={st.hint}
+                  icon={st.icon}
                 />
-              )}
-            </SectionCard>
-            <SectionCard title="Moderation queue" bodyClassName="p-0">
-              <ul className="divide-y divide-border">
-                {queue.map((q) => (
-                  <li key={q.label}>
-                    <Link
-                      to={q.to}
-                      className="press flex items-center gap-3 px-4 py-4 hover:bg-surface-2"
-                    >
-                      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-2">
-                        <q.icon className="size-4 text-muted-foreground" strokeWidth={1.75} />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-medium">{q.label}</span>
-                        <span className="block text-xs text-muted-foreground">{q.hint}</span>
-                      </span>
+              ))}
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-3">
+          <SectionCard
+            title="Activity over time"
+            className="lg:col-span-2"
+            action={
+              <span className="text-xs text-muted-foreground">Last 14 days · completed runs</span>
+            }
+          >
+            {loading ? (
+              <Skeleton className="h-56 w-full md:h-64" />
+            ) : data && data.series.some((point) => point.runs > 0) ? (
+              <TrendArea
+                data={data.series.map((point) => ({ day: point.day, runs: point.runs }))}
+                series={[{ key: "runs", label: "Completed runs", color: "var(--chart-1)" }]}
+              />
+            ) : (
+              <p className="py-16 text-center text-sm text-muted-foreground">
+                No run has been completed yet. This fills in from recorded runs.
+              </p>
+            )}
+          </SectionCard>
+
+          <SectionCard title="Moderation queue" bodyClassName="p-0">
+            <ul className="divide-y divide-border">
+              {queue.map((q) => (
+                <li key={q.label}>
+                  <Link
+                    to={q.to}
+                    className="press flex items-center gap-3 px-4 py-4 hover:bg-surface-2"
+                  >
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-2">
+                      <q.icon className="size-4 text-muted-foreground" strokeWidth={1.75} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-medium">{q.label}</span>
+                      <span className="block text-xs text-muted-foreground">{q.hint}</span>
+                    </span>
+                    {q.value === undefined ? null : (
                       <StatusBadge tone={q.tone}>{q.value}</StatusBadge>
-                      <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
-                    </Link>
+                    )}
+                    <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </SectionCard>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-3">
+          <SectionCard title="Recent activity" className="lg:col-span-2" bodyClassName="p-0">
+            {loading ? (
+              <ListSkeleton rows={5} />
+            ) : data && data.activity.length > 0 ? (
+              <ul className="divide-y divide-border">
+                {data.activity.slice(0, 6).map((a, i) => {
+                  const Icon = kindIcon[a.kind];
+                  return (
+                    <li
+                      key={`${a.kind}-${a.at}-${i}`}
+                      className="flex items-center gap-3 px-4 py-3"
+                    >
+                      <Avatar name={a.actor} size="sm" />
+                      <p className="min-w-0 flex-1 text-sm">
+                        <span className="font-medium">@{a.actor}</span>{" "}
+                        <span className="text-muted-foreground">{a.action}</span>{" "}
+                        {a.href ? (
+                          <Link to={a.href} className="font-medium hover:underline">
+                            {a.subject}
+                          </Link>
+                        ) : (
+                          <span className="font-medium">{a.subject}</span>
+                        )}
+                        <span className="text-muted-foreground"> · {formatAgo(a.at)}</span>
+                      </p>
+                      <Icon className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="px-4 py-12 text-center text-sm text-muted-foreground">
+                Nothing has happened yet: a decision, a published game or a verified score appears
+                here.
+              </p>
+            )}
+          </SectionCard>
+
+          <SectionCard title="Most played games" bodyClassName="p-4">
+            {loading ? (
+              <ListSkeleton rows={5} avatar={false} />
+            ) : data && data.topGames.length > 0 ? (
+              <ul className="space-y-4">
+                {data.topGames.slice(0, 5).map((g) => (
+                  <li key={g.slug}>
+                    <div className="flex items-baseline justify-between gap-2 text-sm">
+                      <Link to="/admin/games" className="truncate font-medium hover:underline">
+                        {g.title}
+                      </Link>
+                      <span className="shrink-0 font-mono text-xs text-muted-foreground tabular">
+                        {fmt(g.runs)}
+                      </span>
+                    </div>
+                    <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-surface-2">
+                      <div
+                        className="h-full rounded-full bg-primary"
+                        style={{ width: `${(g.runs / data.topGames[0].runs) * 100}%` }}
+                      />
+                    </div>
                   </li>
                 ))}
+                <li>
+                  <Link
+                    to="/admin/analytics"
+                    className="text-sm text-muted-foreground hover:text-foreground"
+                  >
+                    Full analytics →
+                  </Link>
+                </li>
               </ul>
-            </SectionCard>
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-3">
-            <SectionCard title="Recent activity" className="lg:col-span-2" bodyClassName="p-0">
-              {s === "loading" ? (
-                <ListSkeleton rows={5} />
-              ) : (
-                <ul className="divide-y divide-border">
-                  {adminActivity.slice(0, 6).map((a) => {
-                    const Icon = kindIcon[a.kind];
-                    return (
-                      <li key={a.id} className="flex items-center gap-3 px-4 py-3">
-                        <Avatar name={a.actor} size="sm" />
-                        <p className="min-w-0 flex-1 text-sm">
-                          <span className="font-medium">@{a.actor}</span>{" "}
-                          <span className="text-muted-foreground">{a.action}</span>{" "}
-                          {a.subject && <span className="font-medium">{a.subject}</span>}
-                          <span className="text-muted-foreground"> · {a.time}</span>
-                        </p>
-                        <Icon
-                          className="size-4 shrink-0 text-muted-foreground"
-                          strokeWidth={1.75}
-                        />
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </SectionCard>
-            <SectionCard title="Top games today" bodyClassName="p-4">
-              {s === "loading" ? (
-                <ListSkeleton rows={5} avatar={false} />
-              ) : (
-                <ul className="space-y-4">
-                  {popularGames.slice(0, 5).map((g) => (
-                    <li key={g.id}>
-                      <div className="flex items-baseline justify-between gap-2 text-sm">
-                        <span className="truncate font-medium">{g.title}</span>
-                        <span className="shrink-0 font-mono text-xs text-muted-foreground tabular">
-                          {fmt(g.plays)}
-                        </span>
-                      </div>
-                      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-surface-2">
-                        <div
-                          className="h-full rounded-full bg-primary"
-                          style={{ width: `${(g.plays / popularGames[0].plays) * 100}%` }}
-                        />
-                      </div>
-                    </li>
-                  ))}
-                  <li>
-                    <Link
-                      to="/admin/analytics"
-                      className="text-sm text-muted-foreground hover:text-foreground"
-                    >
-                      Full analytics →
-                    </Link>
-                  </li>
-                </ul>
-              )}
-            </SectionCard>
-          </div>
-
-          <SectionCard
-            title="System overview"
-            action={<span className="text-xs text-muted-foreground">Updated 1m ago</span>}
-            bodyClassName="p-0"
-          >
-            {s === "loading" ? (
-              <ListSkeleton rows={6} avatar={false} />
             ) : (
+              <p className="py-12 text-center text-sm text-muted-foreground">
+                No game has been finished yet.
+              </p>
+            )}
+          </SectionCard>
+        </div>
+
+        <SectionCard title="Platform services" bodyClassName="p-0">
+          {services.status === "loading" ? (
+            <ListSkeleton rows={6} avatar={false} />
+          ) : services.status === "error" ? (
+            <ErrorState onRetry={services.retry} body={services.error.message} />
+          ) : (
+            <>
+              <p className="border-b border-border px-4 py-2 text-xs text-muted-foreground">
+                {services.data.note}
+              </p>
               <ul className="divide-y divide-border">
-                {systemServices.map((svc) => (
+                {services.data.items.map((svc) => (
                   <li
                     key={svc.name}
                     className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3"
                   >
                     <span className="min-w-40 flex-1 text-sm font-medium">{svc.name}</span>
-                    <span className="w-24 text-xs text-muted-foreground tabular">
-                      {svc.uptime} uptime
-                    </span>
-                    <span className="w-20 font-mono text-xs text-muted-foreground tabular">
-                      {svc.latency}
-                    </span>
                     <span className="hidden min-w-0 flex-1 truncate text-xs text-muted-foreground lg:block">
                       {svc.note}
                     </span>
-                    <StatusBadge
-                      tone={
-                        svc.status === "operational"
-                          ? statusTone("operational")
-                          : svc.status === "degraded"
-                            ? "warning"
-                            : "info"
-                      }
-                    >
-                      {svc.status}
-                    </StatusBadge>
+                    <StatusBadge tone={statusTone("muted")}>not measured</StatusBadge>
                   </li>
                 ))}
               </ul>
-            )}
-          </SectionCard>
-        </div>
-      )}
+            </>
+          )}
+        </SectionCard>
+      </div>
     </AdminPage>
   );
 }

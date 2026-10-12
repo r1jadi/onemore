@@ -6,6 +6,7 @@ import {
   Flag,
   Gamepad2,
   LayoutDashboard,
+  Lock,
   MessageSquare,
   Send,
   SlidersHorizontal,
@@ -15,8 +16,11 @@ import {
   Users,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { Avatar } from "@/components/common";
+import { Avatar, ErrorState } from "@/components/common";
 import { LogoMark } from "@/components/layout/Logo";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useAdminOverview, useAdminSession } from "@/lib/admin/api";
 import { cn } from "@/lib/utils";
 
 type AdminRoute =
@@ -73,10 +77,117 @@ const nav: { label: string; items: AdminNavItem[] }[] = [
 
 const flat: AdminNavItem[] = nav.flatMap((g) => g.items);
 
+/**
+ * The badge a queue item carries.
+ *
+ * The count comes from the API's own aggregate, and while it is loading or
+ * failed there is no badge at all — a `0` here would read as "nothing to do",
+ * which is a claim the dashboard has not earned.
+ */
+function QueueBadge({ count, tone }: { count: number | undefined; tone: "primary" | "muted" }) {
+  if (count === undefined) return null;
+  return (
+    <span
+      className={cn(
+        "rounded-full px-1.5 text-[11px] tabular",
+        tone === "primary"
+          ? "bg-primary font-semibold text-primary-foreground"
+          : "bg-surface-2 font-medium text-muted-foreground",
+      )}
+    >
+      {count}
+    </span>
+  );
+}
+
 export function AdminShell({ children }: { children?: ReactNode }) {
   const path = useRouterState({ select: (s) => s.location.pathname });
+  const session = useAdminSession();
+
+  // The gate. The API enforces this on every route — this decides what to render
+  // so that a person who is not staff sees why rather than a broken dashboard.
+  if (session.status === "loading") {
+    return (
+      <div className="mx-auto w-full max-w-7xl px-4 pt-8 md:px-8">
+        <Skeleton className="h-8 w-56" />
+        <Skeleton className="mt-4 h-40 w-full rounded-xl" />
+      </div>
+    );
+  }
+
+  if (session.status === "error") {
+    const error = session.error;
+    if (error.isUnauthorized) {
+      return (
+        <AdminGate
+          title="Sign in to open the dashboard"
+          body="The admin API answers only requests that carry a verified session."
+        >
+          <Button asChild>
+            <Link to="/login">Sign in</Link>
+          </Button>
+        </AdminGate>
+      );
+    }
+    return <ErrorState onRetry={session.retry} body={error.message} />;
+  }
+
+  if (!session.data.isStaff) {
+    return (
+      <AdminGate
+        title="This area requires a moderator account"
+        body="Your account does not hold a moderator or administrator role, so the API has no admin data to show you."
+      >
+        <Button asChild variant="secondary">
+          <Link to="/">Back to onemore</Link>
+        </Button>
+      </AdminGate>
+    );
+  }
+
+  return <AdminDashboard path={path} session={session.data} children={children} />;
+}
+
+/** The two states in which there is no dashboard to render. */
+function AdminGate({
+  title,
+  body,
+  children,
+}: {
+  title: string;
+  body: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col items-center justify-center px-6 text-center">
+      <div className="mb-4 flex size-12 items-center justify-center rounded-full bg-surface-2">
+        <Lock className="size-5 text-muted-foreground" />
+      </div>
+      <p className="font-medium">{title}</p>
+      <p className="mt-1 text-sm text-muted-foreground">{body}</p>
+      {children && <div className="mt-5">{children}</div>}
+    </div>
+  );
+}
+
+function AdminDashboard({
+  path,
+  session,
+  children,
+}: {
+  path: string;
+  session: { username: string; displayName: string; role: string; isAdmin: boolean };
+  children?: ReactNode;
+}) {
+  // One read for the two queue badges. It is the same aggregate the overview
+  // screen shows, so the badge and the page behind it cannot disagree.
+  const overview = useAdminOverview();
+  const counts = overview.status === "ready" ? overview.data : undefined;
+
   const isActive = (to: string, exact?: boolean) =>
     exact ? path === to || path === `${to}/` : path.startsWith(to);
+
+  const roleLabel = session.isAdmin ? "Administrator" : "Moderator";
 
   return (
     <div className="min-h-dvh md:flex">
@@ -104,14 +215,10 @@ export function AdminShell({ children }: { children?: ReactNode }) {
                   <Icon className="size-[18px]" strokeWidth={1.75} />
                   <span className="flex-1">{label}</span>
                   {to === "/admin/reports" && (
-                    <span className="rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground tabular">
-                      6
-                    </span>
+                    <QueueBadge count={counts?.openReports} tone="primary" />
                   )}
                   {to === "/admin/review" && (
-                    <span className="rounded-full bg-surface-2 px-1.5 text-[11px] font-medium text-muted-foreground tabular">
-                      3
-                    </span>
+                    <QueueBadge count={counts?.pendingReview} tone="muted" />
                   )}
                 </Link>
               ))}
@@ -127,10 +234,10 @@ export function AdminShell({ children }: { children?: ReactNode }) {
             Back to onemore
           </Link>
           <div className="mt-1 flex items-center gap-2.5 px-3 pt-2">
-            <Avatar name="kira" size="sm" />
+            <Avatar name={session.username} size="sm" />
             <div className="min-w-0 text-xs">
-              <p className="truncate font-medium">@kira</p>
-              <p className="truncate text-muted-foreground">Moderator</p>
+              <p className="truncate font-medium">@{session.username}</p>
+              <p className="truncate text-muted-foreground">{roleLabel}</p>
             </div>
           </div>
         </div>
@@ -144,7 +251,7 @@ export function AdminShell({ children }: { children?: ReactNode }) {
               <span className="text-sm font-semibold">onemore admin</span>
             </Link>
             <span className="ml-auto rounded-full bg-surface-2 px-2 py-0.5 text-[11px] text-muted-foreground">
-              Prototype
+              {roleLabel}
             </span>
           </div>
           <nav aria-label="Admin" className="no-scrollbar flex gap-2 overflow-x-auto px-4 pb-3">

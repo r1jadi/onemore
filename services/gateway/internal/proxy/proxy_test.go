@@ -10,6 +10,7 @@ import (
 
 	"github.com/r1jadi/onemore/packages/go/platform/config"
 	"github.com/r1jadi/onemore/packages/go/platform/httpx"
+	"github.com/r1jadi/onemore/services/internal/apiroutes"
 )
 
 // recorder is a stand-in upstream service.
@@ -112,7 +113,10 @@ func TestUnconfiguredGroupIsNotProxied(t *testing.T) {
 	upstream := newRecorder(t)
 	handler := proxyHandler(t, map[string]string{"games": upstream.server.URL})
 
-	response := do(t, handler, http.MethodGet, "/api/v1/admin/users", nil)
+	// The scores group has no upstream configured here, while games does — so a
+	// request for it must not be answered by the games service, and must not be
+	// proxied anywhere at all.
+	response := do(t, handler, http.MethodGet, "/api/v1/scores", nil)
 
 	if response.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", response.StatusCode)
@@ -212,17 +216,50 @@ func TestUpstreamCorsHeadersAreDropped(t *testing.T) {
 }
 
 func TestLongestPrefixWins(t *testing.T) {
-	admin := newRecorder(t)
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	p := New(testConfig(map[string]string{"admin": admin.server.URL}), logger)
-
-	found := false
-	for _, rt := range p.routes {
-		if rt.prefix == "/api/v1/admin" && rt.service == "admin" {
-			found = true
+	// Every group in the routing table must be proxied to the service the table
+	// names. Two of them are served by a deployment whose name is not their own
+	// (the play sessions and the admin API are mounted in the games service,
+	// because Vercel's Go preset gives a service root three entrypoint names and
+	// all three are taken), so the mapping is asserted from the table rather than
+	// assumed from the prefix.
+	// Every service in the table gets an upstream, so every group is routed.
+	upstreams := map[string]string{}
+	recorders := map[string]*recorder{}
+	for _, group := range apiroutes.Groups() {
+		if _, ok := recorders[group.Service]; !ok {
+			recorders[group.Service] = newRecorder(t)
+			upstreams[group.Service] = recorders[group.Service].server.URL
 		}
 	}
-	if !found {
-		t.Fatal("/api/v1/admin is not mapped to the admin service")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	p := New(testConfig(upstreams), logger)
+
+	for _, group := range apiroutes.Groups() {
+		found := false
+		for _, rt := range p.routes {
+			if rt.prefix == group.Prefix && rt.service == group.Service {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("%s is not proxied to the %s service, which the routing table names", group.Prefix, group.Service)
+		}
+	}
+	games := recorders["games"]
+
+	// Longest prefix wins, so a nested path under a group in the table is still
+	// answered by that group's upstream with its path intact.
+	handler := p.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	response := do(t, handler, http.MethodGet, "/api/v1/games/stack-10/leaderboard?period=week", nil)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("nested path status = %d, want 200 from the upstream", response.StatusCode)
+	}
+	if got := games.lastPath; got != "/api/v1/games/stack-10/leaderboard" {
+		t.Fatalf("upstream saw %q, want the nested path", got)
+	}
+	if got := games.lastQuery; got != "period=week" {
+		t.Fatalf("upstream query = %q, want period=week", got)
 	}
 }

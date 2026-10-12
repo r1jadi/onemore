@@ -210,7 +210,22 @@ dashboard access:
    **from its own service** — _"This API is not available in this environment
    yet."_ is the different fault of a missing binding — and the web app reports the
    failure instead of pretending to sign anyone in.
-6. **Avatar uploads depend on browser-visible Supabase configuration.** A profile
+6. **The admin surface needs two migrations applied, and one role granted by
+   hand.** `20261013130000_admin_operations.sql` and
+   `20261013130100_admin_identity_and_categories.sql` define the staff functions
+   and `admin_identity()`; until they are applied, every admin route answers `503`
+   from the service (the functions do not exist), which is a diagnosable failure
+   rather than a crash. Apply them the same way the earlier ones were applied —
+   the dashboard's SQL editor, or the CLI once it can run `db push` again (see the
+   note in item 1). Then, and only then, grant a role. **Granting is a two-part,
+   operator-only action** — the `public.user_roles` row plus the Supabase Auth
+   `app_metadata.role` claim — and the exact SQL, the claim value and the
+   verification call are in
+   [0013](../decisions/0013-admin-authorization.md#granting-and-revoking-a-role).
+   No account is granted a role by this repository, and none is granted
+   automatically: the dashboard says "this area requires a moderator account"
+   until somebody does it deliberately.
+7. **Avatar uploads depend on browser-visible Supabase configuration.** A profile
    picture is uploaded from the browser straight to the `avatars` bucket with the
    caller's own token, so `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`
    must be present in the built bundle for the button to work. Everything else about

@@ -1,0 +1,209 @@
+package supabaseadmin
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/r1jadi/onemore/packages/go/platform/config"
+)
+
+// newClient points a client at a stand-in for PostgREST and counts what reached
+// it, so a test can prove a call was never sent.
+func newClient(t *testing.T, handler http.HandlerFunc) (*Client, *int) {
+	t.Helper()
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		handler(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := New(&config.Config{
+		Supabase: config.Supabase{ProjectURL: server.URL, PublishableKey: "sb_publishable_test"},
+	})
+	if err != nil {
+		t.Fatalf("building client: %v", err)
+	}
+	return client, &requests
+}
+
+// TestCallCarriesTheCallerToken: the project key identifies the project, the
+// bearer token identifies the caller, and the function name is the path. This is
+// what makes the database's own checks meaningful.
+func TestCallCarriesTheCallerToken(t *testing.T) {
+	var (
+		path   string
+		apiKey string
+		authz  string
+	)
+	client, requests := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		apiKey = r.Header.Get("apikey")
+		authz = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"isStaff":true,"role":"admin","userId":"abc"}`))
+	})
+
+	identity, err := client.Identity(context.Background(), "caller-token")
+	if err != nil {
+		t.Fatalf("identity: %v", err)
+	}
+	if *requests != 1 {
+		t.Fatalf("requests = %d, want 1", *requests)
+	}
+	if path != "/rest/v1/rpc/admin_identity" {
+		t.Errorf("path = %q, want the function's own name", path)
+	}
+	if apiKey != "sb_publishable_test" {
+		t.Errorf("apikey = %q", apiKey)
+	}
+	if authz != "Bearer caller-token" {
+		t.Errorf("Authorization = %q, want the caller's token", authz)
+	}
+	if !identity.IsStaff || identity.Role != "admin" {
+		t.Errorf("identity decoded as %+v", identity)
+	}
+}
+
+// TestCallWithoutATokenIsRefusedLocally: a call with no caller token would be
+// answered as `anon`, which is a deployment fault rather than a caller's
+// mistake — so it never leaves the process.
+func TestCallWithoutATokenIsRefusedLocally(t *testing.T) {
+	client, requests := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("a request was sent without a caller token")
+	})
+
+	if _, err := client.Identity(context.Background(), ""); err == nil {
+		t.Fatal("an empty token was accepted")
+	}
+	if *requests != 0 {
+		t.Fatalf("requests = %d, want none", *requests)
+	}
+}
+
+// TestErrorMapping: the SQLSTATE the database raised decides the classification,
+// so a handler can answer 403, 404 or 400 without parsing prose.
+func TestErrorMapping(t *testing.T) {
+	cases := []struct {
+		name    string
+		status  int
+		body    string
+		forbid  bool
+		missing bool
+		bad     bool
+		unauth  bool
+	}{
+		{
+			name:   "the staff guard refused",
+			status: http.StatusForbidden,
+			body:   `{"code":"42501","message":"this operation requires a moderator or administrator role"}`,
+			forbid: true,
+		},
+		{
+			name:    "the row does not exist",
+			status:  http.StatusNotFound,
+			body:    `{"code":"P0002","message":"no such game"}`,
+			missing: true,
+		},
+		{
+			name:   "the transition is illegal",
+			status: http.StatusBadRequest,
+			body:   `{"code":"22023","message":"cannot move a game from published to draft"}`,
+			bad:    true,
+		},
+		{
+			name:   "the token was rejected",
+			status: http.StatusUnauthorized,
+			body:   `{"code":"PGRST301","message":"JWT expired"}`,
+			unauth: true,
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			client, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(testCase.status)
+				_, _ = w.Write([]byte(testCase.body))
+			})
+
+			_, err := client.SetGameStatus(context.Background(), "token", "id", "published", "")
+			var dataErr *Error
+			if !errors.As(err, &dataErr) {
+				t.Fatalf("error = %v, want a data error", err)
+			}
+			if dataErr.IsForbidden() != testCase.forbid {
+				t.Errorf("IsForbidden = %v, want %v", dataErr.IsForbidden(), testCase.forbid)
+			}
+			if dataErr.IsNotFound() != testCase.missing {
+				t.Errorf("IsNotFound = %v, want %v", dataErr.IsNotFound(), testCase.missing)
+			}
+			if dataErr.IsBadRequest() != testCase.bad {
+				t.Errorf("IsBadRequest = %v, want %v", dataErr.IsBadRequest(), testCase.bad)
+			}
+			if dataErr.IsUnauthorized() != testCase.unauth {
+				t.Errorf("IsUnauthorized = %v, want %v", dataErr.IsUnauthorized(), testCase.unauth)
+			}
+
+			// The database's own message can describe the schema or echo the
+			// caller's input, so it must never reach a log line or a response.
+			if strings.Contains(err.Error(), "message") || strings.Contains(err.Error(), "published to draft") {
+				t.Errorf("the error carries database text: %q", err.Error())
+			}
+		})
+	}
+}
+
+// TestDirectoryArgsAreNamedAndNullable: the functions take named arguments, and
+// an absent filter is SQL NULL rather than an empty string that matches nothing.
+func TestDirectoryArgsAreNamedAndNullable(t *testing.T) {
+	var body map[string]any
+	client, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`))
+	})
+
+	if _, err := client.Games(context.Background(), "token", "", "", Page{Limit: 50}); err != nil {
+		t.Fatalf("games: %v", err)
+	}
+	if value, present := body["p_status"]; !present || value != nil {
+		t.Errorf("p_status = %v, want an explicit null", value)
+	}
+	if _, ok := body["p_limit"]; !ok {
+		t.Errorf("p_limit missing from %v", body)
+	}
+	// One row more than the page: that is how the caller learns another page
+	// exists without a COUNT.
+	if value, _ := body["p_limit"].(float64); value != 51 {
+		t.Errorf("p_limit = %v, want the page size plus one", body["p_limit"])
+	}
+}
+
+// TestParsePageValidates: the paging the API documents is enforced here, so a
+// malformed page is a 400 rather than a database error.
+func TestParsePageValidates(t *testing.T) {
+	if _, err := ParsePage(map[string][]string{"limit": {"0"}}); err == nil {
+		t.Error("limit=0 was accepted")
+	}
+	if _, err := ParsePage(map[string][]string{"limit": {"101"}}); err == nil {
+		t.Error("limit=101 was accepted")
+	}
+	if _, err := ParsePage(map[string][]string{"offset": {"-1"}}); err == nil {
+		t.Error("offset=-1 was accepted")
+	}
+	page, err := ParsePage(map[string][]string{"limit": {"10"}, "offset": {"20"}})
+	if err != nil {
+		t.Fatalf("a valid page was refused: %v", err)
+	}
+	if page.Limit != 10 || page.Offset != 20 {
+		t.Errorf("page = %+v", page)
+	}
+}

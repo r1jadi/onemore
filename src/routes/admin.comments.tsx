@@ -1,49 +1,35 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ChevronRight, Eye, EyeOff, MessageSquare, MoreHorizontal, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { EyeOff, MessageSquare, Undo2 } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 import {
   AdminListStates,
   AdminPage,
   AdminTable,
-  ConfirmDialog,
   FilterSelect,
-  MetaRow,
   MobileRow,
-  Pager,
+  OffsetPager,
+  PromptDialog,
   SearchField,
+  SectionCard,
   StatusBadge,
   Toolbar,
-  usePaged,
+  useDebounced,
   type Column,
 } from "@/components/admin/ui";
-import {
-  Avatar,
-  ErrorState,
-  ListSkeleton,
-  StateSwitcher,
-  UserName,
-  useMockLoad,
-} from "@/components/common";
+import { Avatar } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { adminComments, type AdminComment } from "@/lib/admin-mock";
+  ADMIN_LIMIT,
+  asApiError,
+  formatAgo,
+  moderateComment,
+  useAdminComments,
+  useAdminOverview,
+  type AdminComment,
+  type CommentState,
+} from "@/lib/admin/api";
 import { fmt } from "@/lib/format";
-import { getGame } from "@/lib/admin-mock";
-import { users } from "@/lib/mock";
 
 export const Route = createFileRoute("/admin/comments")({
   head: () => ({
@@ -52,349 +38,262 @@ export const Route = createFileRoute("/admin/comments")({
   component: CommentsAdmin,
 });
 
-function CommentsAdmin() {
-  const loading = useMockLoad(500);
-  const [comments, setComments] = useState(adminComments);
+const stateOptions = [
+  { value: "all", label: "All comments" },
+  { value: "visible", label: "Visible" },
+  { value: "hidden", label: "Hidden" },
+];
+
+/** A hide or restore waiting on its reason. */
+type Pending = { comment: AdminComment; hidden: boolean } | null;
+
+/**
+ * Every comment, including the hidden ones.
+ *
+ * A hide is a database write: `admin_set_comment_hidden` sets the flag and writes
+ * the audit row in one transaction, so the list refreshes from the source rather
+ * than from local state that could drift from it.
+ */
+export function CommentsAdmin() {
+  const [state, setState] = useState<CommentState>("all");
   const [q, setQ] = useState("");
-  const [filter, setFilter] = useState("all");
-  const [state, setState] = useState("ready");
-  const [detail, setDetail] = useState<AdminComment | null>(null);
-  const [confirm, setConfirm] = useState<{
-    comment: AdminComment;
-    kind: "hide" | "unhide" | "delete";
-  } | null>(null);
+  const [page, setPage] = useState(0);
+  const term = useDebounced(q.trim());
 
-  const filtered = useMemo(() => {
-    const term = q.trim().toLowerCase();
-    return comments.filter((c) => {
-      const hit =
-        !term ||
-        c.text.toLowerCase().includes(term) ||
-        c.user.toLowerCase().includes(term) ||
-        getGame(c.game).title.toLowerCase().includes(term);
-      const filterHit =
-        filter === "all" ||
-        (filter === "reported" && c.reports > 0) ||
-        (filter === "hidden" && c.hidden) ||
-        (filter === "visible" && !c.hidden);
-      return hit && filterHit;
-    });
-  }, [comments, q, filter]);
+  const comments = useAdminComments({
+    state,
+    q: term || undefined,
+    limit: ADMIN_LIMIT,
+    offset: page * ADMIN_LIMIT,
+  });
+  const overview = useAdminOverview();
 
-  const { page, setPage, pages, slice, total, perPage } = usePaged(filtered, 8);
-  const s = loading ? "loading" : state;
+  const [pending, setPending] = useState<Pending>(null);
+  const [busy, setBusy] = useState<string | null>(null);
 
-  const patch = (id: string, next: Partial<AdminComment>, message: string) => {
-    setComments((list) => list.map((c) => (c.id === id ? { ...c, ...next } : c)));
-    setDetail((d) => (d && d.id === id ? { ...d, ...next } : d));
-    toast.success(message);
+  const rows = comments.status === "ready" ? comments.data.items : [];
+  const hasMore = comments.status === "ready" ? comments.data.hasMore : false;
+
+  const decide = (comment: AdminComment, hidden: boolean, reason?: string) => {
+    setBusy(comment.id);
+    moderateComment(comment.id, hidden, reason)
+      .then((result) => {
+        toast.success(result.hidden ? "Comment hidden." : "Comment restored.");
+        comments.retry();
+        overview.retry();
+      })
+      .catch((error: unknown) => toast.error(asApiError(error).message))
+      .finally(() => setBusy(null));
   };
 
   const columns: Column<AdminComment>[] = [
     {
       key: "comment",
       head: "Comment",
+      className: "min-w-80",
       cell: (c) => (
-        <div className="min-w-0 max-w-md">
-          <p className="truncate text-sm">{c.text}</p>
-          <p className="truncate text-xs text-muted-foreground">
-            {getGame(c.game).title} · {c.time}
-            {c.score ? ` · scored ${fmt(c.score)}` : ""}
-          </p>
+        <div className="min-w-0">
+          <p className="line-clamp-2 text-sm">{c.body}</p>
+          {c.isReply && (
+            <span className="mt-1 inline-block text-xs text-muted-foreground">reply</span>
+          )}
         </div>
       ),
     },
     {
-      key: "user",
-      head: "User",
-      cell: (c) => <span className="text-sm text-muted-foreground">@{c.user}</span>,
-    },
-    {
-      key: "likes",
-      head: "Likes",
-      className: "text-right",
-      cell: (c) => <span className="font-mono text-sm tabular">{fmt(c.likes)}</span>,
-    },
-    {
-      key: "reports",
-      head: "Reports",
-      className: "text-right",
-      cell: (c) =>
-        c.reports > 0 ? (
-          <StatusBadge tone="destructive">{c.reports}</StatusBadge>
-        ) : (
-          <span className="text-sm text-muted-foreground tabular">0</span>
-        ),
-    },
-    {
-      key: "status",
-      head: "Status",
+      key: "author",
+      head: "Author",
       cell: (c) => (
-        <StatusBadge tone={c.hidden ? "muted" : "success"}>
-          {c.hidden ? "hidden" : "visible"}
+        <span className="flex items-center gap-2">
+          <Avatar name={c.authorUsername} size="sm" />
+          <span className="truncate text-sm">@{c.authorUsername}</span>
+        </span>
+      ),
+    },
+    {
+      key: "game",
+      head: "On",
+      cell: (c) => (
+        <Link
+          to="/games/$id"
+          params={{ id: c.gameSlug }}
+          className="truncate text-sm text-muted-foreground hover:text-foreground hover:underline"
+        >
+          {c.gameTitle}
+        </Link>
+      ),
+    },
+    {
+      key: "engagement",
+      head: "Likes / reports",
+      className: "text-right",
+      cell: (c) => (
+        <span className="font-mono text-sm tabular">
+          {fmt(c.likes)} / {c.reports > 0 ? fmt(c.reports) : "0"}
+        </span>
+      ),
+    },
+    {
+      key: "when",
+      head: "Posted",
+      cell: (c) => (
+        <span className="text-xs text-muted-foreground">{formatAgo(c.createdAt) ?? "—"}</span>
+      ),
+    },
+    {
+      key: "state",
+      head: "State",
+      cell: (c) => (
+        <StatusBadge tone={c.isHidden ? "destructive" : "success"}>
+          {c.isHidden ? "hidden" : "visible"}
         </StatusBadge>
       ),
     },
     {
       key: "actions",
-      head: <span className="sr-only">Actions</span>,
-      className: "w-12 text-right",
+      head: "",
+      className: "w-36 text-right",
       cell: (c) => (
-        <div onClick={(e) => e.stopPropagation()}>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" aria-label="Comment actions">
-                <MoreHorizontal />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setDetail(c)}>View comment</DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() =>
-                  setConfirm(
-                    c.hidden ? { comment: c, kind: "unhide" } : { comment: c, kind: "hide" },
-                  )
-                }
-              >
-                {c.hidden ? (
-                  <>
-                    <Eye />
-                    Unhide comment
-                  </>
-                ) : (
-                  <>
-                    <EyeOff />
-                    Hide comment
-                  </>
-                )}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                className="text-destructive"
-                onClick={() => setConfirm({ comment: c, kind: "delete" })}
-              >
-                <Trash2 />
-                Delete comment
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+        <Button
+          variant={c.isHidden ? "secondary" : "ghost"}
+          size="sm"
+          disabled={busy === c.id}
+          onClick={() => setPending({ comment: c, hidden: !c.isHidden })}
+        >
+          {c.isHidden ? <Undo2 /> : <EyeOff />}
+          {c.isHidden ? "Restore" : "Hide"}
+        </Button>
       ),
     },
   ];
 
-  const author = detail ? users.find((u) => u.username === detail.user) : undefined;
-
   return (
     <AdminPage
       title="Comments"
-      subtitle={`${comments.filter((c) => c.reports > 0).length} reported comments need attention. Hide or delete anything that breaks the rules.`}
-      actions={
-        <div className="hidden md:block">
-          <StateSwitcher value={state} onChange={setState} />
-        </div>
+      subtitle={
+        overview.status === "ready"
+          ? `${fmt(overview.data.comments)} comments · ${fmt(overview.data.hiddenComments)} hidden. Hiding a comment keeps it in the database and hides it from players.`
+          : "Every comment, including hidden ones."
       }
     >
       <Toolbar>
         <SearchField
           value={q}
-          onChange={(v) => {
-            setQ(v);
-            setPage(1);
+          onChange={(value) => {
+            setQ(value);
+            setPage(0);
           }}
-          placeholder="Search comment, user or game"
           label="Search comments"
+          placeholder="Search the text"
         />
         <FilterSelect
-          label="Comment filter"
-          value={filter}
-          onChange={(v) => {
-            setFilter(v);
-            setPage(1);
+          label="Comment state"
+          value={state}
+          onChange={(value) => {
+            setState(value as CommentState);
+            setPage(0);
           }}
-          options={[
-            { value: "all", label: "All comments" },
-            { value: "reported", label: "Reported only" },
-            { value: "visible", label: "Visible" },
-            { value: "hidden", label: "Hidden" },
-          ]}
+          options={stateOptions}
         />
       </Toolbar>
 
-      {s === "loading" ? (
-        <ListSkeleton rows={8} />
-      ) : s === "error" ? (
-        <ErrorState onRetry={() => setState("ready")} />
-      ) : s === "empty" || filtered.length === 0 ? (
-        <AdminListStates
-          state="empty"
-          emptyTitle="No comments match"
-          emptyBody="Try another search term or filter."
-          action={
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setQ("");
-                setFilter("all");
-              }}
-            >
-              Clear filters
-            </Button>
-          }
-        />
+      {comments.status === "error" ? (
+        <SectionCard>
+          <AdminListStates
+            state="error"
+            onRetry={comments.retry}
+            emptyTitle=""
+            emptyBody={comments.error.message}
+          />
+        </SectionCard>
+      ) : comments.status === "loading" ? (
+        <AdminListStates state="loading" emptyTitle="" rows={8} />
+      ) : rows.length === 0 ? (
+        <SectionCard>
+          <AdminListStates
+            state="ready"
+            emptyTitle={
+              term
+                ? "No comment matches that"
+                : state === "hidden"
+                  ? "Nothing is hidden"
+                  : "No comments"
+            }
+            emptyBody={
+              term
+                ? "Try a different search."
+                : state === "hidden"
+                  ? "No comment has been hidden."
+                  : "Players have not commented yet."
+            }
+          />
+        </SectionCard>
       ) : (
         <>
           <AdminTable
             columns={columns}
-            rows={slice}
+            rows={rows}
             rowKey={(c) => c.id}
-            onRow={(c) => setDetail(c)}
             mobileRow={(c) => (
-              <MobileRow ariaLabel="Open comment" onClick={() => setDetail(c)}>
-                <Avatar name={c.user} size="sm" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm">{c.text}</p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    @{c.user} · {getGame(c.game).title} · {c.time}
-                  </p>
-                </div>
-                {c.reports > 0 && <StatusBadge tone="destructive">{c.reports}</StatusBadge>}
-                <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+              <MobileRow>
+                <Avatar name={c.authorUsername} size="sm" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm">{c.body}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    @{c.authorUsername} · {c.gameTitle} · {formatAgo(c.createdAt) ?? "—"}
+                  </span>
+                </span>
+                <StatusBadge tone={c.isHidden ? "destructive" : "success"}>
+                  {c.isHidden ? "hidden" : "visible"}
+                </StatusBadge>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={c.isHidden ? "Restore comment" : "Hide comment"}
+                  disabled={busy === c.id}
+                  onClick={() => setPending({ comment: c, hidden: !c.isHidden })}
+                >
+                  {c.isHidden ? <Undo2 /> : <EyeOff />}
+                </Button>
               </MobileRow>
             )}
           />
-          <Pager
+          <OffsetPager
             page={page}
-            pages={pages}
             setPage={setPage}
-            total={total}
-            perPage={perPage}
+            perPage={ADMIN_LIMIT}
+            rows={rows.length}
+            hasMore={hasMore}
             label="comments"
           />
         </>
       )}
 
-      {/* Comment detail */}
-      <Dialog open={!!detail} onOpenChange={(o) => !o && setDetail(null)}>
-        <DialogContent className="max-h-[88dvh] max-w-lg overflow-y-auto">
-          {detail && (
-            <>
-              <DialogHeader>
-                <DialogTitle>Comment</DialogTitle>
-                <DialogDescription>
-                  {getGame(detail.game).title} · {detail.time}
-                </DialogDescription>
-              </DialogHeader>
-              <blockquote className="rounded-xl border border-border bg-surface p-4 text-sm">
-                {detail.text}
-              </blockquote>
-              <div className="flex items-center gap-3">
-                <Avatar name={detail.user} />
-                <div className="min-w-0 flex-1">
-                  <UserName username={detail.user} verified={author?.verified} />
-                  <p className="truncate text-xs text-muted-foreground">
-                    {author?.name ?? "Player"} · {fmt(author?.followers ?? 0)} followers
-                  </p>
-                </div>
-                <Button asChild size="sm" variant="secondary">
-                  <Link to="/u/$username" params={{ username: detail.user }}>
-                    Profile
-                  </Link>
-                </Button>
-              </div>
-              <dl className="divide-y divide-border rounded-xl border border-border bg-surface px-4 py-1">
-                <MetaRow label="Likes">{fmt(detail.likes)}</MetaRow>
-                <MetaRow label="Reports">{detail.reports === 0 ? "None" : detail.reports}</MetaRow>
-                <MetaRow label="Status">
-                  <StatusBadge tone={detail.hidden ? "muted" : "success"}>
-                    {detail.hidden ? "hidden" : "visible"}
-                  </StatusBadge>
-                </MetaRow>
-              </dl>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() =>
-                    patch(
-                      detail.id,
-                      { hidden: !detail.hidden },
-                      detail.hidden ? "Comment unhidden" : "Comment hidden",
-                    )
-                  }
-                >
-                  {detail.hidden ? (
-                    <>
-                      <Eye />
-                      Unhide
-                    </>
-                  ) : (
-                    <>
-                      <EyeOff />
-                      Hide
-                    </>
-                  )}
-                </Button>
-                <Button asChild size="sm" variant="ghost">
-                  <Link to="/games/$id" params={{ id: detail.game }}>
-                    <MessageSquare />
-                    Open game
-                  </Link>
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="text-destructive"
-                  onClick={() => setConfirm({ comment: detail, kind: "delete" })}
-                >
-                  <Trash2 />
-                  Delete
-                </Button>
-              </div>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      <ConfirmDialog
-        open={!!confirm}
-        onOpenChange={(o) => !o && setConfirm(null)}
-        title={
-          confirm?.kind === "delete"
-            ? "Delete this comment?"
-            : confirm?.kind === "hide"
-              ? "Hide this comment?"
-              : "Unhide this comment?"
-        }
+      <PromptDialog
+        open={pending !== null}
+        onOpenChange={(open) => !open && setPending(null)}
+        title={pending?.hidden ? "Hide this comment" : "Restore this comment"}
         description={
-          confirm?.kind === "delete"
-            ? `The comment from @${confirm.comment.user} will be permanently removed and every report on it closed.`
-            : confirm?.kind === "hide"
-              ? "The comment stays on record for moderators but disappears for everyone else."
-              : "The comment will be visible again to all players."
+          pending ? (
+            <>
+              <span className="flex items-center gap-2">
+                <MessageSquare className="size-4 shrink-0" />
+                <span className="line-clamp-2">{pending.comment.body}</span>
+              </span>
+              <span className="mt-2 block">
+                {pending.hidden
+                  ? "It stays in the database and disappears from the game page. The reason is stored with the decision."
+                  : "It becomes visible again on the game page. The reason is stored with the decision."}
+              </span>
+            </>
+          ) : undefined
         }
-        confirmLabel={
-          confirm?.kind === "delete"
-            ? "Delete comment"
-            : confirm?.kind === "hide"
-              ? "Hide comment"
-              : "Unhide"
-        }
-        destructive={confirm?.kind !== "unhide"}
-        onConfirm={() => {
-          if (!confirm) return;
-          if (confirm.kind === "delete") {
-            setComments((list) => list.filter((c) => c.id !== confirm.comment.id));
-            setDetail(null);
-            toast.success("Comment deleted");
-          } else {
-            patch(
-              confirm.comment.id,
-              { hidden: confirm.kind === "hide" },
-              confirm.kind === "hide" ? "Comment hidden" : "Comment unhidden",
-            );
-          }
-          setConfirm(null);
+        label="Reason"
+        confirmLabel={pending?.hidden ? "Hide" : "Restore"}
+        destructive={pending?.hidden}
+        onConfirm={(reason) => {
+          if (pending) decide(pending.comment, pending.hidden, reason);
+          setPending(null);
         }}
       />
     </AdminPage>

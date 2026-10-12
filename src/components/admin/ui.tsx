@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, Search, X } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { EmptyState, ErrorState, ListSkeleton } from "@/components/common";
 import {
   AlertDialog,
@@ -407,6 +407,48 @@ export function AdminListStates({
   return <EmptyState title={emptyTitle} body={emptyBody} action={action} />;
 }
 
+/**
+ * A screen whose feature has no backend yet.
+ *
+ * Used where the prototype showed invented rows and working buttons. The panel
+ * states what exists, what does not, and what would have to be built — which is
+ * more useful to an operator than a list of games that were never featured.
+ */
+export function UnavailablePanel({
+  icon: Icon,
+  title,
+  body,
+  points,
+  action,
+}: {
+  icon: typeof Search;
+  title: string;
+  body: string;
+  points?: string[];
+  action?: ReactNode;
+}) {
+  return (
+    <div className="enter rounded-xl border border-border bg-surface px-6 py-14 text-center">
+      <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-full bg-surface-2">
+        <Icon className="size-5 text-muted-foreground" strokeWidth={1.75} />
+      </div>
+      <p className="font-medium">{title}</p>
+      <p className="mx-auto mt-1 max-w-lg text-sm text-muted-foreground">{body}</p>
+      {points && points.length > 0 && (
+        <ul className="mx-auto mt-5 max-w-md space-y-2 text-left text-sm text-muted-foreground">
+          {points.map((point) => (
+            <li key={point} className="flex gap-2">
+              <span aria-hidden className="mt-2 size-1 shrink-0 rounded-full bg-muted-foreground" />
+              <span>{point}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {action && <div className="mt-6 flex flex-wrap justify-center gap-2">{action}</div>}
+    </div>
+  );
+}
+
 /* --------------------------------------------------------------- pagination */
 
 export function usePaged<T>(rows: T[], perPage = 8) {
@@ -415,6 +457,74 @@ export function usePaged<T>(rows: T[], perPage = 8) {
   const current = Math.min(page, pages);
   const slice = rows.slice((current - 1) * perPage, current * perPage);
   return { page: current, setPage, pages, slice, total: rows.length, perPage };
+}
+
+/**
+ * Server-side paging: one page of rows at a time, read from the API.
+ *
+ * The admin API pages by `limit`/`offset` and reports whether another page
+ * exists; there is no total, because counting every row to display a page number
+ * would cost more than the page. So this renders a range, not a page count.
+ */
+export function OffsetPager({
+  page,
+  setPage,
+  perPage,
+  rows,
+  hasMore,
+  label = "rows",
+}: {
+  page: number;
+  setPage: (p: number) => void;
+  perPage: number;
+  rows: number;
+  hasMore: boolean;
+  label?: string;
+}) {
+  if (page === 0 && !hasMore) return null;
+  const from = rows === 0 ? 0 : page * perPage + 1;
+  const to = page * perPage + rows;
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 pt-3">
+      <p className="text-xs text-muted-foreground tabular">
+        {rows === 0 ? `No ${label} on this page` : `Showing ${from}–${to} ${label}`}
+      </p>
+      <div className="flex items-center gap-1">
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Previous page"
+          disabled={page === 0}
+          onClick={() => setPage(Math.max(0, page - 1))}
+        >
+          <ChevronLeft />
+        </Button>
+        <span className="px-2 text-xs text-muted-foreground tabular">page {page + 1}</span>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Next page"
+          disabled={!hasMore}
+          onClick={() => setPage(page + 1)}
+        >
+          <ChevronRight />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Delays a value until typing settles, so a filter box is one request rather
+ * than one per keystroke.
+ */
+export function useDebounced<T>(value: T, ms = 300): T {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(value), ms);
+    return () => clearTimeout(timer);
+  }, [value, ms]);
+  return settled;
 }
 
 export function Pager({
