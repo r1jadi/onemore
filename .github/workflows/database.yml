@@ -55,8 +55,13 @@ jobs:
       - name: Install psql
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
 
+      # Invoked through bash rather than as an executable: this repository is
+      # developed on Windows, where git does not record the executable bit
+      # (core.fileMode is false), so relying on './scripts/test-rls.sh' fails
+      # here with "Permission denied". The mode is set on the file as well, for
+      # anyone running it from a POSIX checkout.
       - name: Apply migrations, seed and RLS suite
-        run: ./scripts/test-rls.sh
+        run: bash ./scripts/test-rls.sh
 
       # The seed runs after every migration during `supabase db reset`, so it
       # must be safe to apply repeatedly.

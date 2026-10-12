@@ -20,7 +20,12 @@ max_rows = 1000
 [db]
 port = 54322
 shadow_port = 54320
-major_version = 16
+# 17, not 16: the CLI validates this against the Postgres majors its local stack
+# ships (13/14/15/17 — 16 is skipped) and rejects 16 outright, both locally and
+# in the Supabase Preview check. 16 is still the version the migrations and the
+# RLS suite are written and tested against: .github/workflows/database.yml and
+# scripts/test-rls.sh pin it.
+major_version = 17
 
 [db.pooler]
 enabled = false
