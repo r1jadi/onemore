@@ -1,24 +1,16 @@
 /**
- * Prototype fixtures for the features that have no backend yet.
+ * Retired prototype fixtures. No production route or component imports this
+ * module (enforced by `src/test/stabilization.test.tsx`); it is kept so the
+ * history of what was removed stays reviewable, and so the catalogue test can
+ * assert the game fixtures were not re-added.
  *
- * This module used to hold the game catalogue too. It no longer does: the
- * catalogue is real, served by `services/games` and read through
- * `@/lib/games/catalog`. The seven fabricated games it held — with invented play
- * counts, likes, comment totals, scores, session times and creators — are gone
- * rather than hidden behind a flag, because a screen that can fall back to them
- * is a screen that can show a fabrication as a fact.
- *
- * What remains is what genuinely belongs to unfinished features, and every one of
- * them is a separate phase:
- *
- *   - **public profiles and the follow graph** — there is no public profile
- *     endpoint; `services/users` serves only the caller's own `/users/me`.
- *   - **comments** — no comments service.
- *   - **notifications** — no notifications service.
- *   - **achievements** — nothing records them.
- *
- * Anything here is a placeholder for a feature that does not exist. Nothing that
- * the catalogue API can answer belongs in this file.
+ * Follows, profiles, notifications and search are now real, backed by Supabase
+ * RLS tables (`public.follows`, `public.profiles`, `public.notifications`,
+ * `public.user_preferences`, `public.blocked_users`) and read through
+ * `@/lib/social/follows`, `@/lib/notifications/store` and
+ * `@/lib/supabase/rest`. Comments, achievements, saves and activity feeds have
+ * no backend and are rendered as honest empty/unavailable states instead of
+ * these fixtures.
  */
 
 export type User = {

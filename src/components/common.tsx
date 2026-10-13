@@ -117,21 +117,99 @@ export function UserName({ username, verified }: { username: string; verified?: 
 export function FollowButton({
   initial = false,
   size = "sm",
+  username,
+  userId,
 }: {
   initial?: boolean;
   size?: "sm" | "default";
+  /** Preferred: the target account id. Falls back to resolving `username`. */
+  userId?: string;
+  username?: string;
 }) {
-  const [on, setOn] = useState(initial);
+  const [resolvedId, setResolvedId] = useState<string | undefined>(userId);
+  const [localInitial, setLocalInitial] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+
+  useEffect(() => {
+    if (userId) {
+      setResolvedId(userId);
+      return;
+    }
+    if (!username) return;
+    let cancelled = false;
+    import("@/lib/social/follows").then(({ resolveUserId }) =>
+      resolveUserId(username)
+        .then((id) => {
+          if (!cancelled && id) setResolvedId(id);
+        })
+        .catch(() => undefined),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, username]);
+
+  async function toggle() {
+    if (!resolvedId) {
+      // No target to follow yet (still resolving, or unknown user): resolving
+      // the username is the only honest action; a visual toggle would lie.
+      if (username) {
+        setBusy(true);
+        try {
+          const { resolveUserId, followUser } = await import("@/lib/social/follows");
+          const id = await resolveUserId(username);
+          if (!id) {
+            setError("That account could not be found.");
+            return;
+          }
+          setResolvedId(id);
+          await followUser(id);
+          setLocalInitial(true);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Couldn't update the follow.");
+        } finally {
+          setBusy(false);
+        }
+      }
+      return;
+    }
+    setBusy(true);
+    setError(undefined);
+    try {
+      const { followUser, unfollowUser } = await import("@/lib/social/follows");
+      if (localInitial) {
+        await unfollowUser(resolvedId);
+        setLocalInitial(false);
+      } else {
+        await followUser(resolvedId);
+        setLocalInitial(true);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't update the follow.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <Button
-      size={size}
-      variant={on ? "secondary" : "default"}
-      aria-pressed={on}
-      onClick={() => setOn(!on)}
-      className="min-w-24"
-    >
-      {on ? "Following" : "Follow"}
-    </Button>
+    <span className="inline-flex flex-col items-end gap-1">
+      <Button
+        size={size}
+        variant={localInitial ? "secondary" : "default"}
+        aria-pressed={localInitial}
+        onClick={() => void toggle()}
+        disabled={busy}
+        className="min-w-24"
+      >
+        {localInitial ? "Following" : "Follow"}
+      </Button>
+      {error && (
+        <span className="text-xs text-destructive" role="alert">
+          {error}
+        </span>
+      )}
+    </span>
   );
 }
 

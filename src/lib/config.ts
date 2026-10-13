@@ -28,7 +28,27 @@ function readEnv(value: unknown): string {
  * Base URL for the versioned API. Empty configuration means same-origin
  * `/api/v1`, which is how production is expected to be wired (the gateway
  * fronts the web origin); local development points at the gateway directly.
+ *
+ * Fail-safe: a `localhost` absolute URL baked into a production bundle (for
+ * example from a local `.env.local` at build time) can never work for a
+ * visitor, and surfaces as a network failure ("Could not reach the server").
+ * When the page itself is not on localhost, such a value is ignored in favour
+ * of same-origin. This is a client-side guard only — the deployment must still
+ * set `VITE_API_BASE_URL` correctly (see `.env.example`).
  */
+function isLocalHost(host: string): boolean {
+  const h = host.toLowerCase();
+  return h === "localhost" || h === "127.0.0.1" || h === "::1" || h.endsWith(".localhost");
+}
+
+function currentHost(): string {
+  try {
+    return globalThis.location?.hostname ?? "";
+  } catch {
+    return "";
+  }
+}
+
 function resolveApiBaseUrl(): string {
   const raw = readEnv(import.meta.env?.["VITE_API_BASE_URL"]);
   if (raw === "") return DEFAULT_API_PATH;
@@ -36,6 +56,11 @@ function resolveApiBaseUrl(): string {
   try {
     const url = new URL(raw);
     if (url.protocol !== "https:" && url.protocol !== "http:") return DEFAULT_API_PATH;
+    // A localhost API URL is only usable from a localhost page. Production
+    // visitors would otherwise see every API call fail as a network error.
+    if (isLocalHost(url.hostname) && currentHost() !== "" && !isLocalHost(currentHost())) {
+      return DEFAULT_API_PATH;
+    }
     return url.href.replace(/\/+$/, "");
   } catch {
     return DEFAULT_API_PATH;

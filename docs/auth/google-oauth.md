@@ -1,0 +1,63 @@
+# Google sign-in (Supabase OAuth, PKCE)
+
+Code implements the full flow; the provider credentials and dashboard switch
+must be done manually by the owner. Nothing is simulated and no secret lives in
+the frontend.
+
+## How it works in code
+
+- Entry: `Continue with Google` on login/signup and `Connect` in
+  Settings → Connected accounts redirect to
+  `<SUPABASE>/auth/v1/authorize?provider=google&redirect_to=<SITE>/auth/callback?next=…`
+  with a fresh PKCE verifier in `sessionStorage` (`googleAuthorizeUrl` in
+  `src/lib/auth/session.ts`).
+- Callback: `/auth/callback` exchanges `?code` via
+  `POST <SUPABASE>/auth/v1/token?grant_type=pkce` with the stored verifier,
+  then verifies the tokens through `POST /api/v1/auth/session` before adopting
+  them. Cancellation (`?error=access_denied`) and missing verifiers show
+  specific messages. Parameters are stripped from the URL.
+- Profiles: OAuth users get a row from the existing `handle_new_user` trigger;
+  no email-based auto-linking is performed, so Google cannot take over an
+  address it does not own.
+- Connected state: Settings → Connected accounts reads live identities from
+  `GET <SUPABASE>/auth/v1/user` (`fetchLinkedProviders`). Google shows
+  connected only when the provider is linked; Apple shows unavailable until a
+  genuine Apple flow is configured.
+
+## Manual setup (owner)
+
+### 1. Google Cloud console (one OAuth client)
+
+1. APIs & Services → Credentials → Create Credentials → OAuth client ID →
+   Application type **Web application**.
+2. Authorized JavaScript origins:
+   - `https://onemorestartup.vercel.app`
+   - `https://dmqrdtoigbzcgmwskmhl.supabase.co`
+3. Authorized redirect URIs (exact, Supabase callback):
+   - `https://dmqrdtoigbzcgmwskmhl.supabase.co/auth/v1/callback`
+4. Keep the client secret in the Google console; it is entered in Supabase, not
+   in this repo.
+
+### 2. Supabase dashboard
+
+1. Authentication → Providers → Google → Enable.
+2. Paste the Google **Client ID** and **Client secret**.
+3. Authentication → URL Configuration → Site URL:
+   `https://onemorestartup.vercel.app`.
+4. Redirect URLs: add `https://onemorestartup.vercel.app/auth/callback`
+   (and preview variants as needed).
+
+### 3. Verify
+
+- Click Continue with Google, complete consent, expect `/auth/callback` → `/`.
+- Cancel at Google, expect the cancelled message, no session.
+- Settings → Connected accounts must show Google connected afterwards.
+
+## Not done
+
+- Apple OAuth is intentionally not configured; the UI says unavailable and the
+  login button explains it. Do not mark Apple connected until a real flow and
+  credentials exist.
+- Production Google login must not be claimed as enabled until the steps above
+  are completed and verified in production (local tests only prove the code
+  paths).

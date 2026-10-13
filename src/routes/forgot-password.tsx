@@ -3,6 +3,7 @@ import { MailCheck } from "lucide-react";
 import { useState } from "react";
 import { AuthLayout, Field } from "@/components/auth/AuthLayout";
 import { Button } from "@/components/ui/button";
+import { publicConfig } from "@/lib/config";
 import { seo } from "@/lib/seo";
 
 export const Route = createFileRoute("/forgot-password")({
@@ -10,8 +11,43 @@ export const Route = createFileRoute("/forgot-password")({
   component: Forgot,
 });
 
+/**
+ * Password recovery via Supabase Auth. The email contains a recovery link that
+ * lands on `/auth/callback` and then on `/reset-password`; this screen never
+ * invents a "sent" state without calling the API.
+ */
 function Forgot() {
   const [sent, setSent] = useState(false);
+  const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+
+  async function submit(email: string) {
+    setError(undefined);
+    setBusy(true);
+    try {
+      const base = publicConfig.supabase.url.replace(/\/+$/, "");
+      const key = publicConfig.supabase.publishableKey;
+      if (base === "" || key === "") {
+        throw new Error("Password recovery is not configured for this deployment.");
+      }
+      const redirectTo = new URL("/auth/callback", window.location.origin);
+      redirectTo.searchParams.set("next", "/reset-password");
+      const response = await fetch(`${base}/auth/v1/recover`, {
+        method: "POST",
+        headers: { apikey: key, "Content-Type": "application/json" },
+        body: JSON.stringify({ email, options: { redirectTo: redirectTo.toString() } }),
+      });
+      if (!response.ok) {
+        throw new Error("We could not send the reset email. Try again shortly.");
+      }
+      setSent(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (sent)
     return (
       <AuthLayout
@@ -22,8 +58,8 @@ function Forgot() {
           <MailCheck className="size-12 text-muted-foreground" strokeWidth={1.5} />
         </div>
         <div className="mt-auto space-y-2 lg:mt-4">
-          <Button asChild variant="play" size="xl" className="w-full">
-            <Link to="/reset-password">Open reset link (demo)</Link>
+          <Button asChild variant="secondary" size="lg" className="w-full">
+            <Link to="/login">Back to log in</Link>
           </Button>
           <Button variant="ghost" size="lg" className="w-full" onClick={() => setSent(false)}>
             Use a different email
@@ -45,11 +81,28 @@ function Forgot() {
         className="flex flex-1 flex-col"
         onSubmit={(e) => {
           e.preventDefault();
-          setSent(true);
+          const f = new FormData(e.currentTarget);
+          const email = String(f.get("email") ?? "").trim();
+          if (email === "") {
+            setError("Enter your email address.");
+            return;
+          }
+          void submit(email);
         }}
       >
-        <Field id="email" type="email" label="Email" required autoComplete="email" />
-        <Button type="submit" variant="play" size="xl" className="mt-auto w-full lg:mt-6">
+        <Field id="email" name="email" type="email" label="Email" required autoComplete="email" />
+        {error && (
+          <p className="mt-3 text-sm text-destructive" role="alert">
+            {error}
+          </p>
+        )}
+        <Button
+          type="submit"
+          variant="play"
+          size="xl"
+          className="mt-auto w-full lg:mt-6"
+          disabled={busy}
+        >
           Send reset link
         </Button>
       </form>

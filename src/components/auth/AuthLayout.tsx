@@ -103,14 +103,38 @@ export function Field({
   );
 }
 
-export function SocialButtons() {
+export function SocialButtons({ next }: { next?: string } = {}) {
   return (
     <>
       <div className="grid gap-2">
-        <Button variant="secondary" size="lg" type="button">
+        <Button
+          variant="secondary"
+          size="lg"
+          type="button"
+          onClick={() => {
+            // Apple OAuth is not configured: the button is honest about that
+            // rather than simulating a provider response.
+            window.alert("Apple sign-in is not available yet. Use Google or email.");
+          }}
+          aria-describedby="apple-unavailable"
+        >
           Continue with Apple
         </Button>
-        <Button variant="secondary" size="lg" type="button">
+        <span id="apple-unavailable" className="sr-only">
+          Apple sign-in is unavailable until the provider is configured.
+        </span>
+        <Button
+          variant="secondary"
+          size="lg"
+          type="button"
+          onClick={() => {
+            // Real Supabase Google OAuth (PKCE). Failures surface on the
+            // callback screen, never as a simulated success.
+            import("@/lib/auth/session").then(({ googleAuthorizeUrl }) => {
+              window.location.href = googleAuthorizeUrl(next ?? "/");
+            });
+          }}
+        >
           Continue with Google
         </Button>
       </div>

@@ -3,6 +3,7 @@ import { Check } from "lucide-react";
 import { useState } from "react";
 import { AuthLayout, Field } from "@/components/auth/AuthLayout";
 import { Button } from "@/components/ui/button";
+import { changePassword, getAuthState } from "@/lib/auth/session";
 import { seo } from "@/lib/seo";
 
 export const Route = createFileRoute("/reset-password")({
@@ -10,11 +11,35 @@ export const Route = createFileRoute("/reset-password")({
   component: Reset,
 });
 
+/**
+ * Sets a new password for the recovery session established by the callback.
+ * Without a session (link never opened, expired, or opened in another browser)
+ * the screen says so instead of pretending to update a password.
+ */
 function Reset() {
   const [a, setA] = useState("");
   const [b, setB] = useState("");
   const [done, setDone] = useState(false);
+  const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
   const mismatch = b.length > 0 && a !== b;
+  const signedIn = getAuthState().status === "authenticated";
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (a.length < 8 || mismatch) return;
+    setError(undefined);
+    setBusy(true);
+    try {
+      await changePassword(a);
+      setDone(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (done)
     return (
       <AuthLayout
@@ -34,13 +59,13 @@ function Reset() {
     );
   return (
     <AuthLayout title="Set a new password" subtitle="Use at least 8 characters.">
-      <form
-        className="flex flex-1 flex-col"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (a.length >= 8 && !mismatch) setDone(true);
-        }}
-      >
+      {!signedIn && (
+        <p className="mb-4 rounded-lg bg-surface p-3 text-sm text-muted-foreground" role="note">
+          Open the reset link from your email first — it signs you in so this screen can set the new
+          password. Links expire; use the newest one.
+        </p>
+      )}
+      <form className="flex flex-1 flex-col" onSubmit={submit}>
         <div className="space-y-4">
           <Field
             id="new"
@@ -49,7 +74,7 @@ function Reset() {
             value={a}
             onChange={(e) => setA(e.target.value)}
             autoComplete="new-password"
-            error={a && a.length < 8 ? "Too short." : undefined}
+            error={a && a.length < 8 ? "Use at least 8 characters." : undefined}
           />
           <Field
             id="confirm"
@@ -61,12 +86,17 @@ function Reset() {
             error={mismatch ? "Passwords don't match." : undefined}
           />
         </div>
+        {error && (
+          <p className="mt-3 text-sm text-destructive" role="alert">
+            {error}
+          </p>
+        )}
         <Button
           type="submit"
           variant="play"
           size="xl"
           className="mt-auto w-full lg:mt-6"
-          disabled={a.length < 8 || a !== b}
+          disabled={a.length < 8 || a !== b || busy || !signedIn}
         >
           Update password
         </Button>

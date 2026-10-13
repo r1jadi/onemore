@@ -1,63 +1,129 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Bell, Heart, MessageCircle, Settings, Trophy, UserPlus, Zap } from "lucide-react";
 import { useState } from "react";
-import {
-  Avatar,
-  EmptyState,
-  ErrorState,
-  FollowButton,
-  ListSkeleton,
-  Page,
-  PageHeader,
-  StateSwitcher,
-  useMockLoad,
-} from "@/components/common";
+import { EmptyState, ErrorState, ListSkeleton, Page, PageHeader } from "@/components/common";
 import { Button } from "@/components/ui/button";
-import { notifications, type Notification } from "@/lib/mock";
+import {
+  describeNotification,
+  markAllRead,
+  useNotifications,
+  type AppNotification,
+} from "@/lib/notifications/store";
 import { seo } from "@/lib/seo";
 import { cn } from "@/lib/utils";
+import { formatAgo } from "@/lib/admin/api";
 
 export const Route = createFileRoute("/notifications")({
   head: () => seo("Notifications", "Follows, comments, likes and score updates."),
   component: Notifications,
 });
 
-const icon: Record<Notification["type"], typeof Bell> = {
+const icon: Record<AppNotification["kind"], typeof Bell> = {
   like: Heart,
   follow: UserPlus,
   comment: MessageCircle,
-  beat: Zap,
-  rank: Trophy,
+  score: Zap,
+  moderation: Trophy,
   system: Bell,
 };
-const filters = ["All", "Scores", "Social", "Comments"];
 
+const filters = ["All", "Scores", "Social", "Comments"] as const;
+
+function matchesFilter(item: AppNotification, filter: (typeof filters)[number]): boolean {
+  switch (filter) {
+    case "All":
+      return true;
+    case "Scores":
+      return item.kind === "score";
+    case "Social":
+      return item.kind === "follow" || item.kind === "like";
+    case "Comments":
+      return item.kind === "comment";
+    default:
+      return true;
+  }
+}
+
+/**
+ * Real inbox: rows from `public.notifications` for the signed-in user. Guests
+ * get a sign-in prompt, an empty inbox gets a clean empty state, and a failure
+ * gets a retry — never fixture rows and never another user's count.
+ */
 function Notifications() {
-  const loading = useMockLoad();
-  const [items, setItems] = useState(notifications);
-  const [filter, setFilter] = useState("All");
-  const [state, setState] = useState("ready");
-  const list = items.filter(
-    (n) =>
-      filter === "All" ||
-      (filter === "Scores" && ["beat", "rank"].includes(n.type)) ||
-      (filter === "Social" && ["follow", "like"].includes(n.type)) ||
-      (filter === "Comments" && n.type === "comment"),
-  );
+  const state = useNotifications();
+  const [filter, setFilter] = useState<(typeof filters)[number]>("All");
+  const [marking, setMarking] = useState(false);
+
+  if (state.status === "anonymous") {
+    return (
+      <Page>
+        <PageHeader title="Notifications" />
+        <EmptyState
+          icon={Bell}
+          title="Sign in to see notifications"
+          body="Follows, comments and score updates show up here once you're signed in."
+          action={
+            <Button asChild>
+              <Link to="/login" search={{ redirect: "/notifications" }}>
+                Log in
+              </Link>
+            </Button>
+          }
+        />
+      </Page>
+    );
+  }
+
+  if (state.status === "loading") {
+    return (
+      <Page>
+        <PageHeader title="Notifications" />
+        <ListSkeleton />
+      </Page>
+    );
+  }
+
+  if (state.status === "error") {
+    return (
+      <Page>
+        <PageHeader title="Notifications" />
+        <ErrorState
+          title="Couldn't load notifications"
+          body={state.error.message}
+          onRetry={state.retry}
+        />
+      </Page>
+    );
+  }
+
+  const list = state.items.filter((item) => matchesFilter(item, filter));
+  const unread = state.items.filter((item) => !item.readAt).length;
+
+  async function markAll() {
+    if (marking || unread === 0) return;
+    setMarking(true);
+    try {
+      await markAllRead();
+      state.retry();
+    } catch {
+      // The error surfaces on the next read; the button stays available.
+    } finally {
+      setMarking(false);
+    }
+  }
 
   return (
     <Page>
       <PageHeader
         title="Notifications"
+        subtitle={unread > 0 ? `${unread} unread` : undefined}
         actions={
           <>
-            <div className="hidden md:block">
-              <StateSwitcher value={state} onChange={setState} />
-            </div>
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setItems(items.map((n) => ({ ...n, unread: false })))}
+              onClick={() => void markAll()}
+              disabled={marking || unread === 0}
             >
               Mark all read
             </Button>
@@ -92,11 +158,7 @@ function Notifications() {
           Your activity
         </Link>
       </div>
-      {loading || state === "loading" ? (
-        <ListSkeleton />
-      ) : state === "error" ? (
-        <ErrorState onRetry={() => setState("ready")} />
-      ) : state === "empty" || list.length === 0 ? (
+      {list.length === 0 ? (
         <EmptyState
           icon={Bell}
           title="You're all caught up"
@@ -104,58 +166,51 @@ function Notifications() {
         />
       ) : (
         <ul>
-          {list.map((n) => {
-            const Icon = icon[n.type];
+          {list.map((item) => {
+            const Icon = icon[item.kind];
+            const actor =
+              typeof item.payload["username"] === "string"
+                ? (item.payload["username"] as string)
+                : undefined;
+            const game =
+              typeof item.payload["game"] === "string"
+                ? (item.payload["game"] as string)
+                : undefined;
             return (
               <li
-                key={n.id}
+                key={item.id}
                 className={cn(
                   "enter flex items-center gap-3 px-4 py-3 md:rounded-lg md:px-3",
-                  n.unread && "bg-surface",
+                  !item.readAt && "bg-surface",
                 )}
               >
                 <div className="relative">
-                  {n.user ? (
-                    <Avatar name={n.user} />
-                  ) : (
-                    <span className="flex size-10 items-center justify-center rounded-full bg-surface-2">
-                      <Icon className="size-4" />
-                    </span>
-                  )}
-                  {n.user && (
-                    <span className="absolute -right-1 -bottom-1 flex size-5 items-center justify-center rounded-full border-2 border-background bg-surface-2">
-                      <Icon className="size-2.5" />
-                    </span>
-                  )}
+                  <span className="flex size-10 items-center justify-center rounded-full bg-surface-2">
+                    <Icon className="size-4" />
+                  </span>
                 </div>
                 <p className="min-w-0 flex-1 text-sm">
-                  {n.user && (
-                    <Link to="/u/$username" params={{ username: n.user }} className="font-medium">
-                      @{n.user}{" "}
+                  {actor && (
+                    <Link to="/u/$username" params={{ username: actor }} className="font-medium">
+                      @{actor}{" "}
                     </Link>
                   )}
-                  <span className={n.user ? "text-muted-foreground" : ""}>{n.text}</span>
-                  <span className="text-muted-foreground"> · {n.time}</span>
+                  <span className={actor ? "text-muted-foreground" : ""}>
+                    {describeNotification(item)}
+                  </span>
+                  <span className="text-muted-foreground">
+                    {" "}
+                    · {formatAgo(item.createdAt) ?? "recently"}
+                  </span>
                 </p>
-                {n.type === "follow" ? (
-                  <FollowButton />
-                ) : (
-                  n.game && (
-                    <Button asChild size="sm" variant={n.type === "beat" ? "default" : "secondary"}>
-                      // The slug is the catalogue's own identifier, so the link // resolves against
-                      the real API on the game page. The // label is generic: a notification carries
-                      a slug, not a // title, and looking one up from a fixture would be reading //
-                      catalogue data from a placeholder.
-                      <Link
-                        to={n.type === "beat" ? "/play/$id" : "/games/$id"}
-                        params={{ id: n.game }}
-                      >
-                        {n.type === "beat" ? "Beat it" : "Open"}
-                      </Link>
-                    </Button>
-                  )
+                {game && (
+                  <Button asChild size="sm" variant="secondary">
+                    <Link to="/games/$id" params={{ id: game }}>
+                      Open
+                    </Link>
+                  </Button>
                 )}
-                {n.unread && (
+                {!item.readAt && (
                   <span className="size-2 rounded-full bg-primary" aria-label="Unread" />
                 )}
               </li>

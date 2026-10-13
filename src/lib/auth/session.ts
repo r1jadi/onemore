@@ -17,6 +17,7 @@
 import { useSyncExternalStore } from "react";
 
 import { ApiError, apiFetch } from "@/lib/api/client";
+import { publicConfig } from "@/lib/config";
 
 /** Routes implemented by `services/auth`. Kept together so they cannot drift. */
 const Routes = {
@@ -140,6 +141,251 @@ export function signUp(email: string, password: string): Promise<AuthSession> {
     method: "POST",
     body: { email, password },
   }).then(adopt);
+}
+
+function supabaseAuthBase(): { url: string; publishableKey: string } {
+  const url = publicConfig.supabase.url.replace(/\/+$/, "");
+  const publishableKey = publicConfig.supabase.publishableKey;
+  if (url === "" || publishableKey === "") {
+    throw new Error(
+      "Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY (see .env.example).",
+    );
+  }
+  return { url, publishableKey };
+}
+
+/** Asks Supabase to re-send the confirmation email for an unconfirmed address. */
+export async function resendConfirmation(email: string): Promise<void> {
+  const { url, publishableKey } = supabaseAuthBase();
+  const response = await fetch(`${url}/auth/v1/resend`, {
+    method: "POST",
+    headers: {
+      apikey: publishableKey,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ type: "signup", email }),
+  });
+  if (!response.ok) {
+    throw new ApiError("We could not re-send the confirmation email. Try again shortly.", {
+      code: "resend_failed",
+      status: response.status,
+    });
+  }
+}
+
+/**
+ * Verifies a Supabase email-confirmation link (`token_hash` + `type`) and
+ * returns the Supabase token pair. This is the link format Supabase sends for
+ * signup confirmation; no six-digit code is involved.
+ */
+export async function verifyEmailLink(
+  tokenHash: string,
+  type: string,
+): Promise<{ accessToken: string; refreshToken: string }> {
+  const { url, publishableKey } = supabaseAuthBase();
+  const response = await fetch(`${url}/auth/v1/verify`, {
+    method: "POST",
+    headers: {
+      apikey: publishableKey,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ token_hash: tokenHash, type }),
+  });
+  if (!response.ok) {
+    throw new ApiError("That confirmation link is invalid or has expired. Request a new one.", {
+      code: "invalid_confirmation",
+      status: response.status,
+    });
+  }
+  const payload = (await response.json()) as {
+    access_token?: string;
+    refresh_token?: string;
+  };
+  if (!payload.access_token || !payload.refresh_token) {
+    throw new ApiError("That confirmation link is invalid or has expired. Request a new one.", {
+      code: "invalid_confirmation",
+      status: 400,
+    });
+  }
+  return { accessToken: payload.access_token, refreshToken: payload.refresh_token };
+}
+
+/**
+ * Exchanges a verified Supabase access token for the application session and
+ * adopts the returned token pair. `POST /auth/session` verifies the token
+ * server-side, so an arbitrary URL parameter can never count as proof of
+ * authentication — only a token Supabase issued and the backend verified does.
+ */
+export async function adoptSupabaseTokens(input: {
+  accessToken: string;
+  refreshToken: string;
+  expiresIn?: number;
+}): Promise<AuthSession> {
+  const view = await apiFetch<Session>(Routes.session, {
+    method: "POST",
+    body: { accessToken: input.accessToken },
+  });
+  tokens = {
+    accessToken: input.accessToken,
+    refreshToken: input.refreshToken,
+    tokenType: "bearer",
+    expiresIn: input.expiresIn,
+  };
+  publish({ status: "authenticated", session: view });
+  return { session: view, tokens: tokens as Tokens };
+}
+
+/** The Supabase OAuth entry point for Google sign-in/up (PKCE, no secrets). */
+export function googleAuthorizeUrl(next = "/"): string {
+  const { url, publishableKey } = supabaseAuthBase();
+  const redirectTo = new URL("/auth/callback", window.location.origin);
+  redirectTo.searchParams.set("next", next);
+  // PKCE: generate a verifier now and keep it for the callback exchange. It is
+  // a single-use random value in sessionStorage, never a long-lived token.
+  const verifier = randomVerifier();
+  try {
+    sessionStorage.setItem("onemore-oauth-verifier", verifier);
+  } catch {
+    // Storage may be unavailable (private mode); the callback then reports a
+    // clear error instead of silently failing.
+  }
+  void codeChallenge(verifier).then((challenge) => {
+    try {
+      sessionStorage.setItem("onemore-oauth-challenge", challenge);
+    } catch {
+      // Ignored: the verifier is what the exchange needs.
+    }
+  });
+  const authorize = new URL(`${url}/auth/v1/authorize`);
+  authorize.searchParams.set("provider", "google");
+  authorize.searchParams.set("redirect_to", redirectTo.toString());
+  // `apikey` is required by the Supabase Auth gateway for authorize calls.
+  void publishableKey;
+  return authorize.toString();
+}
+
+function randomVerifier(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+async function codeChallenge(verifier: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+  const bytes = new Uint8Array(digest);
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+/**
+ * Exchanges an OAuth authorization `code` for Supabase tokens (PKCE) and then
+ * for the application session. Rejects when the verifier is missing (a fresh
+ * tab, cleared storage) rather than inventing a session.
+ */
+export async function exchangeOAuthCode(code: string): Promise<AuthSession> {
+  const { url, publishableKey } = supabaseAuthBase();
+  let verifier: string | null = null;
+  try {
+    verifier = sessionStorage.getItem("onemore-oauth-verifier");
+  } catch {
+    verifier = null;
+  }
+  if (!verifier) {
+    throw new ApiError("That sign-in did not finish. Start again from Log in.", {
+      code: "oauth_verifier_missing",
+      status: 400,
+    });
+  }
+  const response = await fetch(`${url}/auth/v1/token?grant_type=pkce`, {
+    method: "POST",
+    headers: {
+      apikey: publishableKey,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ auth_code: code, code_verifier: verifier }),
+  });
+  if (!response.ok) {
+    throw new ApiError("That Google sign-in did not complete. Try again.", {
+      code: "oauth_exchange_failed",
+      status: response.status,
+    });
+  }
+  const payload = (await response.json()) as {
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
+  };
+  if (!payload.access_token || !payload.refresh_token) {
+    throw new ApiError("That Google sign-in did not complete. Try again.", {
+      code: "oauth_exchange_failed",
+      status: 400,
+    });
+  }
+  try {
+    sessionStorage.removeItem("onemore-oauth-verifier");
+    sessionStorage.removeItem("onemore-oauth-challenge");
+  } catch {
+    // Best effort cleanup only.
+  }
+  // Tokens are verified by the backend before they are trusted (see above).
+  return adoptSupabaseTokens({
+    accessToken: payload.access_token,
+    refreshToken: payload.refresh_token,
+    expiresIn: payload.expires_in,
+  });
+}
+
+/** Changes the password for the current session through Supabase Auth. */
+export async function changePassword(newPassword: string): Promise<void> {
+  const token = getAccessToken();
+  if (!token) {
+    throw new ApiError("Sign in to change your password.", {
+      code: "unauthorized",
+      status: 401,
+    });
+  }
+  if (newPassword.length < 8) {
+    throw new ApiError("Use at least 8 characters for your password.", {
+      code: "unprocessable_entity",
+      status: 422,
+    });
+  }
+  const { url, publishableKey } = supabaseAuthBase();
+  const response = await fetch(`${url}/auth/v1/user`, {
+    method: "PUT",
+    headers: {
+      apikey: publishableKey,
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ password: newPassword }),
+  });
+  if (!response.ok) {
+    throw new ApiError("That password could not be saved. Try a stronger one.", {
+      code: "password_change_failed",
+      status: response.status,
+    });
+  }
+}
+
+/** Reads the provider identities linked to the current Supabase user. */
+export async function fetchLinkedProviders(): Promise<Array<{ provider: string }>> {
+  const token = getAccessToken();
+  if (!token) return [];
+  const { url, publishableKey } = supabaseAuthBase();
+  const response = await fetch(`${url}/auth/v1/user`, {
+    headers: { apikey: publishableKey, Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) return [];
+  const payload = (await response.json()) as { identities?: Array<{ provider?: string }> };
+  return (payload.identities ?? [])
+    .map((identity) => ({ provider: String(identity.provider ?? "").toLowerCase() }))
+    .filter((entry) => entry.provider !== "");
 }
 
 /** Exchanges an email and password for a session. */

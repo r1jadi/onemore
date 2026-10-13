@@ -1,17 +1,19 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Users } from "lucide-react";
+import { useEffect, useState } from "react";
 import * as z from "zod";
 import {
   Avatar,
   EmptyState,
+  ErrorState,
   FollowButton,
   ListSkeleton,
   Page,
   PageHeader,
   UserName,
-  useMockLoad,
 } from "@/components/common";
-import { users } from "@/lib/mock";
+import { fetchProfilesByIds, listFollowers, listFollowees, resolveUserId } from "@/lib/social/follows";
+import type { PublicProfile } from "@/lib/social/follows";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/u/$username/connections")({
@@ -27,11 +29,38 @@ export const Route = createFileRoute("/u/$username/connections")({
   component: Connections,
 });
 
+/** Real follower/following lists from the follow graph. */
 function Connections() {
   const { username } = Route.useParams();
   const { tab = "followers" } = Route.useSearch();
-  const loading = useMockLoad();
-  const list = tab === "followers" ? users : users.filter((u) => u.isFollowing);
+  const [list, setList] = useState<PublicProfile[] | undefined>(undefined);
+  const [error, setError] = useState<string>();
+
+  useEffect(() => {
+    let cancelled = false;
+    setList(undefined);
+    setError(undefined);
+    (async () => {
+      const userId = await resolveUserId(username);
+      if (!userId) throw new Error(`@${username} doesn't exist.`);
+      const ids = tab === "followers" ? await listFollowers(userId) : await listFollowees(userId);
+      const profiles = await fetchProfilesByIds(ids);
+      return profiles;
+    })()
+      .then((profiles) => {
+        if (!cancelled) setList(profiles);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Couldn't load connections.");
+          setList([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [username, tab]);
+
   return (
     <Page>
       <PageHeader back title={`@${username}`} />
@@ -55,8 +84,10 @@ function Connections() {
           </Link>
         ))}
       </div>
-      {loading ? (
+      {list === undefined ? (
         <ListSkeleton />
+      ) : error ? (
+        <ErrorState title="Couldn't load connections" body={error} onRetry={() => window.location.reload()} />
       ) : list.length === 0 ? (
         <EmptyState icon={Users} title="No one here yet" />
       ) : (
@@ -70,11 +101,11 @@ function Connections() {
               >
                 <Avatar name={u.username} />
                 <div className="min-w-0 text-sm">
-                  <UserName username={u.username} verified={u.verified} />
-                  <p className="truncate text-xs text-muted-foreground">{u.name}</p>
+                  <UserName username={u.username} />
+                  <p className="truncate text-xs text-muted-foreground">{u.display_name}</p>
                 </div>
               </Link>
-              <FollowButton initial={u.isFollowing} />
+              <FollowButton userId={u.id} />
             </li>
           ))}
         </ul>

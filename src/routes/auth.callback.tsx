@@ -1,0 +1,197 @@
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useEffect, useRef, useState } from "react";
+import * as z from "zod";
+import { AuthLayout } from "@/components/auth/AuthLayout";
+import { Button } from "@/components/ui/button";
+import {
+  adoptSupabaseTokens,
+  authErrorMessage,
+  exchangeOAuthCode,
+  verifyEmailLink,
+} from "@/lib/auth/session";
+import { seo } from "@/lib/seo";
+
+const searchSchema = z.object({
+  code: z.string().optional(),
+  token_hash: z.string().optional(),
+  type: z.string().optional(),
+  error: z.string().optional(),
+  error_description: z.string().optional(),
+  next: z.string().optional(),
+});
+
+export const Route = createFileRoute("/auth/callback")({
+  validateSearch: (search) => searchSchema.parse(search),
+  head: () => seo("Confirming", "Finishing email confirmation."),
+  component: Callback,
+});
+
+type Outcome =
+  | { status: "working" }
+  | { status: "done"; next: string }
+  | { status: "confirmed-no-session"; next: string }
+  | { status: "failed"; message: string };
+
+/**
+ * Email-verification and OAuth callback.
+ *
+ * Handles the formats Supabase actually returns:
+ * - `?token_hash=…&type=signup|email|recovery` (email link, verified via
+ *   `POST /auth/v1/verify`, then exchanged for the app session);
+ * - `?code=…` (PKCE: OAuth or the newer email-link code flow, exchanged with
+ *   the stored verifier, then exchanged for the app session);
+ * - `#access_token=…&refresh_token=…` (implicit fragment, verified by the
+ *   backend before it is trusted).
+ *
+ * Callback parameters are removed from the visible URL as soon as the outcome
+ * is known. Arbitrary parameters are never treated as proof of authentication.
+ */
+function Callback() {
+  const search = Route.useSearch();
+  const nav = useNavigate();
+  const [outcome, setOutcome] = useState<Outcome>({ status: "working" });
+  const ran = useRef(false);
+
+  useEffect(() => {
+    if (ran.current) return;
+    ran.current = true;
+
+    async function run(): Promise<Outcome> {
+      const next = sanitizeNext(search.next);
+      if (search.error) {
+        return {
+          status: "failed",
+          message: describeOAuthError(search.error, search.error_description),
+        };
+      }
+      // Fragment flow (`#access_token=…`): Supabase implicit redirect.
+      const fragment = parseFragment(window.location.hash);
+      if (fragment["access_token"] && fragment["refresh_token"]) {
+        try {
+          await adoptSupabaseTokens({
+            accessToken: fragment["access_token"],
+            refreshToken: fragment["refresh_token"],
+          });
+          return { status: "done", next };
+        } catch (error) {
+          return { status: "failed", message: authErrorMessage(error) };
+        }
+      }
+      if (search.token_hash && search.type) {
+        try {
+          const pair = await verifyEmailLink(search.token_hash, search.type);
+          await adoptSupabaseTokens(pair);
+          return { status: "done", next };
+        } catch (error) {
+          return { status: "failed", message: authErrorMessage(error) };
+        }
+      }
+      if (search.code) {
+        try {
+          await exchangeOAuthCode(search.code);
+          return { status: "done", next };
+        } catch (error) {
+          return { status: "failed", message: authErrorMessage(error) };
+        }
+      }
+      return {
+        status: "failed",
+        message: "That link is missing its confirmation details. Request a new one.",
+      };
+    }
+
+    void run().then((result) => {
+      // Strip tokens from the address bar before rendering the outcome.
+      try {
+        const clean = new URL(window.location.href);
+        for (const key of ["code", "token_hash", "type", "error", "error_description"]) {
+          clean.searchParams.delete(key);
+        }
+        clean.hash = "";
+        window.history.replaceState(null, "", clean.toString());
+      } catch {
+        // URL cleanup is best effort; the outcome below is what matters.
+      }
+      setOutcome(result);
+      if (result.status === "done") {
+        nav({ to: result.next });
+      }
+    });
+  }, [nav, search]);
+
+  if (outcome.status === "working") {
+    return (
+      <AuthLayout title="Confirming…" subtitle="Finishing verification.">
+        <p className="text-sm text-muted-foreground" role="status">
+          Checking the link with the server…
+        </p>
+      </AuthLayout>
+    );
+  }
+
+  if (outcome.status === "done") {
+    return (
+      <AuthLayout title="Confirmed" subtitle="Taking you back to onemore…">
+        <p className="text-sm text-muted-foreground" role="status">
+          Email confirmed. Redirecting…
+        </p>
+      </AuthLayout>
+    );
+  }
+
+  if (outcome.status === "confirmed-no-session") {
+    return (
+      <AuthLayout title="Email confirmed" subtitle="Your address is verified.">
+        <p className="text-sm text-muted-foreground">
+          Sign in to continue — no session was issued with this confirmation.
+        </p>
+        <Button asChild variant="play" size="xl" className="mt-6 w-full">
+          <Link to="/login">Continue to log in</Link>
+        </Button>
+      </AuthLayout>
+    );
+  }
+
+  return (
+    <AuthLayout title="Link didn't work" subtitle="That confirmation link could not be used.">
+      <p className="text-sm text-destructive" role="alert">
+        {outcome.message}
+      </p>
+      <div className="mt-6 grid gap-2">
+        <Button asChild variant="secondary" size="lg" className="w-full">
+          <Link to="/verify-email" search={{ email: undefined }}>
+            Request a new link
+          </Link>
+        </Button>
+        <Button asChild variant="play" size="xl" className="w-full">
+          <Link to="/login">Back to log in</Link>
+        </Button>
+      </div>
+    </AuthLayout>
+  );
+}
+
+function sanitizeNext(value: string | undefined): string {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return "/";
+  return value;
+}
+
+function parseFragment(hash: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const raw = hash.startsWith("#") ? hash.slice(1) : hash;
+  for (const part of raw.split("&")) {
+    const [key, ...rest] = part.split("=");
+    if (!key) continue;
+    out[decodeURIComponent(key)] = decodeURIComponent(rest.join("="));
+  }
+  return out;
+}
+
+function describeOAuthError(code: string, description?: string): string {
+  if (code === "access_denied") {
+    return "Google sign-in was cancelled. Try again when you're ready.";
+  }
+  return description && description !== ""
+    ? description
+    : "That sign-in did not complete. Try again.";
+}

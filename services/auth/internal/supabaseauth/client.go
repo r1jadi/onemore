@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -121,8 +122,19 @@ func New(cfg *config.Config) (*Client, error) {
 // policy; the service additionally rejects obviously unusable input before the
 // call. When the project requires email confirmation the result carries a user
 // and no session.
+//
+// The confirmation link Supabase emails must land on the app's own callback
+// (`/auth/callback`), not on Supabase's default site URL: the callback
+// verifies the link, exchanges it for tokens, and establishes the app session
+// without ever treating a URL parameter as proof. The destination is resolved
+// from PUBLIC_SITE_URL (preferred), SITE_URL, then VITE_PUBLIC_SITE_URL, and
+// defaults to the production origin. An invalid value is ignored rather than
+// sent, so a misconfigured environment cannot produce a broken link.
 func (c *Client) SignUp(ctx context.Context, email, password string) (Result, error) {
-	payload := map[string]string{"email": email, "password": password}
+	payload := map[string]any{"email": email, "password": password}
+	if redirect := confirmationRedirect(); redirect != "" {
+		payload["options"] = map[string]string{"emailRedirectTo": redirect}
+	}
 	return c.sessionCall(ctx, "sign-up", http.MethodPost, "/auth/v1/signup", payload, "")
 }
 
@@ -292,6 +304,43 @@ func errorCode(body io.Reader) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+// confirmationRedirect resolves the email-confirmation landing URL. The
+// Supabase dashboard must also list it under Authentication → URL
+// Configuration → Redirect URLs; code can only propose the destination, the
+// allowlist decides whether Supabase honours it.
+func confirmationRedirect() string {
+	raw := strings.TrimSpace(config.Getenv("PUBLIC_SITE_URL", "SITE_URL", "VITE_PUBLIC_SITE_URL"))
+	if raw == "" {
+		raw = "https://onemorestartup.vercel.app"
+	}
+	parsed, err := parseRedirectBase(raw)
+	if err != nil {
+		return ""
+	}
+	return parsed + "/auth/callback"
+}
+
+func parseRedirectBase(raw string) (string, error) {
+	trimmed := strings.TrimRight(strings.TrimSpace(raw), "/")
+	if trimmed == "" {
+		return "", errors.New("empty redirect base")
+	}
+	if !strings.Contains(trimmed, "://") {
+		trimmed = "https://" + trimmed
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil {
+		return "", err
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", errors.New("redirect base must be http or https")
+	}
+	if u.Host == "" {
+		return "", errors.New("redirect base has no host")
+	}
+	return u.Scheme + "://" + u.Host, nil
 }
 
 func decodeJSON(body io.Reader, dst any) error {

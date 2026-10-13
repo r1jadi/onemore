@@ -13,13 +13,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { signOut } from "@/lib/auth/session";
+import { useAdminVisibility } from "@/lib/admin/visibility";
+import { signOut, useAuth } from "@/lib/auth/session";
 import { seo } from "@/lib/seo";
-import { avatarUrl, useProfile, type ProfileState } from "@/lib/users/profile";
+import { avatarUrl, clearProfile, useProfile, type ProfileState } from "@/lib/users/profile";
 
 export const Route = createFileRoute("/settings/")({
   head: () => seo("Settings", "Manage your onemore account, privacy and preferences."),
@@ -85,20 +84,33 @@ function Identity({ state }: { state: ProfileState }) {
 
 function Settings() {
   const nav = useNavigate();
+  const auth = useAuth();
   const profile = useProfile();
+  const showAdmin = useAdminVisibility();
   const [logout, setLogout] = useState(false);
   const [del, setDel] = useState(false);
-  const [confirm, setConfirm] = useState("");
+  const signedIn = auth.status === "authenticated";
+
   return (
     <Page>
       <PageHeader back title="Settings" />
-      <Link
-        to="/profile"
-        className="press mx-4 flex items-center gap-3 rounded-xl bg-surface p-3 md:mx-0"
-      >
-        <Identity state={profile} />
-        <ChevronRight className="size-4 text-muted-foreground" />
-      </Link>
+      {signedIn ? (
+        <Link
+          to="/profile"
+          className="press mx-4 flex items-center gap-3 rounded-xl bg-surface p-3 md:mx-0"
+        >
+          <Identity state={profile} />
+          <ChevronRight className="size-4 text-muted-foreground" />
+        </Link>
+      ) : (
+        <Link
+          to="/login"
+          className="press mx-4 flex items-center gap-3 rounded-xl bg-surface p-3 md:mx-0"
+        >
+          <Identity state={profile} />
+          <ChevronRight className="size-4 text-muted-foreground" />
+        </Link>
+      )}
       {settingsGroups.map((g) => (
         <section key={g.label} className="mt-6">
           <h2 className="px-4 pb-2 text-xs font-medium text-muted-foreground md:px-0">{g.label}</h2>
@@ -122,41 +134,58 @@ function Settings() {
           </ul>
         </section>
       ))}
-      <section className="mt-6">
-        <h2 className="px-4 pb-2 text-xs font-medium text-muted-foreground md:px-0">Admin</h2>
-        <ul className="mx-4 divide-y divide-border overflow-hidden rounded-xl bg-surface md:mx-0">
+      {showAdmin && (
+        <section className="mt-6">
+          <h2 className="px-4 pb-2 text-xs font-medium text-muted-foreground md:px-0">Admin</h2>
+          <ul className="mx-4 divide-y divide-border overflow-hidden rounded-xl bg-surface md:mx-0">
+            <li>
+              <Link
+                to="/admin"
+                className="flex min-h-14 items-center gap-3 px-4 hover:bg-surface-2"
+              >
+                <Shield className="size-[18px] text-muted-foreground" strokeWidth={1.75} />
+                <span className="flex-1 text-sm">Admin dashboard</span>
+                <span className="hidden text-sm text-muted-foreground sm:block">
+                  Moderation, games, analytics
+                </span>
+                <ChevronRight className="size-4 text-muted-foreground" />
+              </Link>
+            </li>
+          </ul>
+        </section>
+      )}
+      {signedIn ? (
+        <ul className="mx-4 mt-6 divide-y divide-border overflow-hidden rounded-xl bg-surface md:mx-0">
           <li>
-            <Link to="/admin" className="flex min-h-14 items-center gap-3 px-4 hover:bg-surface-2">
-              <Shield className="size-[18px] text-muted-foreground" strokeWidth={1.75} />
-              <span className="flex-1 text-sm">Admin dashboard</span>
-              <span className="hidden text-sm text-muted-foreground sm:block">
-                Moderation, games, analytics
-              </span>
-              <ChevronRight className="size-4 text-muted-foreground" />
-            </Link>
+            <button
+              onClick={() => setLogout(true)}
+              className="flex min-h-14 w-full items-center gap-3 px-4 text-sm hover:bg-surface-2"
+            >
+              <LogOut className="size-[18px] text-muted-foreground" strokeWidth={1.75} />
+              Log out
+            </button>
+          </li>
+          <li>
+            <button
+              onClick={() => setDel(true)}
+              className="flex min-h-14 w-full items-center gap-3 px-4 text-sm text-destructive hover:bg-surface-2"
+            >
+              <Trash2 className="size-[18px]" strokeWidth={1.75} />
+              Delete account
+            </button>
           </li>
         </ul>
-      </section>
-      <ul className="mx-4 mt-6 divide-y divide-border overflow-hidden rounded-xl bg-surface md:mx-0">
-        <li>
-          <button
-            onClick={() => setLogout(true)}
-            className="flex min-h-14 w-full items-center gap-3 px-4 text-sm hover:bg-surface-2"
-          >
-            <LogOut className="size-[18px] text-muted-foreground" strokeWidth={1.75} />
-            Log out
-          </button>
-        </li>
-        <li>
-          <button
-            onClick={() => setDel(true)}
-            className="flex min-h-14 w-full items-center gap-3 px-4 text-sm text-destructive hover:bg-surface-2"
-          >
-            <Trash2 className="size-[18px]" strokeWidth={1.75} />
-            Delete account
-          </button>
-        </li>
-      </ul>
+      ) : (
+        <div className="mx-4 mt-6 rounded-xl bg-surface p-4 md:mx-0">
+          <p className="text-sm font-medium">Signed out</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Log in to manage your account, or browse the public catalogue as a guest.
+          </p>
+          <Button asChild className="mt-3">
+            <Link to="/login">Log in</Link>
+          </Button>
+        </div>
+      )}
 
       <AlertDialog open={logout} onOpenChange={setLogout}>
         <AlertDialogContent>
@@ -176,6 +205,7 @@ function Settings() {
                   // Nothing left to do here: the session is already gone locally
                   // and the access token stops being accepted when it expires.
                 }
+                clearProfile();
                 nav({ to: "/welcome" });
               }}
             >
@@ -184,33 +214,25 @@ function Settings() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <AlertDialog
-        open={del}
-        onOpenChange={(o) => {
-          setDel(o);
-          setConfirm("");
-        }}
-      >
+      <AlertDialog open={del} onOpenChange={setDel}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete your account?</AlertDialogTitle>
             <AlertDialogDescription>
-              This permanently deletes your profile, scores, comments and followers after 30 days.
-              This can't be undone.
+              Self-service deletion is not available in this build: there is no verified deletion
+              endpoint yet, so this screen does not pretend to delete anything. To request deletion,
+              open an issue on the project tracker from your signed-in account and a moderator will
+              process it.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <div className="space-y-1.5">
-            <Label htmlFor="del">Type DELETE to confirm</Label>
-            <Input id="del" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
-          </div>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              disabled={confirm !== "DELETE"}
-              className={buttonVariants({ variant: "destructive" })}
-              onClick={() => nav({ to: "/welcome" })}
+              onClick={() => {
+                window.open("https://github.com/r1jadi/onemore/issues", "_blank", "noreferrer");
+              }}
             >
-              Delete account
+              Open an issue
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

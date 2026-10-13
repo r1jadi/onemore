@@ -16,6 +16,8 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { rootSeo } from "../lib/seo";
 import { AppShell } from "@/components/layout/AppShell";
 import { Toaster } from "@/components/ui/sonner";
+import { LanguageProvider } from "@/lib/settings/language";
+import { ThemeProvider } from "@/lib/settings/theme";
 
 // Full-screen flows rendered without the main navigation.
 const BARE = [
@@ -30,6 +32,7 @@ const BARE = [
   "/reset-password",
   "/verify-email",
   "/account-created",
+  "/auth/callback",
 ];
 
 function NotFoundComponent() {
@@ -142,7 +145,9 @@ function RootShell({ children }: { children: ReactNode }) {
         <HeadContent />
       </head>
       <body>
-        {children}
+        <ThemeProvider>
+          <LanguageProvider>{children}</LanguageProvider>
+        </ThemeProvider>
         <Scripts />
       </body>
     </html>

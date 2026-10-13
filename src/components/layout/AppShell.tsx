@@ -15,7 +15,9 @@ import {
 import type { ReactNode } from "react";
 import { Logo } from "./Logo";
 import { cn } from "@/lib/utils";
-import { notifications } from "@/lib/mock";
+import { useAuth } from "@/lib/auth/session";
+import { useUnreadCount } from "@/lib/notifications/store";
+import { useAdminVisibility } from "@/lib/admin/visibility";
 
 const mobile = [
   { to: "/", label: "Home", icon: Home },
@@ -37,10 +39,18 @@ const desktop = [
   { to: "/profile", label: "Profile", icon: User },
 ] as const;
 
-const unread = notifications.filter((n) => n.unread).length;
-
+/**
+ * Main navigation. Authentication comes from the single reactive session
+ * store; the Admin link additionally requires the backend to confirm a staff
+ * role (fail closed while loading). The notification badge is the real unread
+ * count for the signed-in user — zero while anonymous — never a fixture.
+ */
 export function AppShell({ children }: { children: ReactNode }) {
   const path = useRouterState({ select: (s) => s.location.pathname });
+  const auth = useAuth();
+  const unread = useUnreadCount();
+  const showAdmin = useAdminVisibility();
+  void auth;
   const isActive = (to: string) => (to === "/" ? path === "/" : path.startsWith(to));
   const feed = path === "/" || path === "/following";
 
@@ -81,16 +91,18 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Settings className="size-[18px]" strokeWidth={1.75} />
             Settings
           </Link>
-          <Link
-            to="/admin"
-            className={cn(
-              "press flex h-10 items-center gap-3 rounded-lg px-3 text-sm text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-foreground",
-              isActive("/admin") && "bg-sidebar-accent text-sidebar-foreground",
-            )}
-          >
-            <Shield className="size-[18px]" strokeWidth={1.75} />
-            Admin
-          </Link>
+          {showAdmin && (
+            <Link
+              to="/admin"
+              className={cn(
+                "press flex h-10 items-center gap-3 rounded-lg px-3 text-sm text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-foreground",
+                isActive("/admin") && "bg-sidebar-accent text-sidebar-foreground",
+              )}
+            >
+              <Shield className="size-[18px]" strokeWidth={1.75} />
+              Admin
+            </Link>
+          )}
           <Link
             to="/welcome"
             className="px-3 pt-2 text-xs text-muted-foreground hover:text-foreground"

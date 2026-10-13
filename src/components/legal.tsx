@@ -1,63 +1,107 @@
-// Placeholder legal copy for the prototype. Replace with reviewed legal text before launch.
+// Substantive terms and privacy text based on the implemented service.
+// No registered company, address, jurisdiction or contact identity is invented
+// here: where operator details are required, the document says exactly what the
+// owner must supply (see OPERATOR_DETAILS_REQUIRED below).
+//
+// Effective date: 2026-10-13. Review with counsel before public launch; this
+// is product-accurate copy, not legal advice.
+
+export const OPERATOR_DETAILS_REQUIRED = [
+  "Legal operator name (person or company) and contact email for account, terms and privacy requests.",
+  "Jurisdiction / governing law and support response expectations, if any are promised.",
+  "Data-retention periods beyond the implemented 30-day deletion target, if the policy must state them.",
+] as const;
+
 export const terms = [
   [
-    "1. Using onemore",
-    "You must be at least 13 years old to create an account. You're responsible for activity on your account and for keeping your password secure.",
+    "1. What onemore is",
+    "onemore is a web catalogue of short playable games with accounts, profiles, scores, leaderboards, follows, notifications and moderation. Browsing the catalogue is public; scoring, following, notifications and settings require an account.",
   ],
   [
-    "2. Your content",
-    "Usernames, comments and profile information you post remain yours. You grant onemore a licence to display them within the service.",
+    "2. Accounts, verification and security",
+    "You must be at least 13 years old to create an account. Sign up with an email and password or with Google OAuth; email addresses are verified through a confirmation link before sign-in. You are responsible for activity on your account and for keeping your credentials secure. We may rate-limit credential attempts and require reauthentication for sensitive actions.",
   ],
   [
-    "3. Fair play",
-    "Scores must be earned by playing. Automated play, exploiting bugs or manipulating leaderboards may lead to score removal or suspension.",
+    "3. Fair play and leaderboards",
+    "Scores must be earned by playing in the app. Play sessions are created server-side and scores are recorded against them; only published games appear on leaderboards. Automated play, exploiting bugs, manipulating sessions or leaderboard abuse may lead to score removal, content removal or account restriction.",
   ],
   [
-    "4. Community rules",
-    "No harassment, hate speech, spam or impersonation. We may remove content or restrict accounts that break these rules.",
+    "4. Your content and social features",
+    "Display names, bios, follows, blocked-user choices and notification preferences you set remain yours. You grant onemore a licence to display profile and social content within the service so follows, leaderboards and notifications can function. Private-account, leaderboard-visibility and interaction settings in Settings → Privacy control who can see your activity where implemented.",
   ],
   [
-    "5. Games by creators",
-    "Games are made by onemore and independent creators. Creators are responsible for their games and must follow our publishing guidelines.",
+    "5. Prohibited conduct",
+    "No harassment, hate speech, spam, impersonation, cheating, abuse of reporting or blocking, or interference with the service. Content and accounts that break these rules may be hidden, restricted or suspended by moderators and administrators.",
   ],
   [
-    "6. Termination",
-    "You can delete your account at any time. We may suspend accounts that violate these terms.",
+    "6. Moderation and enforcement",
+    "Moderators review reports and the review queue; administrators manage games, categories, users and system settings. Enforcement ranges from hidden content to suspension. Decisions are made from database records of the reported content and account history.",
   ],
   [
-    "7. Changes",
-    "We'll notify you of material changes to these terms in the app before they take effect.",
+    "7. Deletion and data handling",
+    "Self-service deletion is not available in this build; request deletion through the project issue tracker from your signed-in account. Deletion removes your profile and social relationships; scores on public leaderboards may be retained without attribution where leaderboard integrity requires it. See the Privacy Policy for what is collected and how long it is kept.",
+  ],
+  [
+    "8. Availability, changes and third parties",
+    "The service is provided as-is and may change, including games, scores display, social features and rate limits. Authentication and hosting run on Supabase and Vercel; Google sign-in, when enabled, is subject to Google's terms. No uptime, response-time or support promise is made in this document.",
+  ],
+  [
+    "9. Intellectual property",
+    "Games, artwork, branding and the app itself remain the property of their respective owners. You may not copy, redistribute or misrepresent them. Creator-published games are subject to the publishing review described in the app.",
+  ],
+  [
+    "10. Changes to these terms",
+    "Material changes are announced in the app before they take effect. Continued use after the effective date constitutes acceptance.",
+  ],
+  [
+    "11. Contact and operator details",
+    "Operator identity and contact: TO BE SUPPLIED BY THE OWNER before public launch (see the note at the top of this document). Until then, use the project issue tracker linked in Settings → Help.",
   ],
 ];
 
 export const privacy = [
   [
     "What we collect",
-    "Account details (email, username), gameplay data (scores, sessions), social activity (follows, likes, comments) and basic device information.",
+    "Account and authentication: email, password verifier (stored by Supabase Auth, never by onemore), email-verification state, OAuth provider identities you link (Google), and session tokens held in memory only. Profile: username (generated), display name, bio, avatar object path, onboarding state. Gameplay: play sessions (game, seed, start/end times) and scores (session, game, value, duration). Social, when you use it: follows, blocked-user relationships, notification rows (kind, payload, read time) and your privacy/notification preferences. Operational: rate-limit counters, request ids and error logs needed to run and protect the API.",
+  ],
+  [
+    "What we do not collect",
+    "No payment data (no payments feature exists), no push subscriptions (no push delivery exists), no email campaign data (no email delivery beyond Supabase auth mails), no device fingerprint inventory beyond what the browser necessarily sends, and no analytics events beyond the append-only table the backend validates — the app does not run third-party analytics or advertising trackers.",
   ],
   [
     "How we use it",
-    "To run leaderboards, recommend games, keep the platform safe and improve the product. We don't sell your personal data.",
+    "To create and secure accounts, verify email, run play sessions and leaderboards, render profiles and follow graphs, deliver in-app notifications for genuine events (such as new followers), enforce blocks and privacy choices, moderate reported content, and keep the platform safe within rate limits.",
   ],
   [
     "Who can see it",
-    "Your profile, scores and comments are public by default. You can make your account private in Settings → Privacy.",
+    "Profiles (username, display name, bio, avatar), published games, scores on visible games, follows and visible comments are public by default. Private-account and visibility toggles in Settings → Privacy limit discovery where implemented. Notifications and preferences are visible only to their owner; roles are visible only to their owner and to staff. Administrators and moderators see moderation queues and audit trails through the staff-gated admin API.",
   ],
   [
-    "Your choices",
-    "You can download or delete your data, control notifications and limit personalised recommendations at any time.",
+    "Storage, cookies and local data",
+    "Session tokens live in memory only and are dropped on sign-out or reload; nothing writes access or refresh tokens to localStorage, sessionStorage or cookies. Appearance, language and accessibility choices persist in this browser's localStorage. Recent searches persist in this browser's localStorage. OAuth PKCE verifiers live in sessionStorage for the duration of one sign-in attempt. Avatar images live in the public `avatars` Supabase Storage bucket under your account folder.",
   ],
   [
-    "Retention",
-    "We keep data while your account is active and delete it within 30 days after account deletion, except where required by law.",
+    "Infrastructure",
+    "Hosting and API: Vercel (web app, Go gateway and Go services on one domain). Identity, database and storage: Supabase (Auth, Postgres with Row Level Security, Storage). OAuth, when enabled: Google. No other processors are used by this deployment.",
   ],
-  ["Contact", "Questions about privacy can be sent to privacy@onemore.app."],
+  [
+    "Retention and deletion",
+    "Data is kept while your account is active. Self-service deletion is not available in this build; request deletion through the project issue tracker. The deletion target is removal of profile, preferences, follows, blocks and notifications within 30 days; scores on public leaderboards may be retained without attribution for integrity. Backups, if any, age out on the provider's schedule.",
+  ],
+  [
+    "Your choices and rights",
+    "Edit profile, privacy, notification, language, appearance, accessibility and blocked-user settings in Settings; each supported control persists and takes effect as described on its screen. Unsupported controls (push, email delivery, MFA, per-device session lists) are labelled unavailable rather than simulated. To request access, correction or deletion, open an issue on the project tracker from your signed-in account until a dedicated privacy contact is published.",
+  ],
+  [
+    "Contact",
+    "Privacy contact: TO BE SUPPLIED BY THE OWNER before public launch (operator name and email). Until then, use the project issue tracker linked in Settings → Help. This policy is product-accurate documentation, not legal advice; have counsel review it before public launch.",
+  ],
 ];
 
 export function LegalBody({ sections }: { sections: string[][] }) {
   return (
     <div className="space-y-5 text-sm leading-relaxed">
-      <p className="text-xs text-muted-foreground">Last updated October 1, 2026</p>
+      <p className="text-xs text-muted-foreground">Last updated October 13, 2026</p>
       {sections.map(([h, b]) => (
         <section key={h}>
           <h2 className="font-semibold">{h}</h2>

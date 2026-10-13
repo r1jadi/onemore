@@ -1,52 +1,110 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
 import { AuthLayout } from "@/components/auth/AuthLayout";
 import { Button } from "@/components/ui/button";
-import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
+import { authErrorMessage, resendConfirmation } from "@/lib/auth/session";
 import { seo } from "@/lib/seo";
 
 export const Route = createFileRoute("/verify-email")({
-  head: () => seo("Verify your email", "Enter the 6-digit code we sent to your email."),
+  validateSearch: (search: Record<string, unknown>) => ({
+    email: typeof search["email"] === "string" ? (search["email"] as string) : undefined,
+  }),
+  head: () =>
+    seo("Verify your email", "Confirm your email address to finish creating your account."),
   component: Verify,
 });
 
+/**
+ * Confirmation-pending state for the link flow Supabase actually sends.
+ *
+ * Supabase delivers a verification *link*, not a six-digit code, so this
+ * screen explains the link, offers a resend, and points to sign-in once the
+ * link has been opened. It never claims the account is verified and never
+ * accepts a code as proof.
+ */
 function Verify() {
+  const { email } = Route.useSearch();
   const nav = useNavigate();
-  const [code, setCode] = useState("");
-  const [wait, setWait] = useState(30);
-  useEffect(() => {
-    if (wait <= 0) return;
-    const t = setTimeout(() => setWait(wait - 1), 1000);
-    return () => clearTimeout(t);
-  }, [wait]);
+  const [address, setAddress] = useState(email ?? "");
+  const [status, setStatus] = useState<string>();
+  const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+
+  async function resend() {
+    const value = address.trim();
+    if (value === "") {
+      setError("Enter the email address you signed up with.");
+      return;
+    }
+    setError(undefined);
+    setStatus(undefined);
+    setBusy(true);
+    try {
+      await resendConfirmation(value);
+      setStatus("If that address is waiting for confirmation, a new link is on its way.");
+    } catch (err) {
+      setError(authErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <AuthLayout title="Check your email" subtitle="We sent a 6-digit code to r•••@mail.com.">
-      <label className="mb-2 text-sm font-medium" htmlFor="otp">
-        Verification code
-      </label>
-      <InputOTP id="otp" maxLength={6} value={code} onChange={setCode}>
-        <InputOTPGroup className="w-full">
-          {[0, 1, 2, 3, 4, 5].map((i) => (
-            <InputOTPSlot key={i} index={i} className="h-14 flex-1 text-lg" />
-          ))}
-        </InputOTPGroup>
-      </InputOTP>
-      <button
-        disabled={wait > 0}
-        onClick={() => setWait(30)}
-        className="mt-4 self-start text-sm text-muted-foreground disabled:opacity-60 enabled:hover:text-foreground"
-      >
-        {wait > 0 ? `Resend code in ${wait}s` : "Resend code"}
-      </button>
-      <Button
-        variant="play"
-        size="xl"
-        className="mt-auto w-full lg:mt-8"
-        disabled={code.length < 6}
-        onClick={() => nav({ to: "/account-created" })}
-      >
-        Verify
-      </Button>
+    <AuthLayout
+      title="Check your email"
+      subtitle={
+        address
+          ? `We sent a confirmation link to ${address}. Open it to verify your address.`
+          : "We sent you a confirmation link. Open it to verify your address."
+      }
+    >
+      <div className="space-y-4">
+        <p className="text-sm text-muted-foreground">
+          The email contains a link — not a code. Clicking it opens onemore and signs you in
+          automatically. If you already opened the link, continue to log in.
+        </p>
+        <label className="block space-y-1.5" htmlFor="verify-email">
+          <span className="text-sm font-medium">Email</span>
+          <input
+            id="verify-email"
+            type="email"
+            autoComplete="email"
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            placeholder="you@example.com"
+            className="h-12 w-full rounded-lg bg-surface px-3 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring md:text-sm"
+          />
+        </label>
+        {status && (
+          <p className="text-sm text-success" role="status">
+            {status}
+          </p>
+        )}
+        {error && (
+          <p className="text-sm text-destructive" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="grid gap-2">
+          <Button variant="secondary" size="lg" className="w-full" disabled={busy} onClick={resend}>
+            Resend confirmation link
+          </Button>
+          <Button
+            variant="play"
+            size="xl"
+            className="w-full"
+            onClick={() => nav({ to: "/login", search: address ? { email: address } : undefined })}
+          >
+            Continue to log in
+          </Button>
+          <p className="text-center text-xs text-muted-foreground">
+            Didn&apos;t get the email? Check spam, then resend. Links expire — use the newest one.{" "}
+            <Link to="/signup" className="underline underline-offset-4">
+              Start over
+            </Link>
+          </p>
+        </div>
+      </div>
     </AuthLayout>
   );
 }

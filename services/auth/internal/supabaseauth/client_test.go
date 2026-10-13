@@ -156,6 +156,27 @@ func TestSignUpDecodesAConfirmationPendingResponse(t *testing.T) {
 	}
 }
 
+func TestSignUpProposesTheAppCallback(t *testing.T) {
+	t.Setenv("PUBLIC_SITE_URL", "https://example.com")
+	t.Setenv("SITE_URL", "")
+	t.Setenv("VITE_PUBLIC_SITE_URL", "")
+
+	client, requests := stubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, 200, `{"id":"u1","email":"player@example.com","created_at":"2026-10-01T00:00:00Z"}`)
+	})
+
+	if _, err := client.SignUp(context.Background(), "player@example.com", "correct-horse-battery"); err != nil {
+		t.Fatalf("sign-up failed: %v", err)
+	}
+	options, ok := (*requests)[0].body["options"].(map[string]any)
+	if !ok {
+		t.Fatalf("body has no options: %v", (*requests)[0].body)
+	}
+	if options["emailRedirectTo"] != "https://example.com/auth/callback" {
+		t.Errorf("emailRedirectTo = %v, want the app callback", options["emailRedirectTo"])
+	}
+}
+
 func TestRefreshUsesTheRefreshTokenGrant(t *testing.T) {
 	client, requests := stubServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(t, w, 200, `{"access_token":"a2","refresh_token":"r2","token_type":"bearer","expires_in":60}`)

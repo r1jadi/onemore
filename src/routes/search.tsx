@@ -13,7 +13,14 @@ import {
 import { GameRow } from "@/components/game/GameCard";
 import { Label } from "@/components/ui/label";
 import { catalogErrorMessage, useGames } from "@/lib/games/catalog";
-import { users } from "@/lib/mock";
+import { listBlockedIds } from "@/lib/settings/blocked";
+import {
+  fetchProfilesByIds,
+  listFollowees,
+  searchProfiles,
+  type PublicProfile,
+} from "@/lib/social/follows";
+import { getAuthState } from "@/lib/auth/session";
 import { seo } from "@/lib/seo";
 import { cn } from "@/lib/utils";
 
@@ -32,16 +39,47 @@ function useDebounced<T>(value: T, ms = 250): T {
   return settled;
 }
 
+const RECENT_KEY = "onemore-recent-searches";
+
+function readRecent(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter((x): x is string => typeof x === "string").slice(0, 8)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeRecent(entries: string[]): void {
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(entries.slice(0, 8)));
+  } catch {
+    // Best effort.
+  }
+}
+
 function SearchPage() {
   const [q, setQ] = useState("");
   const [tab, setTab] = useState<"top" | "games" | "people">("top");
-  const [recent, setRecent] = useState(["stack 10", "memory", "nora.k"]);
-  const term = useDebounced(q.trim());
-  const people = users.filter(
-    (u) =>
-      u.username.includes(q.trim().toLowerCase()) ||
-      u.name.toLowerCase().includes(q.trim().toLowerCase()),
+  const [recent, setRecent] = useState<string[]>(() =>
+    typeof window === "undefined" ? [] : readRecent(),
   );
+  const term = useDebounced(q.trim());
+
+  function remember(value: string) {
+    const next = [value, ...recent.filter((x) => x !== value)].slice(0, 8);
+    setRecent(next);
+    writeRecent(next);
+  }
+
+  function clearRecent() {
+    setRecent([]);
+    writeRecent([]);
+  }
 
   return (
     <Page>
@@ -56,6 +94,9 @@ function SearchPage() {
             autoFocus
             value={q}
             onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && q.trim() !== "") remember(q.trim());
+            }}
             placeholder="Search games and people"
             className="h-11 w-full rounded-xl bg-surface pr-10 pl-10 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
@@ -96,7 +137,7 @@ function SearchPage() {
           <div className="mt-4 flex items-center justify-between">
             <h2 className="text-sm font-semibold">Recent</h2>
             {recent.length > 0 && (
-              <button className="text-xs text-muted-foreground" onClick={() => setRecent([])}>
+              <button className="text-xs text-muted-foreground" onClick={clearRecent}>
                 Clear all
               </button>
             )}
@@ -113,7 +154,11 @@ function SearchPage() {
                   </button>
                   <button
                     aria-label={`Remove ${r}`}
-                    onClick={() => setRecent(recent.filter((x) => x !== r))}
+                    onClick={() => {
+                      const next = recent.filter((x) => x !== r);
+                      setRecent(next);
+                      writeRecent(next);
+                    }}
                   >
                     <X className="size-4 text-muted-foreground" />
                   </button>
@@ -137,36 +182,7 @@ function SearchPage() {
       )}
 
       {q && tab !== "people" && <GameResults term={term} />}
-      {q &&
-        tab !== "games" &&
-        (people.length === 0 ? (
-          tab === "people" ? (
-            <EmptyState
-              icon={SearchIcon}
-              title={`No people for "${q}"`}
-              body="Try a different spelling."
-            />
-          ) : null
-        ) : (
-          <div>
-            {people.map((x) => (
-              <div key={x.username} className="enter flex items-center gap-3 px-4 py-3 md:px-0">
-                <Link
-                  to="/u/$username"
-                  params={{ username: x.username }}
-                  className="flex min-w-0 flex-1 items-center gap-3"
-                >
-                  <Avatar name={x.username} />
-                  <div className="min-w-0 text-sm">
-                    <UserName username={x.username} verified={x.verified} />
-                    <p className="truncate text-xs text-muted-foreground">{x.name}</p>
-                  </div>
-                </Link>
-                <FollowButton initial={x.isFollowing} />
-              </div>
-            ))}
-          </div>
-        ))}
+      {q && tab !== "games" && <PeopleResults query={term} only={tab === "people"} />}
     </Page>
   );
 }
@@ -200,6 +216,93 @@ function GameResults({ term }: { term: string }) {
     <div>
       {items.map((game) => (
         <GameRow key={game.slug} game={game} />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * People results from the public profile projection. Blocked accounts are
+ * filtered out, and follow state comes from the real follow graph.
+ */
+function PeopleResults({ query, only }: { query: string; only: boolean }) {
+  const [people, setPeople] = useState<PublicProfile[] | undefined>(undefined);
+  const [followingIds, setFollowingIds] = useState<Set<string>>(new Set());
+  const [error, setError] = useState<string>();
+
+  useEffect(() => {
+    if (query.trim() === "") {
+      setPeople([]);
+      return;
+    }
+    let cancelled = false;
+    setError(undefined);
+    searchProfiles(query, 8)
+      .then(async (rows) => {
+        if (cancelled) return;
+        const blocked = await listBlockedIds();
+        const visible = rows.filter((row) => !blocked.has(row.id));
+        if (!cancelled) setPeople(visible);
+        const auth = getAuthState();
+        if (!cancelled && auth.status === "authenticated") {
+          try {
+            const followees = await listFollowees(auth.session.userId);
+            if (!cancelled) setFollowingIds(new Set(followees));
+          } catch {
+            // Follow state is best effort; the rows are still real.
+          }
+        }
+        // Prefetch display names for followees is unnecessary: rows carry them.
+        void fetchProfilesByIds;
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Couldn't search people.");
+          setPeople([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [query]);
+
+  if (people === undefined) return <ListSkeleton rows={3} />;
+  if (error) {
+    return (
+      <ErrorState
+        title="Couldn't search people"
+        body={error}
+        onRetry={() => setPeople(undefined)}
+      />
+    );
+  }
+  if (people.length === 0) {
+    if (!only) return null;
+    return (
+      <EmptyState
+        icon={SearchIcon}
+        title={`No people for "${query}"`}
+        body="Try a different spelling."
+      />
+    );
+  }
+  return (
+    <div>
+      {people.map((x) => (
+        <div key={x.username} className="enter flex items-center gap-3 px-4 py-3 md:px-0">
+          <Link
+            to="/u/$username"
+            params={{ username: x.username }}
+            className="flex min-w-0 flex-1 items-center gap-3"
+          >
+            <Avatar name={x.username} />
+            <div className="min-w-0 text-sm">
+              <UserName username={x.username} />
+              <p className="truncate text-xs text-muted-foreground">{x.display_name}</p>
+            </div>
+          </Link>
+          <FollowButton userId={x.id} initial={followingIds.has(x.id)} />
+        </div>
       ))}
     </div>
   );

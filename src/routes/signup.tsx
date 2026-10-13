@@ -12,6 +12,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { authErrorMessage, signUp } from "@/lib/auth/session";
+import { updateProfile } from "@/lib/users/profile";
 import { seo } from "@/lib/seo";
 import { cn } from "@/lib/utils";
 
@@ -26,29 +27,63 @@ const titles = [
   ["Before you start", "Step 3 of 3 · Please review and accept."],
 ];
 
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
 function Signup() {
   const nav = useNavigate();
   const [step, setStep] = useState(0);
   const [accept, setAccept] = useState({ terms: false, privacy: false, marketing: false });
   const [doc, setDoc] = useState<"terms" | "privacy" | null>(null);
-  const [username, setUsername] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [nameError, setNameError] = useState<string>();
   const [creds, setCreds] = useState<{ email: string; password: string }>();
+  const [credError, setCredError] = useState<string>();
   const [err, setErr] = useState<string>();
   const [busy, setBusy] = useState(false);
-  const taken = username === "nora.k";
 
   // The credential is collected in step 1 and held until the account is created
   // in step 3, because the account itself is only made once the terms are
   // accepted. It is forwarded to Supabase by the auth service and never stored.
+  // The username is intentionally not collected here: it is not writable
+  // through the profile API (see ProfileForm), so asking for one would be a
+  // promise this screen cannot keep. The account gets a generated username;
+  // the display name below is applied to the profile when a session exists.
   async function createAccount() {
     if (!creds) return setErr("Enter your email and password to start again.");
     setErr(undefined);
     setBusy(true);
     try {
       const result = await signUp(creds.email, creds.password);
+      const name = displayName.trim();
+      // When Supabase issued a session immediately, apply the display name to
+      // the real profile row. While confirmation is pending there is no token,
+      // so the name is kept for the onboarding step after verification.
+      if (result.tokens && name !== "") {
+        try {
+          await updateProfile({ displayName: name });
+        } catch {
+          try {
+            sessionStorage.setItem("onemore-pending-display-name", name);
+          } catch {
+            // Best effort only; the profile screen lets the user set it later.
+          }
+        }
+      } else if (name !== "") {
+        try {
+          sessionStorage.setItem("onemore-pending-display-name", name);
+        } catch {
+          // Best effort only.
+        }
+      }
       // Tokens mean the account is ready to use. Without them Supabase requires
       // email confirmation, which is the step the app already asks the user for.
-      nav({ to: result.tokens ? "/" : "/verify-email" });
+      if (result.tokens) {
+        nav({ to: "/" });
+      } else {
+        nav({ to: "/verify-email", search: { email: creds.email } });
+      }
     } catch (error) {
       setErr(authErrorMessage(error));
     } finally {
@@ -86,10 +121,18 @@ function Signup() {
           onSubmit={(e) => {
             e.preventDefault();
             const f = new FormData(e.currentTarget);
-            setCreds({
-              email: String(f.get("email") ?? "").trim(),
-              password: String(f.get("password") ?? ""),
-            });
+            const email = String(f.get("email") ?? "").trim();
+            const password = String(f.get("password") ?? "");
+            if (!isValidEmail(email)) {
+              setCredError("Enter a valid email address.");
+              return;
+            }
+            if (password.length < 8) {
+              setCredError("Use at least 8 characters for your password.");
+              return;
+            }
+            setCredError(undefined);
+            setCreds({ email, password });
             setStep(1);
           }}
         >
@@ -102,6 +145,7 @@ function Signup() {
               label="Email"
               required
               autoComplete="email"
+              defaultValue={creds?.email ?? ""}
             />
             <Field
               id="password"
@@ -113,6 +157,11 @@ function Signup() {
               autoComplete="new-password"
             />
             <p className="text-xs text-muted-foreground">At least 8 characters, with a number.</p>
+            {credError && (
+              <p className="text-sm text-destructive" role="alert">
+                {credError}
+              </p>
+            )}
           </div>
           <Button type="submit" variant="play" size="xl" className="mt-auto w-full lg:mt-6">
             Continue
@@ -125,24 +174,34 @@ function Signup() {
           className="flex flex-1 flex-col"
           onSubmit={(e) => {
             e.preventDefault();
-            if (!taken) setStep(2);
+            const value = displayName.trim();
+            if (value === "") {
+              setNameError("Add a display name — this is how others see you.");
+              return;
+            }
+            if (value.length > 60) {
+              setNameError("Keep the display name to 60 characters or fewer.");
+              return;
+            }
+            setNameError(undefined);
+            setStep(2);
           }}
         >
           <div className="space-y-4">
-            <Field id="display" label="Display name" required autoComplete="name" />
             <Field
-              id="username"
-              label="Username"
+              id="display"
+              label="Display name"
               required
-              value={username}
-              onChange={(e) => setUsername(e.target.value.toLowerCase())}
-              error={taken ? "That username is taken." : undefined}
+              autoComplete="name"
+              maxLength={60}
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              error={nameError}
             />
-            {username && !taken && (
-              <p className="flex items-center gap-1 text-xs text-success">
-                <Check className="size-3.5" />@{username} is available
-              </p>
-            )}
+            <p className="text-xs text-muted-foreground">
+              Your username is generated automatically and shown in your profile. It can&apos;t be
+              changed yet.
+            </p>
           </div>
           <Button type="submit" variant="play" size="xl" className="mt-auto w-full lg:mt-6">
             Continue

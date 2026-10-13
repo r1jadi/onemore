@@ -35,15 +35,15 @@ export const settingsGroups = [
     items: [
       { slug: "privacy", title: "Privacy", desc: "Who can see your activity", icon: Lock },
       { slug: "notifications", title: "Notifications", desc: "Push and email", icon: Bell },
-      { slug: "language", title: "Language", desc: "English", icon: Globe },
-      { slug: "appearance", title: "Appearance", desc: "Theme and density", icon: Palette },
+      { slug: "language", title: "Language", desc: "English, Polski", icon: Globe },
+      { slug: "appearance", title: "Appearance", desc: "Dark, light, system", icon: Palette },
       {
         slug: "accessibility",
         title: "Accessibility",
         desc: "Motion, contrast, text size",
         icon: Accessibility,
       },
-      { slug: "blocked", title: "Blocked users", desc: "2 blocked", icon: ShieldOff },
+      { slug: "blocked", title: "Blocked users", desc: "People you've blocked", icon: ShieldOff },
     ],
   },
   {
@@ -52,7 +52,7 @@ export const settingsGroups = [
       { slug: "help", title: "Help", desc: "FAQ and contact", icon: HelpCircle },
       { slug: "terms", title: "Terms & Conditions", desc: "", icon: ScrollText },
       { slug: "privacy-policy", title: "Privacy Policy", desc: "", icon: FileText },
-      { slug: "about", title: "About", desc: "Version 0.1.0", icon: Info },
+      { slug: "about", title: "About", desc: "Version and source", icon: Info },
     ],
   },
 ];

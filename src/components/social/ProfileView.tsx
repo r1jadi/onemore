@@ -10,7 +10,6 @@ import {
   PageHeader,
   Stat,
   UserName,
-  useMockLoad,
 } from "@/components/common";
 import { ShareSheet } from "@/components/social/Sheets";
 import { Button } from "@/components/ui/button";
@@ -21,7 +20,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
-import { achievements } from "@/lib/mock";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -31,20 +29,21 @@ const tabs = ["Best scores", "Activity", "Saved", "Recent", "Achievements"] as c
  * The identity this view draws.
  *
  * It is deliberately not the API's `Profile`: one view renders both the
- * signed-in user (from `services/users`) and another player's prototype page, and
- * only these fields are common to both. `stats` is absent for the signed-in user
- * because no scores service exists yet — a follower or games-played count here
- * would have to be invented, so the row is simply not drawn.
+ * signed-in user (from `services/users`) and another player's public page, and
+ * only these fields are common to both.
  */
 export type ProfileHeader = {
   username: string;
   name: string;
   bio?: string;
   verified?: boolean;
+  userId?: string;
   isFollowing?: boolean;
   /** Public URL of the profile picture. Absent renders the account's initials. */
   avatarSrc?: string;
   stats?: { followers: number; following: number; played: number };
+  /** When the played count is unknown, hide it rather than showing zero. */
+  hidePlayed?: boolean;
 };
 
 export function ProfileView({
@@ -56,9 +55,8 @@ export function ProfileView({
   user: ProfileHeader;
   self?: boolean;
   /**
-   * Whether the identity is still being fetched. A real screen passes its own
-   * state; without it the prototype's simulated skeleton is used, which is what
-   * the prototype-backed pages rely on.
+   * Whether the identity is still being fetched. Callers pass their own state;
+   * when omitted the view renders content directly (no simulated loading).
    */
   loading?: boolean;
   /**
@@ -68,11 +66,20 @@ export function ProfileView({
    */
   fallback?: ReactNode;
 }) {
-  const simulated = useMockLoad();
-  const skeleton = loading ?? simulated;
+  const skeleton = loading ?? false;
   const [tab, setTab] = useState<(typeof tabs)[number]>("Best scores");
   const [share, setShare] = useState(false);
   const visible = self ? tabs : tabs.filter((t) => t !== "Saved");
+
+  async function block() {
+    try {
+      const { blockUsername } = await import("@/lib/settings/blocked");
+      await blockUsername(user.username);
+      toast.success(`Blocked @${user.username}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't block this account.");
+    }
+  }
 
   return (
     <Page>
@@ -107,13 +114,16 @@ export function ProfileView({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => toast("Report submitted")}>
+                  <DropdownMenuItem
+                    onClick={() =>
+                      toast(
+                        "Reporting is reviewed by moderators. Open an issue to report this account.",
+                      )
+                    }
+                  >
                     Report
                   </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className="text-destructive"
-                    onClick={() => toast(`Blocked @${user.username}`)}
-                  >
+                  <DropdownMenuItem className="text-destructive" onClick={() => void block()}>
                     Block
                   </DropdownMenuItem>
                 </DropdownMenuContent>
@@ -154,7 +164,7 @@ export function ProfileView({
                         label="Following"
                         conn={{ username: user.username, tab: "following" }}
                       />
-                      <Stat value={user.stats.played} label="Games played" />
+                      {!user.hidePlayed && <Stat value={user.stats.played} label="Games played" />}
                     </div>
                   )}
                   <div className="mt-4 flex justify-center gap-2 md:justify-start">
@@ -171,10 +181,15 @@ export function ProfileView({
                       </>
                     ) : (
                       <>
-                        <FollowButton initial={user.isFollowing} size="default" />
+                        <FollowButton
+                          userId={user.userId}
+                          username={user.username}
+                          initial={user.isFollowing}
+                          size="default"
+                        />
                         <Button
                           variant="secondary"
-                          onClick={() => toast("Messages are coming soon")}
+                          onClick={() => toast("Direct messages are not implemented.")}
                         >
                           Message
                         </Button>
@@ -214,18 +229,10 @@ export function ProfileView({
               <GridSkeleton count={4} />
             ) : (
               <>
-                {/*
-                 * The tabs that need recorded activity — best scores, activity,
-                 * saved and recent — have no data source. They used to be filled
-                 * with fixture rows ("Scored 2,140 on Stack 10", four saved
-                 * games) which is exactly the kind of claim this app must not
-                 * make: nothing records scores or saves yet, and none of these
-                 * tabs can tell a real row from an invented one.
-                 */}
                 {tab === "Best scores" && (
                   <EmptyState
                     title="No scores yet"
-                    body="Nothing records scores yet, so there are no personal bests to show."
+                    body="Scores appear here once play history is recorded for this account."
                   />
                 )}
                 {tab === "Activity" && (
@@ -244,27 +251,11 @@ export function ProfileView({
                   />
                 )}
                 {tab === "Achievements" && (
-                  <div className="grid grid-cols-2 gap-3 px-4 md:grid-cols-3 md:px-0">
-                    {achievements.map((a) => (
-                      <div
-                        key={a.id}
-                        className={cn(
-                          "rounded-xl border border-border p-3",
-                          !a.earned && "opacity-50",
-                        )}
-                      >
-                        <Award
-                          className={cn(
-                            "size-5",
-                            a.earned ? "text-primary" : "text-muted-foreground",
-                          )}
-                          strokeWidth={1.75}
-                        />
-                        <p className="mt-3 text-sm font-medium">{a.title}</p>
-                        <p className="text-xs text-muted-foreground">{a.desc}</p>
-                      </div>
-                    ))}
-                  </div>
+                  <EmptyState
+                    icon={Award}
+                    title="No achievements yet"
+                    body="Achievements are not recorded yet, so nothing is shown rather than a sample set."
+                  />
                 )}
               </>
             )}
