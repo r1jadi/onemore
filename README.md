@@ -323,4 +323,4 @@ Linux and is unaffected. Do not commit a repo-wide reformat to silence it.
 
 ## License
 
-Copyright (c) 2026 onemore. All rights reserved. See [LICENSE](LICENSE).
+Copyright (c) 2026 onemore. All rights reserved. See [LICENSE](LICENSE). INTUITA
