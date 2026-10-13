@@ -459,6 +459,51 @@ func TestLeaderboardCallsTheBoardFunctionWithOneRowMoreThanThePage(t *testing.T)
 	}
 }
 
+func TestFollowingGamesCallsTheFeedFunctionWithOneRowMoreThanThePage(t *testing.T) {
+	client, requests := stubServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, `[{"id":"11111111-1111-4111-8111-111111111111",`+
+			`"slug":"creator-hit","title":"Creator Hit","tagline":null,"description":null,`+
+			`"instructions":null,"cover_path":null,"runtime":null,"playable":false,"is_official":false,`+
+			`"published_at":"2026-09-03T12:00:00+00:00","updated_at":"2026-09-03T12:00:00+00:00",`+
+			`"category_slug":"puzzle","category_name":"Puzzle"}]`)
+	})
+
+	games, err := client.FollowingGames(context.Background(), FollowingQuery{FollowerID: testUserID, Limit: 20})
+	if err != nil {
+		t.Fatalf("FollowingGames: %v", err)
+	}
+	if len(games) != 1 || games[0].Slug != "creator-hit" {
+		t.Fatalf("games = %#v, want the followed creator's game", games)
+	}
+	if games[0].Category == nil || games[0].Category.Slug != "puzzle" {
+		t.Fatalf("category = %#v, want the joined category", games[0].Category)
+	}
+
+	sent := (*requests)[0]
+	if sent.method != http.MethodPost || sent.path != "/rest/v1/rpc/following_feed" {
+		t.Fatalf("request = %s %s, want the feed function", sent.method, sent.path)
+	}
+	if sent.body["p_follower"] != testUserID {
+		t.Fatalf("p_follower = %v, want the verified follower", sent.body["p_follower"])
+	}
+	if sent.body["p_limit"] != float64(21) {
+		t.Fatalf("p_limit = %v, want one row past the page", sent.body["p_limit"])
+	}
+}
+
+func TestFollowingGamesRequiresAFollower(t *testing.T) {
+	client, requests := stubServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, `[]`)
+	})
+
+	if _, err := client.FollowingGames(context.Background(), FollowingQuery{Limit: 20}); err == nil {
+		t.Fatal("the feed was read without a follower")
+	}
+	if len(*requests) != 0 {
+		t.Fatal("the database was read without a follower")
+	}
+}
+
 func TestLeaderboardSendsAWindowedBoundary(t *testing.T) {
 	client, requests := stubServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, `[]`)

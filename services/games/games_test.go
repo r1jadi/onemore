@@ -69,6 +69,14 @@ type fakeBackend struct {
 	statCalls  int
 	boardCalls int
 	standCalls int
+	// owners maps a game slug to its creator's user id. Slugs absent from the
+	// map are official ownerless games, which the Following feed must exclude.
+	owners map[string]string
+	// followed maps an owner id to the set of follower ids following them.
+	followed map[string]map[string]bool
+	// lastFollowing records the FollowingQuery the handler built, so tests
+	// assert the follower came from the token rather than a parameter.
+	lastFollowing supabasegames.FollowingQuery
 }
 
 func (b *fakeBackend) ListGames(_ context.Context, query supabasegames.ListQuery) ([]supabasegames.Game, error) {
@@ -84,6 +92,45 @@ func (b *fakeBackend) ListGames(_ context.Context, query supabasegames.ListQuery
 		limit = len(b.games)
 	}
 	return b.games[:limit], nil
+}
+
+func (b *fakeBackend) FollowingGames(_ context.Context, query supabasegames.FollowingQuery) ([]supabasegames.Game, error) {
+	b.listCalls++
+	b.lastFollowing = query
+	if b.err != nil {
+		return nil, b.err
+	}
+	// The fake honours the follower scoping the handler promised: only games
+	// whose owner the follower follows are returned. Ownership lives in the
+	// owners map (slug → owner id); games without an entry are official and
+	// never match any follower.
+	out := make([]supabasegames.Game, 0, len(b.games))
+	for _, game := range b.games {
+		owner, ok := b.owners[game.Slug]
+		if !ok || owner == "" {
+			continue
+		}
+		if followers, ok := b.followed[owner]; !ok || !followers[query.FollowerID] {
+			continue
+		}
+		// Honour the keyset cursor exactly as the SQL does: strictly older
+		// publication time, or the same stamp with a lower id.
+		if query.HasAfter && game.PublishedAt != nil {
+			after := query.AfterPublishedAt
+			switch {
+			case game.PublishedAt.After(after):
+				continue
+			case game.PublishedAt.Equal(after) && game.ID >= query.AfterID:
+				continue
+			}
+		}
+		out = append(out, game)
+	}
+	limit := query.Limit + 1
+	if limit > len(out) {
+		limit = len(out)
+	}
+	return out[:limit], nil
 }
 
 func (b *fakeBackend) GetGame(_ context.Context, slug string) (supabasegames.Game, bool, error) {
@@ -1079,6 +1126,189 @@ func TestUnreadableRankingIsUnavailableWithoutLeaking(t *testing.T) {
 	}
 	message, _ := body["error"].(map[string]any)["message"].(string)
 	for _, leaked := range []string{"game_leaderboard", "executable", "42501"} {
+		if strings.Contains(message, leaked) {
+			t.Fatalf("message %q leaked upstream detail %q", message, leaked)
+		}
+	}
+}
+
+// ── Following feed ──────────────────────────────────────────────────────────
+
+const followingPath = "/api/v1/games/following"
+
+func followingBackend() *fakeBackend {
+	backend := testBackend()
+	base := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	creatorA := "aaaaaaaa-1111-4111-8111-111111111111"
+	creatorB := "bbbbbbbb-2222-4222-8222-222222222222"
+	stranger := "cccccccc-3333-4333-8333-333333333333"
+	backend.games = []supabasegames.Game{
+		testGame(publishedID, "one-move", "One Move", base),
+		testGame(olderID, "creator-hit", "Creator Hit", base.Add(-48*time.Hour)),
+		testGame(oldestID, "stranger-hit", "Stranger Hit", base.Add(-96*time.Hour)),
+	}
+	backend.owners = map[string]string{
+		"one-move":     creatorA,
+		"creator-hit":  creatorB,
+		"stranger-hit": stranger,
+	}
+	backend.followed = map[string]map[string]bool{
+		creatorA: {testUserID: true},
+		creatorB: {testUserID: true},
+	}
+	backend.stats = map[string]int64{"one-move": 3, "creator-hit": 1, "stranger-hit": 9}
+	return backend
+}
+
+func slugs(t *testing.T, body map[string]any) []string {
+	t.Helper()
+	raw, ok := body["items"].([]any)
+	if !ok {
+		t.Fatalf("items = %v, want a list", body["items"])
+	}
+	out := make([]string, 0, len(raw))
+	for _, entry := range raw {
+		item, ok := entry.(map[string]any)
+		if !ok {
+			t.Fatalf("item = %v, want an object", entry)
+		}
+		slug, _ := item["slug"].(string)
+		out = append(out, slug)
+	}
+	return out
+}
+
+func TestFollowingFeedNeedsASession(t *testing.T) {
+	backend := followingBackend()
+	server, _ := testServerWithAuth(t, backend)
+
+	response, err := http.Get(server.URL + followingPath)
+	if err != nil {
+		t.Fatalf("GET %s: %v", followingPath, err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 for an anonymous caller", response.StatusCode)
+	}
+	if backend.listCalls != 0 {
+		t.Fatal("the database was read for an anonymous caller")
+	}
+}
+
+func TestFollowingFeedIsScopedToTheToken(t *testing.T) {
+	backend := followingBackend()
+	server, sign := testServerWithAuth(t, backend)
+
+	// A caller-supplied identity parameter must make no difference: the feed
+	// belongs to the token's subject.
+	status, body := getWithToken(t, server, followingPath+"?userId="+testOtherID+"&followerId="+testOtherID, sign(testUserID))
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	got := slugs(t, body)
+	for _, slug := range got {
+		if slug == "stranger-hit" {
+			t.Fatalf("feed = %v, want no games from unfollowed creators", got)
+		}
+	}
+	if len(got) != 2 {
+		t.Fatalf("feed = %v, want the two followed creators' games", got)
+	}
+	if backend.lastFollowing.FollowerID != testUserID {
+		t.Fatalf("follower = %q, want the token's subject", backend.lastFollowing.FollowerID)
+	}
+}
+
+func TestFollowingFeedExcludesUnrelatedAndOfficialGames(t *testing.T) {
+	backend := followingBackend()
+	// An official ownerless game must never appear, even though it is published.
+	official := testGame("44444444-4444-4444-8444-444444444444", "official-pick", "Official Pick", time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC))
+	backend.games = append([]supabasegames.Game{official}, backend.games...)
+	server, sign := testServerWithAuth(t, backend)
+
+	status, body := getWithToken(t, server, followingPath, sign(testUserID))
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	got := slugs(t, body)
+	for _, slug := range got {
+		if slug == "official-pick" || slug == "stranger-hit" {
+			t.Fatalf("feed = %v, want only followed creators' games", got)
+		}
+	}
+}
+
+func TestFollowingFeedEmptyFollowsIsAnEmptyPage(t *testing.T) {
+	backend := followingBackend()
+	backend.followed = map[string]map[string]bool{}
+	server, sign := testServerWithAuth(t, backend)
+
+	status, body := getWithToken(t, server, followingPath, sign(testUserID))
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	if got := slugs(t, body); len(got) != 0 {
+		t.Fatalf("feed = %v, want an empty page for no follows", got)
+	}
+	if _, hasCursor := body["nextCursor"]; hasCursor && body["nextCursor"] != nil {
+		t.Fatalf("nextCursor = %v, want null on an empty page", body["nextCursor"])
+	}
+}
+
+func TestFollowingFeedPaginatesWithACursor(t *testing.T) {
+	backend := followingBackend()
+	server, sign := testServerWithAuth(t, backend)
+
+	status, first := getWithToken(t, server, followingPath+"?limit=1", sign(testUserID))
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	firstSlugs := slugs(t, first)
+	if len(firstSlugs) != 1 {
+		t.Fatalf("first page = %v, want one game", firstSlugs)
+	}
+	cursor, _ := first["nextCursor"].(string)
+	if cursor == "" {
+		t.Fatal("first page carries no cursor while a second game exists")
+	}
+
+	status, second := getWithToken(t, server, followingPath+"?limit=1&cursor="+cursor, sign(testUserID))
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	secondSlugs := slugs(t, second)
+	if len(secondSlugs) != 1 || secondSlugs[0] == firstSlugs[0] {
+		t.Fatalf("second page = %v, want the remaining game", secondSlugs)
+	}
+}
+
+func TestFollowingFeedRejectsBadParametersBeforeTheDatabase(t *testing.T) {
+	backend := followingBackend()
+	server, sign := testServerWithAuth(t, backend)
+
+	for _, path := range []string{followingPath + "?limit=0", followingPath + "?limit=101", followingPath + "?cursor=bogus"} {
+		calls := backend.listCalls
+		status, _ := getWithToken(t, server, path, sign(testUserID))
+		if status != http.StatusBadRequest {
+			t.Fatalf("GET %s: status = %d, want 400", path, status)
+		}
+		if backend.listCalls != calls {
+			t.Fatalf("GET %s reached the database with an invalid parameter", path)
+		}
+	}
+}
+
+func TestFollowingFeedFailureIsUnavailableWithoutLeaking(t *testing.T) {
+	backend := followingBackend()
+	backend.err = errors.New("following_feed is not executable")
+	server, sign := testServerWithAuth(t, backend)
+
+	status, body := getWithToken(t, server, followingPath, sign(testUserID))
+	if status != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", status)
+	}
+	message, _ := body["error"].(map[string]any)["message"].(string)
+	for _, leaked := range []string{"following_feed", "executable"} {
 		if strings.Contains(message, leaked) {
 			t.Fatalf("message %q leaked upstream detail %q", message, leaked)
 		}

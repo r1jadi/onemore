@@ -5,9 +5,9 @@ import { GameRow } from "@/components/game/GameCard";
 import { Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getAuthState, subscribe as subscribeToAuth } from "@/lib/auth/session";
-import { catalogErrorMessage, useGames } from "@/lib/games/catalog";
+import { catalogErrorMessage } from "@/lib/games/catalog";
+import { useFollowingFeed } from "@/lib/games/following";
 import { listFollowees } from "@/lib/social/follows";
-import { restGet } from "@/lib/supabase/rest";
 import { seo } from "@/lib/seo";
 
 export const Route = createFileRoute("/following")({
@@ -15,19 +15,18 @@ export const Route = createFileRoute("/following")({
   component: Following,
 });
 
-type OwnedGame = { owner_id: string };
-
 /**
- * The Following feed: published games owned by accounts the caller follows.
- * It is not the For You catalogue under another heading — with no follows it
- * explains discovery, and with follows but no published games it says so.
+ * The Following feed: published creator games of followed accounts, served by
+ * `GET /api/v1/games/following` for the verified caller with cursor
+ * pagination. It is never the For You catalogue under another heading:
+ * - follows nobody → discovery empty state;
+ * - follows accounts with no published creator games → accurate empty state;
+ * - follow-list failure vs feed failure → distinct errors with distinct retries.
  */
 function Following() {
   const [authTick, setAuthTick] = useState(0);
-  const [followeeIds, setFolloweeIds] = useState<string[] | undefined>(undefined);
+  const [followeeCount, setFolloweeCount] = useState<number | undefined>(undefined);
   const [followError, setFollowError] = useState<string>();
-  const [ownerFilter, setOwnerFilter] = useState<string[] | undefined>(undefined);
-  void authTick;
 
   useEffect(() => subscribeToAuth(() => setAuthTick((n) => n + 1)), []);
 
@@ -35,42 +34,26 @@ function Following() {
 
   useEffect(() => {
     if (auth.status !== "authenticated") {
-      setFolloweeIds(undefined);
-      setOwnerFilter(undefined);
+      setFolloweeCount(undefined);
+      setFollowError(undefined);
       return;
     }
     let cancelled = false;
     setFollowError(undefined);
     listFollowees(auth.session.userId)
       .then((ids) => {
-        if (cancelled) return;
-        setFolloweeIds(ids);
-        // Resolve which followees own published games, so the catalogue read
-        // below can be scoped to them. Done via the public games projection
-        // rather than inventing attribution.
-        if (ids.length === 0) {
-          setOwnerFilter([]);
-          return;
-        }
-        const filter = `owner_id=in.(${ids.map(encodeURIComponent).join(",")})&status=eq.published&select=owner_id&limit=200`;
-        restGet<OwnedGame[]>(`games?${filter}`)
-          .then((rows) => {
-            if (!cancelled) setOwnerFilter([...new Set(rows.map((r) => r.owner_id))]);
-          })
-          .catch(() => {
-            if (!cancelled) setOwnerFilter(ids);
-          });
+        if (!cancelled) setFolloweeCount(ids.length);
       })
       .catch((error: unknown) => {
         if (!cancelled) {
           setFollowError(error instanceof Error ? error.message : "Couldn't load follows.");
-          setFolloweeIds([]);
-          setOwnerFilter([]);
+          setFolloweeCount(0);
         }
       });
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth.status, authTick]);
 
   if (auth.status !== "authenticated") {
@@ -93,7 +76,7 @@ function Following() {
     );
   }
 
-  if (followeeIds === undefined || ownerFilter === undefined) {
+  if (followeeCount === undefined) {
     return (
       <Page>
         <PageHeader title="Following" />
@@ -115,7 +98,7 @@ function Following() {
     );
   }
 
-  if (followeeIds.length === 0) {
+  if (followeeCount === 0) {
     return (
       <Page>
         <PageHeader title="Following" />
@@ -133,28 +116,33 @@ function Following() {
     );
   }
 
-  if (ownerFilter.length === 0) {
+  return <FollowingGames />;
+}
+
+function FollowingGames() {
+  const feed = useFollowingFeed({ limit: 20 });
+
+  if (feed.status === "anonymous") {
     return (
       <Page>
         <PageHeader title="Following" />
         <EmptyState
           icon={Users}
-          title="No published games yet"
-          body="The creators you follow haven't published any games. Check back later."
+          title="Sign in to follow creators"
+          body="Following keeps the games of people you follow in one place."
+          action={
+            <Button asChild>
+              <Link to="/login" search={{ redirect: "/following" }}>
+                Log in
+              </Link>
+            </Button>
+          }
         />
       </Page>
     );
   }
 
-  return <FollowingGames ownerIds={ownerFilter} />;
-}
-
-function FollowingGames({ ownerIds }: { ownerIds: string[] }) {
-  // The catalogue hook reads the real games API; the owner scoping above
-  // decides *whose* games count as Following. Until the catalogue supports an
-  // owner filter, the list is intersected client-side against the owner set.
-  const { status, items, error, retry } = useGames({ limit: 50 });
-  if (status === "loading") {
+  if (feed.status === "loading") {
     return (
       <Page>
         <PageHeader title="Following" />
@@ -162,35 +150,21 @@ function FollowingGames({ ownerIds }: { ownerIds: string[] }) {
       </Page>
     );
   }
-  if (status === "error") {
+
+  if (feed.status === "error" && feed.items.length === 0) {
     return (
       <Page>
         <PageHeader title="Following" />
-        <ErrorState title="Couldn't load games" body={catalogErrorMessage(error)} onRetry={retry} />
-      </Page>
-    );
-  }
-  const owned = items.filter((game) =>
-    ownerIds.includes((game as unknown as { ownerId?: string }).ownerId ?? ""),
-  );
-  // When the catalogue payload carries no owner attribution, intersecting is
-  // impossible — report that honestly instead of showing the full catalogue.
-  const carriesAttribution = items.some(
-    (game) => (game as unknown as { ownerId?: string }).ownerId !== undefined,
-  );
-  if (!carriesAttribution) {
-    return (
-      <Page>
-        <PageHeader title="Following" />
-        <EmptyState
-          icon={Users}
-          title="Following feed isn't available yet"
-          body="The catalogue doesn't attribute games to creators yet, so a filtered feed can't be built without guessing. Your follows are saved."
+        <ErrorState
+          title="Couldn't load the following feed"
+          body={catalogErrorMessage(feed.error)}
+          onRetry={feed.retry}
         />
       </Page>
     );
   }
-  if (owned.length === 0) {
+
+  if (feed.status === "ready" && feed.items.length === 0) {
     return (
       <Page>
         <PageHeader title="Following" />
@@ -202,14 +176,36 @@ function FollowingGames({ ownerIds }: { ownerIds: string[] }) {
       </Page>
     );
   }
+
+  const items = feed.items;
+  const failedMore = feed.status === "error" && items.length > 0;
+
   return (
     <Page>
-      <PageHeader title="Following" subtitle={`${owned.length} games from creators you follow`} />
+      <PageHeader
+        title="Following"
+        subtitle={`${items.length} games from creators you follow`}
+      />
       <div>
-        {owned.map((game) => (
+        {items.map((game) => (
           <GameRow key={game.slug} game={game} />
         ))}
       </div>
+      {failedMore && (
+        <ErrorState
+          title="Couldn't load more games"
+          body={catalogErrorMessage(feed.error)}
+          onRetry={() => void feed.loadMore()}
+        />
+      )}
+      {!failedMore && feed.status === "ready" && feed.hasMore && (
+        <div className="mt-4 flex justify-center">
+          <Button variant="secondary" onClick={() => void feed.loadMore()}>
+            Load more
+          </Button>
+        </div>
+      )}
+      {!failedMore && feed.status === "loading-more" && <ListSkeleton rows={2} avatar={false} />}
     </Page>
   );
 }

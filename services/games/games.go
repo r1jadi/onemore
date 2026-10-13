@@ -55,6 +55,12 @@ const Name = "games"
 const (
 	// GamesPath lists the catalogue.
 	GamesPath = "/api/v1/games"
+	// FollowingPath lists the caller's Following feed: published creator games
+	// of followed accounts. It lives under /games so the gateway's existing
+	// games binding routes it with no new upstream; it is registered before
+	// GamePath but routing does not depend on order (Go's mux prefers the
+	// static segment over {slug}).
+	FollowingPath = "/api/v1/games/following"
 	// GamePath reads one game. The identifier is the game's slug, not its uuid.
 	GamePath = "/api/v1/games/{slug}"
 	// LeaderboardPath reads one game's persisted ranking. It is optional-auth:
@@ -123,6 +129,10 @@ var (
 // the catalogue routes instead of crash-looping.
 type Backend interface {
 	ListGames(ctx context.Context, query supabasegames.ListQuery) ([]supabasegames.Game, error)
+	// FollowingGames reads one Following-feed page for the verified follower.
+	// The follower id comes from the JWT identity the handler resolved, never
+	// from a request parameter.
+	FollowingGames(ctx context.Context, query supabasegames.FollowingQuery) ([]supabasegames.Game, error)
 	GetGame(ctx context.Context, slug string) (supabasegames.Game, bool, error)
 	CategoryID(ctx context.Context, slug string) (string, bool, error)
 	CategoryCounts(ctx context.Context) ([]supabasegames.CategoryCount, error)
@@ -277,6 +287,9 @@ func newService(backend Backend, logger *slog.Logger) *service {
 // the router agree and a client gets a documented 501 rather than a 404.
 func (s *service) register(router *httpx.Router) {
 	router.PublicFunc("GET "+GamesPath, s.listGames)
+	// Authenticated: the feed is scoped to the verified caller. Anonymous
+	// callers are refused with 401 rather than served a public substitute.
+	router.AuthenticatedFunc("GET "+FollowingPath, s.followingFeed)
 	router.PublicFunc("GET "+GamePath, s.getGame)
 	router.PublicFunc("GET "+CategoriesPath, s.listCategories)
 	// Optional auth: the board is public, and a token only adds the caller's own
@@ -339,6 +352,62 @@ func (s *service) listGames(w http.ResponseWriter, r *http.Request) {
 		for _, game := range games[:min(len(games), limit)] {
 			// A game published between the two reads has no stat row yet; zero is
 			// then the truth about it, not a substitute for an unknown.
+			items = append(items, view(game, stats[game.Slug].Plays))
+		}
+	}
+
+	var next *string
+	if len(games) > limit {
+		if cursor := nextCursor(games[limit-1]); cursor != "" {
+			next = &cursor
+		}
+	}
+	httpx.WriteJSON(w, r, http.StatusOK, gameListResponse{Items: items, NextCursor: next})
+}
+
+// followingFeed answers the caller's Following feed.
+//
+// The caller is resolved from the verified JWT identity the middleware placed
+// in the context. There is no user-id parameter to get wrong: the only identity
+// this handler can ever answer for is the one that proved itself with a token.
+// The database function restricts output to published, creator-owned games of
+// followed accounts in catalogue order; official ownerless games are excluded
+// by the function, not by client filtering. Pagination is the same keyset
+// cursor as the catalogue, so a game published between pages lands on a later
+// page rather than duplicating a row.
+func (s *service) followingFeed(w http.ResponseWriter, r *http.Request) {
+	if s.backend == nil {
+		s.notConfigured(w, r, "read the following feed")
+		return
+	}
+
+	id, ok := identity.FromContext(r.Context())
+	if !ok || id.Anonymous || id.UserID == "" {
+		httpx.WriteError(w, r, httpx.NewError(httpx.CodeUnauthorized, "Sign in to view your following feed."))
+		return
+	}
+
+	query, failure := parseFollowingQuery(r, id.UserID)
+	if failure != nil {
+		httpx.WriteError(w, r, failure)
+		return
+	}
+
+	games, err := s.backend.FollowingGames(r.Context(), query.FollowingQuery)
+	if err != nil {
+		s.dataFailure(w, r, "read the following feed", err)
+		return
+	}
+
+	limit := query.Limit
+	items := make([]gameView, 0, min(len(games), limit))
+	if len(games) > 0 {
+		stats, statErr := s.backend.GameStats(r.Context())
+		if statErr != nil {
+			s.dataFailure(w, r, "read play counts", statErr)
+			return
+		}
+		for _, game := range games[:min(len(games), limit)] {
 			items = append(items, view(game, stats[game.Slug].Plays))
 		}
 	}
@@ -616,6 +685,62 @@ func parseListQuery(r *http.Request) (listQuery, error) {
 				apierr.Detail{Field: "category", Rule: "format"})
 		}
 		query.CategorySlug = raw
+	}
+
+	if raw := strings.TrimSpace(values.Get("q")); raw != "" {
+		if len([]rune(raw)) > maxSearchRunes {
+			return query, httpx.NewError(httpx.CodeBadRequest,
+				"Search terms are limited to 100 characters.",
+				apierr.Detail{Field: "q", Rule: "maxLength"})
+		}
+		term, ok := supabasegames.SearchTerm(raw)
+		if !ok {
+			return query, httpx.NewError(httpx.CodeBadRequest,
+				"That search has no searchable characters.",
+				apierr.Detail{Field: "q", Rule: "invalid"})
+		}
+		query.Search = term
+	}
+
+	if raw := strings.TrimSpace(values.Get("cursor")); raw != "" {
+		if len(raw) > maxCursorLength {
+			return query, httpx.NewError(httpx.CodeBadRequest,
+				"That cursor is not valid.",
+				apierr.Detail{Field: "cursor", Rule: "maxLength"})
+		}
+		after, id, err := decodeCursor(raw)
+		if err != nil {
+			return query, httpx.NewError(httpx.CodeBadRequest,
+				"That cursor is not valid.",
+				apierr.Detail{Field: "cursor", Rule: "format"})
+		}
+		query.AfterPublishedAt, query.AfterID, query.HasAfter = after, id, true
+	}
+
+	return query, nil
+}
+
+// followingQuery is one Following-feed page: the verified follower plus the
+// same limit/cursor/search contract as the catalogue.
+type followingQuery struct {
+	supabasegames.FollowingQuery
+}
+
+// parseFollowingQuery validates a Following-feed request. The follower comes
+// from the verified identity argument, never from the query string, so a
+// caller cannot ask for another user's feed.
+func parseFollowingQuery(r *http.Request, followerID string) (followingQuery, error) {
+	values := r.URL.Query()
+	query := followingQuery{FollowingQuery: supabasegames.FollowingQuery{FollowerID: followerID, Limit: defaultPageLimit}}
+
+	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
+		limit, err := strconv.Atoi(raw)
+		if err != nil || limit < 1 || limit > maxPageLimit {
+			return query, httpx.NewError(httpx.CodeBadRequest,
+				"limit must be a whole number between 1 and 100.",
+				apierr.Detail{Field: "limit", Rule: "range"})
+		}
+		query.Limit = limit
 	}
 
 	if raw := strings.TrimSpace(values.Get("q")); raw != "" {

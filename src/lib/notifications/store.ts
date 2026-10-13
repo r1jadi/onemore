@@ -69,17 +69,19 @@ export async function fetchNotifications(limit = 50): Promise<AppNotification[]>
 export async function fetchUnreadCount(): Promise<number> {
   const token = getAccessToken();
   const auth = getAuthState();
-  if (!token || auth.status !== "authenticated") return 0;
+  if (!token || auth.status !== "authenticated") {
+    throw new ApiError("Sign in to view notifications.", { code: "unauthorized", status: 401 });
+  }
   try {
     const rows = await restGet<Array<{ id: string }>>(
       "notifications?select=id&read_at=is.null&limit=100",
       token,
     );
     return rows.length;
-  } catch {
-    // A failed badge read is not a badge: callers render no count and the
-    // page itself reports the failure with a retry.
-    return 0;
+  } catch (error) {
+    // A failure is never a zero: callers distinguish it via UnreadBadgeState
+    // and render no badge with a retry path.
+    throw toApiError(error);
   }
 }
 
@@ -164,16 +166,53 @@ export function useNotifications(): NotificationsState & { retry: () => void } {
   return { ...state, retry } as NotificationsState & { retry: () => void };
 }
 
-/** Reactive unread badge count: zero while anonymous, loading or failed. */
-export function useUnreadCount(): number {
-  const [count, setCount] = useState(0);
+/**
+ * Reactive unread badge state.
+ *
+ * - `anonymous`: no account, so no account-specific badge — render nothing.
+ * - `loading`: the count is not known yet — render nothing, not zero.
+ * - `ready`: the request succeeded; `count` may be a genuine zero (render the
+ *   unread-free state) or a positive number (render the badge).
+ * - `error`: the request failed — render no badge and offer `retry`; the
+ *   failure must never look like a successful zero.
+ */
+export type UnreadBadgeState =
+  | { status: "anonymous"; count: 0 }
+  | { status: "loading"; count: 0 }
+  | { status: "ready"; count: number }
+  | { status: "error"; count: 0; error: ApiError };
+
+export function useUnreadCount(): UnreadBadgeState & { retry: () => void } {
   const [tick, setTick] = useState(0);
+  const [state, setState] = useState<UnreadBadgeState>(() =>
+    getAuthState().status === "authenticated"
+      ? { status: "loading", count: 0 }
+      : { status: "anonymous", count: 0 },
+  );
 
   useEffect(() => {
+    if (getAuthState().status !== "authenticated") {
+      setState({ status: "anonymous", count: 0 });
+      return;
+    }
     let cancelled = false;
-    void fetchUnreadCount().then((value) => {
-      if (!cancelled) setCount(value);
-    });
+    setState({ status: "loading", count: 0 });
+    fetchUnreadCount()
+      .then((count) => {
+        if (!cancelled) setState({ status: "ready", count });
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setState({
+            status: "error",
+            count: 0,
+            error:
+              error instanceof ApiError
+                ? error
+                : new ApiError("Couldn't load notifications."),
+          });
+        }
+      });
     return () => {
       cancelled = true;
     };
@@ -182,14 +221,17 @@ export function useUnreadCount(): number {
   useEffect(
     () =>
       subscribeToAuth(() => {
-        const auth = getAuthState();
-        if (auth.status !== "authenticated") setCount(0);
-        else setTick((n) => n + 1);
+        if (getAuthState().status !== "authenticated") {
+          setState({ status: "anonymous", count: 0 });
+        } else {
+          setTick((n) => n + 1);
+        }
       }),
     [],
   );
 
-  return count;
+  const retry = useCallback(() => setTick((n) => n + 1), []);
+  return { ...state, retry } as UnreadBadgeState & { retry: () => void };
 }
 
 /** Human-readable line for a notification row. Never invents actor names. */

@@ -42,8 +42,10 @@ const desktop = [
 /**
  * Main navigation. Authentication comes from the single reactive session
  * store; the Admin link additionally requires the backend to confirm a staff
- * role (fail closed while loading). The notification badge is the real unread
- * count for the signed-in user — zero while anonymous — never a fixture.
+ * role (fail closed while loading). The notification badge renders only for a
+ * successful (`ready`) unread-count read with a positive count: anonymous,
+ * loading and failed reads render no badge, and a genuine zero renders the
+ * unread-free state (also no badge) — never a fixture number.
  */
 export function AppShell({ children }: { children: ReactNode }) {
   const path = useRouterState({ select: (s) => s.location.pathname });
@@ -51,6 +53,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   const unread = useUnreadCount();
   const showAdmin = useAdminVisibility();
   void auth;
+  // A badge only when the count is known-good and positive. Every other state
+  // (anonymous, loading, genuine zero, failure) shows no badge; the failure
+  // case is retryable via `unread.retry` without breaking navigation.
+  const showBadge = unread.status === "ready" && unread.count > 0;
   const isActive = (to: string) => (to === "/" ? path === "/" : path.startsWith(to));
   const feed = path === "/" || path === "/following";
 
@@ -72,9 +78,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             >
               <Icon className="size-[18px]" strokeWidth={1.75} />
               <span className="flex-1">{label}</span>
-              {to === "/notifications" && unread > 0 && (
+              {to === "/notifications" && showBadge && (
                 <span className="rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground tabular">
-                  {unread}
+                  {unread.count}
                 </span>
               )}
             </Link>
@@ -133,10 +139,10 @@ export function AppShell({ children }: { children: ReactNode }) {
               >
                 <Icon className="size-[22px]" strokeWidth={isActive(to) ? 2.1 : 1.75} />
                 {label}
-                {to === "/notifications" && unread > 0 && (
+                {to === "/notifications" && showBadge && (
                   <span
                     className="absolute top-2.5 left-1/2 ml-2 size-2 rounded-full bg-primary"
-                    aria-label={`${unread} unread`}
+                    aria-label={`${unread.count} unread`}
                   />
                 )}
               </Link>

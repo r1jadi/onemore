@@ -180,6 +180,24 @@ type ListQuery struct {
 	HasAfter         bool
 }
 
+// FollowingQuery describes one page of the authenticated Following feed: the
+// published creator games of the accounts FollowerID follows. Same keyset
+// cursor contract as ListQuery so paging is stable across publishes.
+type FollowingQuery struct {
+	// FollowerID is the verified caller. It is filled by the handler from the
+	// JWT identity, never from a query parameter.
+	FollowerID string
+	// Limit is the page size, 1..100.
+	Limit int
+	// Search is the sanitised substring match (see SearchTerm), or "".
+	Search string
+	// AfterID and AfterPublishedAt are the keyset cursor. HasAfter is false
+	// for the first page.
+	AfterID          string
+	AfterPublishedAt time.Time
+	HasAfter         bool
+}
+
 // ListGames reads one page of published games.
 //
 // It returns at most `query.Limit + 1` rows: when the result has more than
@@ -215,6 +233,48 @@ func (c *Client) ListGames(ctx context.Context, query ListQuery) ([]Game, error)
 
 	rows, err := getRows[row](c, ctx, "list-games", "/rest/v1/games?"+params.Encode())
 	if err != nil {
+		return nil, err
+	}
+
+	games := make([]Game, 0, len(rows))
+	for _, row := range rows {
+		games = append(games, row.game())
+	}
+	return games, nil
+}
+
+// FollowingGames reads one page of the follower's feed through the
+// `following_feed` RPC: published, creator-owned games of followed accounts,
+// newest first. It returns at most `query.Limit + 1` rows so the caller learns
+// another page exists without a COUNT. An empty follow list is an empty result,
+// not an error. Official ownerless games never appear here by the function's
+// own predicate, not by client filtering.
+func (c *Client) FollowingGames(ctx context.Context, query FollowingQuery) ([]Game, error) {
+	if query.FollowerID == "" {
+		return nil, errors.New("a following feed needs the follower")
+	}
+	if query.Limit < 1 {
+		return nil, errors.New("a feed page needs a positive limit")
+	}
+
+	payload := map[string]any{
+		"p_follower": query.FollowerID,
+		"p_limit":    query.Limit + 1,
+		"p_search":   nil,
+	}
+	if query.Search != "" {
+		payload["p_search"] = query.Search
+	}
+	if query.HasAfter {
+		payload["p_after_published_at"] = query.AfterPublishedAt.UTC().Format(time.RFC3339Nano)
+		payload["p_after_id"] = query.AfterID
+	} else {
+		payload["p_after_published_at"] = nil
+		payload["p_after_id"] = nil
+	}
+
+	var rows []feedRow
+	if err := c.rpc(ctx, "following-feed", "following_feed", payload, &rows); err != nil {
 		return nil, err
 	}
 
@@ -548,6 +608,47 @@ type categoryRow struct {
 	ID   string `json:"id"`
 	Slug string `json:"slug"`
 	Name string `json:"name"`
+}
+
+// feedRow is one `following_feed` RPC row: the same game projection as `row`
+// but flat, because an RPC cannot embed a joined relation. `game()` maps it
+// onto the public view exactly as the catalogue does.
+type feedRow struct {
+	ID           string     `json:"id"`
+	Slug         string     `json:"slug"`
+	Title        string     `json:"title"`
+	Tagline      *string    `json:"tagline"`
+	Description  *string    `json:"description"`
+	Instructions *string    `json:"instructions"`
+	CoverPath    *string    `json:"cover_path"`
+	Runtime      *string    `json:"runtime"`
+	Playable     bool       `json:"playable"`
+	IsOfficial   bool       `json:"is_official"`
+	PublishedAt  *time.Time `json:"published_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	CategorySlug *string    `json:"category_slug"`
+	CategoryName *string    `json:"category_name"`
+}
+
+func (r feedRow) game() Game {
+	game := Game{
+		ID:           r.ID,
+		Slug:         r.Slug,
+		Title:        r.Title,
+		Tagline:      r.Tagline,
+		Description:  r.Description,
+		Instructions: r.Instructions,
+		CoverPath:    r.CoverPath,
+		Runtime:      r.Runtime,
+		Playable:     r.Playable,
+		IsOfficial:   r.IsOfficial,
+		PublishedAt:  r.PublishedAt,
+		UpdatedAt:    r.UpdatedAt,
+	}
+	if r.CategorySlug != nil && r.CategoryName != nil {
+		game.Category = &Category{Slug: *r.CategorySlug, Name: *r.CategoryName}
+	}
+	return game
 }
 
 // categoryCountRow is one `category_game_counts` row.

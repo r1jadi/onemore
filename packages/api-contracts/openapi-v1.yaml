@@ -528,6 +528,40 @@ paths:
         "409": { $ref: "#/components/responses/Conflict" }
         "501": { $ref: "#/components/responses/NotImplemented" }
 
+  /games/following:
+    get:
+      operationId: listFollowingFeed
+      tags: [games]
+      summary: Read the caller's Following feed
+      description: |
+        Published creator-owned games of the accounts the verified caller
+        follows, newest first. The follower is taken from the verified access
+        token; there is no user-id parameter. Official ownerless games are
+        excluded by the database function, not by client filtering, and only
+        published games the viewer may see are returned. Cursor pagination uses
+        the same opaque keyset cursor as the catalogue. An empty follow list is
+        an empty page, not an error; anonymous callers are refused with 401.
+      x-status: available
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: q
+          in: query
+          description: |
+            Case-insensitive substring match over a game's title, tagline and
+            description, scoped to the feed.
+          schema: { type: string, maxLength: 100 }
+      responses:
+        "200":
+          description: A page of the caller's Following feed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GameList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
   /games/{slug}:
     parameters:
       - $ref: "#/components/parameters/GameSlug"

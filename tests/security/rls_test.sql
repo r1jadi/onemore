@@ -1258,6 +1258,108 @@ select rls_test.ok(
   'an unpublished game is not in the public aggregate at all'
 );
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- New surfaces: preferences, blocks, follow notifications, following feed
+-- ─────────────────────────────────────────────────────────────────────────────
+
+select set_config('request.jwt.claims',
+  json_build_object('sub', :'alice', 'role', 'authenticated')::text, true);
+set local role authenticated;
+
+-- Preferences are strictly per-user.
+select rls_test.allow(
+  $$insert into public.user_preferences (user_id, private_account) values ('11111111-1111-4111-8111-111111111111', true)
+    on conflict (user_id) do update set private_account = excluded.private_account$$,
+  'a player can write their own preferences'
+);
+select rls_test.visible($$select user_id from public.user_preferences where user_id = '11111111-1111-4111-8111-111111111111'$$, 1,
+  'a player reads their own preferences');
+select rls_test.visible($$select user_id from public.user_preferences where user_id = '22222222-2222-4222-8222-222222222222'$$, 0,
+  'another player''s preferences are invisible');
+select rls_test.denied(
+  $$insert into public.user_preferences (user_id) values ('22222222-2222-4222-8222-222222222222')$$,
+  'a player cannot write another user''s preferences'
+);
+
+-- Blocks are strictly per-user, and self-blocks are rejected.
+select rls_test.allow(
+  $$insert into public.blocked_users (blocker_id, blocked_id) values ('11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222')
+    on conflict do nothing$$,
+  'a player can block another account'
+);
+select rls_test.visible($$select blocked_id from public.blocked_users where blocker_id = '11111111-1111-4111-8111-111111111111'$$, 1,
+  'a player reads their own block list');
+select rls_test.rejected(
+  $$insert into public.blocked_users (blocker_id, blocked_id) values ('11111111-1111-4111-8111-111111111111', '11111111-1111-4111-8111-111111111111')$$,
+  'self-blocking is rejected'
+);
+select rls_test.denied(
+  $$insert into public.blocked_users (blocker_id, blocked_id) values ('22222222-2222-4222-8222-222222222222', '33333333-3333-4333-8333-333333333333')$$,
+  'a player cannot block as another user'
+);
+
+-- A genuine follow notifies the followee, and only the followee.
+select rls_test.allow(
+  $$insert into public.follows (follower_id, followee_id) values ('11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222')$$,
+  'a player can follow another account'
+);
+select rls_test.ok(
+  rls_test.count_rows($$select 1 from public.notifications where user_id = '11111111-1111-4111-8111-111111111111' and kind = 'follow'$$) = 0,
+  'a follow notifies nobody except the followee'
+);
+-- Notification rows belong to the followee, so only the followee (or the
+-- table owner, who bypasses RLS) can count them — alice reading bob's inbox
+-- must see zero rows even though the row exists.
+select rls_test.visible($$select 1 from public.notifications where user_id = '22222222-2222-4222-8222-222222222222' and kind = 'follow'$$, 0,
+  'a follow notification is invisible to anyone but its recipient');
+reset role;
+select rls_test.ok(
+  rls_test.count_rows($$select 1 from public.notifications where user_id = '22222222-2222-4222-8222-222222222222' and kind = 'follow'$$) = 1,
+  'a follow creates exactly one follow notification for the followee'
+);
+select set_config('request.jwt.claims',
+  json_build_object('sub', :'alice', 'role', 'authenticated')::text, true);
+set local role authenticated;
+select rls_test.blocked(
+  $$insert into public.follows (follower_id, followee_id) values ('11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222')
+    on conflict do nothing$$,
+  'following an already-followed account touches no row (idempotent retry, no duplicate notification)'
+);
+
+-- The Following feed: bob's published game appears for alice, drafts and
+-- official ownerless games do not, and strangers' games do not.
+select rls_test.ok(
+  (select count(*) from public.following_feed('11111111-1111-4111-8111-111111111111', 50)) >= 1,
+  'a follower''s feed is non-empty'
+);
+select rls_test.ok(
+  (select count(*) from public.following_feed('11111111-1111-4111-8111-111111111111', 50) where slug = 'fixture-bob') = 1,
+  'the feed contains the followed creator''s published game'
+);
+select rls_test.ok(
+  (select count(*) from public.following_feed('11111111-1111-4111-8111-111111111111', 50) where slug = 'fixture-draft') = 0,
+  'the feed never contains drafts'
+);
+select rls_test.ok(
+  (select count(*) from public.following_feed('11111111-1111-4111-8111-111111111111', 50) where is_official) = 0,
+  'the feed never contains official ownerless games'
+);
+select rls_test.ok(
+  (select count(*) from public.following_feed('33333333-3333-4333-8333-333333333333', 50)) = 0,
+  'an account that follows nobody gets an empty feed, not an error'
+);
+
+reset role;
+
+-- The feed reads public rows, so anonymous execution reveals nothing private.
+select set_config('request.jwt.claims', '{"role":"anon"}', true);
+set local role anon;
+select rls_test.ok(
+  (select count(*) from public.following_feed('11111111-1111-4111-8111-111111111111', 50) where slug = 'fixture-bob') = 1,
+  'the feed output is public data either way'
+);
+reset role;
+
 rollback;
 
 \echo 'RLS suite passed.'
