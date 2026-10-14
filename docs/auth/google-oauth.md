@@ -33,9 +33,9 @@ the frontend.
    Application type **Web application**.
 2. Authorized JavaScript origins:
    - `https://onemorestartup.vercel.app`
-   - `https://dmqrdtoigbzcgmwskmhl.supabase.co`
+   - `https://trrwaftksifjaiaxfmiu.supabase.co`
 3. Authorized redirect URIs (exact, Supabase callback):
-   - `https://dmqrdtoigbzcgmwskmhl.supabase.co/auth/v1/callback`
+   - `https://trrwaftksifjaiaxfmiu.supabase.co/auth/v1/callback`
 4. Keep the client secret in the Google console; it is entered in Supabase, not
    in this repo.
 

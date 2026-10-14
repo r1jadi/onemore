@@ -178,8 +178,13 @@ dashboard access:
 
 1. **Supabase project — done, and no migration was needed.** The CLI is installed
    and authenticated, the project is `onemorestartup`
-   (`dmqrdtoigbzcgmwskmhl.supabase.co`), and the hosted schema was inspected
-   directly: `public.profiles` and `public.user_roles` match
+   (`trrwaftksifjaiaxfmiu.supabase.co`), and the hosted schema was inspected
+   directly. **Caution:** this note previously named the ref
+   `dmqrdtoigbzcgmwskmhl.supabase.co` (the CLI link in `supabase/.temp` still
+   points there). Re-confirm the schema inspection against
+   `trrwaftksifjaiaxfmiu` before relying on it, and re-run `supabase link`
+   against the correct project before any CLI database work:
+   `public.profiles` and `public.user_roles` match
    `supabase/migrations/20261005120000_core_schema.sql` and
    `20261005120100_rls_and_grants.sql` column for column, the object policies match
    `20261005120200_storage_buckets.sql`, and the `on_auth_user_created` trigger
