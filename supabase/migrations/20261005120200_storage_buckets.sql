@@ -62,10 +62,12 @@ on conflict (id) do update
 --   avatars/<user-id>/<file>
 -- ─────────────────────────────────────────────────────────────────────────────
 
+drop policy if exists "avatars_public_read" on storage.objects;
 create policy "avatars_public_read"
   on storage.objects for select to anon, authenticated
   using (bucket_id = 'avatars');
 
+drop policy if exists "avatars_owner_insert" on storage.objects;
 create policy "avatars_owner_insert"
   on storage.objects for insert to authenticated
   with check (
@@ -73,6 +75,7 @@ create policy "avatars_owner_insert"
     and (storage.foldername(name))[1] = auth.uid()::text
   );
 
+drop policy if exists "avatars_owner_update" on storage.objects;
 create policy "avatars_owner_update"
   on storage.objects for update to authenticated
   using (
@@ -84,6 +87,7 @@ create policy "avatars_owner_update"
     and (storage.foldername(name))[1] = auth.uid()::text
   );
 
+drop policy if exists "avatars_owner_delete" on storage.objects;
 create policy "avatars_owner_delete"
   on storage.objects for delete to authenticated
   using (
@@ -91,10 +95,12 @@ create policy "avatars_owner_delete"
     and (storage.foldername(name))[1] = auth.uid()::text
   );
 
+drop policy if exists "game_assets_public_read" on storage.objects;
 create policy "game_assets_public_read"
   on storage.objects for select to anon, authenticated
   using (bucket_id = 'game-assets');
 
+drop policy if exists "game_assets_owner_insert" on storage.objects;
 create policy "game_assets_owner_insert"
   on storage.objects for insert to authenticated
   with check (
@@ -102,6 +108,7 @@ create policy "game_assets_owner_insert"
     and (storage.foldername(name))[1] = auth.uid()::text
   );
 
+drop policy if exists "game_assets_owner_delete" on storage.objects;
 create policy "game_assets_owner_delete"
   on storage.objects for delete to authenticated
   using (
@@ -111,6 +118,7 @@ create policy "game_assets_owner_delete"
 
 -- game-builds is private: only the owner reads and writes, and the public web
 -- app never links to it directly.
+drop policy if exists "game_builds_owner_read" on storage.objects;
 create policy "game_builds_owner_read"
   on storage.objects for select to authenticated
   using (
@@ -118,6 +126,7 @@ create policy "game_builds_owner_read"
     and (storage.foldername(name))[1] = auth.uid()::text
   );
 
+drop policy if exists "game_builds_owner_insert" on storage.objects;
 create policy "game_builds_owner_insert"
   on storage.objects for insert to authenticated
   with check (
@@ -125,6 +134,7 @@ create policy "game_builds_owner_insert"
     and (storage.foldername(name))[1] = auth.uid()::text
   );
 
+drop policy if exists "game_builds_owner_delete" on storage.objects;
 create policy "game_builds_owner_delete"
   on storage.objects for delete to authenticated
   using (
@@ -133,6 +143,7 @@ create policy "game_builds_owner_delete"
   );
 
 -- Staff moderation reads submissions without gaining write access to them.
+drop policy if exists "game_builds_staff_read" on storage.objects;
 create policy "game_builds_staff_read"
   on storage.objects for select to authenticated
   using (bucket_id = 'game-builds' and public.is_staff());

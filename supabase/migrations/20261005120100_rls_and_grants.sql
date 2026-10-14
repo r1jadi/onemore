@@ -83,10 +83,12 @@ begin
 end;
 $$;
 
+drop trigger if exists games_stamp_publication on public.games;
 create trigger games_stamp_publication
   before update on public.games
   for each row execute function public.stamp_game_publication();
 
+drop trigger if exists games_owner_is_immutable on public.games;
 create trigger games_owner_is_immutable
   before update on public.games
   for each row
@@ -109,6 +111,7 @@ begin
 end;
 $$;
 
+drop trigger if exists reports_stamp_resolution on public.reports;
 create trigger reports_stamp_resolution
   before update on public.reports
   for each row execute function public.stamp_report_resolution();
@@ -212,10 +215,12 @@ alter table public.notifications enable row level security;
 alter table public.analytics_events enable row level security;
 
 -- profiles ---------------------------------------------------------------------
+drop policy if exists profiles_select_public on public.profiles;
 create policy profiles_select_public
   on public.profiles for select to anon, authenticated
   using (true);
 
+drop policy if exists profiles_update_self on public.profiles;
 create policy profiles_update_self
   on public.profiles for update to authenticated
   using (auth.uid() = id)
@@ -227,49 +232,59 @@ create policy profiles_update_self
 -- user_roles -------------------------------------------------------------------
 -- Read your own role (the UI needs it) and let staff read the roster. There is
 -- no write policy at all: role changes require the service_role key.
+drop policy if exists user_roles_select_own on public.user_roles;
 create policy user_roles_select_own
   on public.user_roles for select to authenticated
   using (auth.uid() = user_id);
 
+drop policy if exists user_roles_select_staff on public.user_roles;
 create policy user_roles_select_staff
   on public.user_roles for select to authenticated
   using (public.is_staff());
 
 -- categories -------------------------------------------------------------------
+drop policy if exists categories_select_public on public.categories;
 create policy categories_select_public
   on public.categories for select to anon, authenticated
   using (true);
 
 -- games ------------------------------------------------------------------------
+drop policy if exists games_select_visible on public.games;
 create policy games_select_visible
   on public.games for select to anon, authenticated
   using (status = 'published' or owner_id = auth.uid() or public.is_staff());
 
+drop policy if exists games_insert_own_draft on public.games;
 create policy games_insert_own_draft
   on public.games for insert to authenticated
   with check (owner_id = auth.uid() and status in ('draft', 'review'));
 
 -- An owner may edit their game, but publishing is a moderation decision: the
 -- owner can only hold it in draft/review. Unpublishing is allowed.
+drop policy if exists games_update_own on public.games;
 create policy games_update_own
   on public.games for update to authenticated
   using (owner_id = auth.uid())
   with check (owner_id = auth.uid() and status in ('draft', 'review'));
 
+drop policy if exists games_delete_own_draft on public.games;
 create policy games_delete_own_draft
   on public.games for delete to authenticated
   using (owner_id = auth.uid() and status = 'draft');
 
+drop policy if exists games_moderate_staff on public.games;
 create policy games_moderate_staff
   on public.games for update to authenticated
   using (public.is_staff())
   with check (public.is_staff());
 
 -- game_sessions ----------------------------------------------------------------
+drop policy if exists game_sessions_select_own on public.game_sessions;
 create policy game_sessions_select_own
   on public.game_sessions for select to authenticated
   using (auth.uid() = user_id or public.is_staff());
 
+drop policy if exists game_sessions_insert_own on public.game_sessions;
 create policy game_sessions_insert_own
   on public.game_sessions for insert to authenticated
   with check (user_id = auth.uid() and completed_at is null and abandoned_at is null);
@@ -277,6 +292,7 @@ create policy game_sessions_insert_own
 
 -- scores -----------------------------------------------------------------------
 -- Readable when the game is visible to the caller; never writable by a client.
+drop policy if exists scores_select_visible on public.scores;
 create policy scores_select_visible
   on public.scores for select to anon, authenticated
   using (
@@ -288,10 +304,12 @@ create policy scores_select_visible
   );
 
 -- comments ---------------------------------------------------------------------
+drop policy if exists comments_select_visible on public.comments;
 create policy comments_select_visible
   on public.comments for select to anon, authenticated
   using (not is_hidden or author_id = auth.uid() or public.is_staff());
 
+drop policy if exists comments_insert_own on public.comments;
 create policy comments_insert_own
   on public.comments for insert to authenticated
   with check (
@@ -301,37 +319,45 @@ create policy comments_insert_own
     and exists (select 1 from public.games g where g.id = game_id and g.status = 'published')
   );
 
+drop policy if exists comments_update_own_body on public.comments;
 create policy comments_update_own_body
   on public.comments for update to authenticated
   using (author_id = auth.uid())
   with check (author_id = auth.uid() and not is_hidden);
 
+drop policy if exists comments_delete_own_or_staff on public.comments;
 create policy comments_delete_own_or_staff
   on public.comments for delete to authenticated
   using (author_id = auth.uid() or public.is_staff());
 
 -- likes ------------------------------------------------------------------------
+drop policy if exists likes_select_public on public.likes;
 create policy likes_select_public
   on public.likes for select to anon, authenticated
   using (true);
 
+drop policy if exists likes_insert_own on public.likes;
 create policy likes_insert_own
   on public.likes for insert to authenticated
   with check (user_id = auth.uid());
 
+drop policy if exists likes_delete_own on public.likes;
 create policy likes_delete_own
   on public.likes for delete to authenticated
   using (user_id = auth.uid());
 
 -- follows ----------------------------------------------------------------------
+drop policy if exists follows_select_public on public.follows;
 create policy follows_select_public
   on public.follows for select to anon, authenticated
   using (true);
 
+drop policy if exists follows_insert_own on public.follows;
 create policy follows_insert_own
   on public.follows for insert to authenticated
   with check (follower_id = auth.uid());
 
+drop policy if exists follows_delete_own on public.follows;
 create policy follows_delete_own
   on public.follows for delete to authenticated
   using (follower_id = auth.uid());
@@ -339,6 +365,7 @@ create policy follows_delete_own
 -- reports ----------------------------------------------------------------------
 -- A reporter may create a report and read their own; only staff read the queue
 -- and only staff resolve. `resolved_by` is stamped by a trigger from auth.uid().
+drop policy if exists reports_insert_own on public.reports;
 create policy reports_insert_own
   on public.reports for insert to authenticated
   with check (
@@ -348,29 +375,35 @@ create policy reports_insert_own
     and resolved_at is null
   );
 
+drop policy if exists reports_select_own_or_staff on public.reports;
 create policy reports_select_own_or_staff
   on public.reports for select to authenticated
   using (reporter_id = auth.uid() or public.is_staff());
 
+drop policy if exists reports_update_staff on public.reports;
 create policy reports_update_staff
   on public.reports for update to authenticated
   using (public.is_staff())
   with check (public.is_staff());
 
 -- moderation_actions -----------------------------------------------------------
+drop policy if exists moderation_actions_select_staff on public.moderation_actions;
 create policy moderation_actions_select_staff
   on public.moderation_actions for select to authenticated
   using (public.is_staff());
 
+drop policy if exists moderation_actions_insert_staff on public.moderation_actions;
 create policy moderation_actions_insert_staff
   on public.moderation_actions for insert to authenticated
   with check (moderator_id = auth.uid() and public.is_staff());
 
 -- notifications ----------------------------------------------------------------
+drop policy if exists notifications_select_own on public.notifications;
 create policy notifications_select_own
   on public.notifications for select to authenticated
   using (auth.uid() = user_id);
 
+drop policy if exists notifications_update_own on public.notifications;
 create policy notifications_update_own
   on public.notifications for update to authenticated
   using (auth.uid() = user_id)

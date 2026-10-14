@@ -58,7 +58,7 @@ end $$;
 
 -- Application profile for an `auth.users` row. Credentials, email and MFA live
 -- in `auth` and are never duplicated here.
-create table public.profiles (
+create table if not exists public.profiles (
   id            uuid primary key references auth.users (id) on delete cascade,
   username      extensions.citext not null,
   display_name  text not null,
@@ -74,13 +74,13 @@ create table public.profiles (
   constraint profiles_avatar_path_format check (avatar_path is null or avatar_path ~ '^[0-9a-f-]{36}/[a-z0-9._-]{1,120}$')
 );
 
-create unique index profiles_username_key on public.profiles (username);
-create index profiles_created_at_idx on public.profiles (created_at desc);
+create unique index if not exists profiles_username_key on public.profiles (username);
+create index if not exists profiles_created_at_idx on public.profiles (created_at desc);
 
 -- Roles are deliberately a separate table so that no update to `profiles` — by
 -- a user, a buggy handler or a future feature — can grant a role. Only the
 -- `service_role` and admins may write here (see 0002).
-create table public.user_roles (
+create table if not exists public.user_roles (
   user_id    uuid primary key references auth.users (id) on delete cascade,
   role       public.app_role not null default 'user',
   granted_at timestamptz not null default now(),
@@ -91,7 +91,7 @@ create table public.user_roles (
 -- Catalogue
 -- ─────────────────────────────────────────────────────────────────────────────
 
-create table public.categories (
+create table if not exists public.categories (
   id          uuid primary key default gen_random_uuid(),
   slug        extensions.citext not null,
   name        text not null,
@@ -102,9 +102,9 @@ create table public.categories (
   constraint categories_name_length check (char_length(name) between 1 and 40)
 );
 
-create unique index categories_slug_key on public.categories (slug);
+create unique index if not exists categories_slug_key on public.categories (slug);
 
-create table public.games (
+create table if not exists public.games (
   id            uuid primary key default gen_random_uuid(),
   owner_id      uuid not null references auth.users (id) on delete cascade,
   category_id   uuid references public.categories (id) on delete set null,
@@ -123,10 +123,10 @@ create table public.games (
   constraint games_player_range check (min_players >= 1 and max_players >= min_players)
 );
 
-create unique index games_slug_key on public.games (slug);
-create index games_status_published_idx on public.games (status, published_at desc nulls last);
-create index games_owner_idx on public.games (owner_id);
-create index games_category_idx on public.games (category_id);
+create unique index if not exists games_slug_key on public.games (slug);
+create index if not exists games_status_published_idx on public.games (status, published_at desc nulls last);
+create index if not exists games_owner_idx on public.games (owner_id);
+create index if not exists games_category_idx on public.games (category_id);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Play
@@ -134,7 +134,7 @@ create index games_category_idx on public.games (category_id);
 
 -- One row per play attempt. The server owns the seed and the start time, which
 -- is what makes a score attributable to a real run.
-create table public.game_sessions (
+create table if not exists public.game_sessions (
   id            uuid primary key default gen_random_uuid(),
   game_id       uuid not null references public.games (id) on delete cascade,
   user_id       uuid references auth.users (id) on delete cascade,
@@ -146,12 +146,12 @@ create table public.game_sessions (
   constraint game_sessions_single_end check (completed_at is null or abandoned_at is null)
 );
 
-create index game_sessions_user_idx on public.game_sessions (user_id, started_at desc);
-create index game_sessions_game_idx on public.game_sessions (game_id, started_at desc);
+create index if not exists game_sessions_user_idx on public.game_sessions (user_id, started_at desc);
+create index if not exists game_sessions_game_idx on public.game_sessions (game_id, started_at desc);
 
 -- Scores are written by the game-sessions service when a session completes.
 -- Players can read them (leaderboards) but never insert or update one.
-create table public.scores (
+create table if not exists public.scores (
   id          uuid primary key default gen_random_uuid(),
   session_id  uuid not null unique references public.game_sessions (id) on delete cascade,
   game_id     uuid not null references public.games (id) on delete cascade,
@@ -163,14 +163,14 @@ create table public.scores (
   constraint scores_duration_range check (duration_ms is null or (duration_ms > 0 and duration_ms <= 86400000))
 );
 
-create index scores_leaderboard_idx on public.scores (game_id, score desc, created_at asc);
-create index scores_user_idx on public.scores (user_id, created_at desc);
+create index if not exists scores_leaderboard_idx on public.scores (game_id, score desc, created_at asc);
+create index if not exists scores_user_idx on public.scores (user_id, created_at desc);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Social
 -- ─────────────────────────────────────────────────────────────────────────────
 
-create table public.comments (
+create table if not exists public.comments (
   id          uuid primary key default gen_random_uuid(),
   game_id     uuid not null references public.games (id) on delete cascade,
   author_id   uuid not null references auth.users (id) on delete cascade,
@@ -185,11 +185,11 @@ create table public.comments (
   constraint comments_no_self_parent check (parent_id is null or parent_id <> id)
 );
 
-create index comments_game_idx on public.comments (game_id, created_at desc) where not is_hidden;
-create index comments_author_idx on public.comments (author_id, created_at desc);
-create index comments_parent_idx on public.comments (parent_id);
+create index if not exists comments_game_idx on public.comments (game_id, created_at desc) where not is_hidden;
+create index if not exists comments_author_idx on public.comments (author_id, created_at desc);
+create index if not exists comments_parent_idx on public.comments (parent_id);
 
-create table public.likes (
+create table if not exists public.likes (
   user_id     uuid not null references auth.users (id) on delete cascade,
   target_kind public.like_target not null,
   target_id   uuid not null,
@@ -197,9 +197,9 @@ create table public.likes (
   primary key (user_id, target_kind, target_id)
 );
 
-create index likes_target_idx on public.likes (target_kind, target_id);
+create index if not exists likes_target_idx on public.likes (target_kind, target_id);
 
-create table public.follows (
+create table if not exists public.follows (
   follower_id uuid not null references auth.users (id) on delete cascade,
   followee_id uuid not null references auth.users (id) on delete cascade,
   created_at  timestamptz not null default now(),
@@ -207,13 +207,13 @@ create table public.follows (
   constraint follows_no_self check (follower_id <> followee_id)
 );
 
-create index follows_followee_idx on public.follows (followee_id, created_at desc);
+create index if not exists follows_followee_idx on public.follows (followee_id, created_at desc);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Moderation
 -- ─────────────────────────────────────────────────────────────────────────────
 
-create table public.reports (
+create table if not exists public.reports (
   id           uuid primary key default gen_random_uuid(),
   reporter_id  uuid not null references auth.users (id) on delete cascade,
   target_kind  public.report_target not null,
@@ -232,9 +232,9 @@ create table public.reports (
   )
 );
 
-create index reports_queue_idx on public.reports (status, created_at asc);
+create index if not exists reports_queue_idx on public.reports (status, created_at asc);
 
-create table public.moderation_actions (
+create table if not exists public.moderation_actions (
   id            uuid primary key default gen_random_uuid(),
   moderator_id  uuid not null references auth.users (id) on delete restrict,
   target_kind   public.report_target not null,
@@ -246,13 +246,13 @@ create table public.moderation_actions (
   constraint moderation_actions_reason_length check (reason is null or char_length(reason) <= 500)
 );
 
-create index moderation_actions_target_idx on public.moderation_actions (target_kind, target_id, created_at desc);
+create index if not exists moderation_actions_target_idx on public.moderation_actions (target_kind, target_id, created_at desc);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Messaging and analytics
 -- ─────────────────────────────────────────────────────────────────────────────
 
-create table public.notifications (
+create table if not exists public.notifications (
   id         uuid primary key default gen_random_uuid(),
   user_id    uuid not null references auth.users (id) on delete cascade,
   kind       public.notification_kind not null,
@@ -262,12 +262,12 @@ create table public.notifications (
   constraint notifications_payload_size check (pg_column_size(payload) <= 4096)
 );
 
-create index notifications_inbox_idx on public.notifications (user_id, created_at desc);
-create index notifications_unread_idx on public.notifications (user_id) where read_at is null;
+create index if not exists notifications_inbox_idx on public.notifications (user_id, created_at desc);
+create index if not exists notifications_unread_idx on public.notifications (user_id) where read_at is null;
 
 -- Append-only product analytics. Event names are constrained so a client cannot
 -- write arbitrary text into the warehouse, and properties are size limited.
-create table public.analytics_events (
+create table if not exists public.analytics_events (
   id         bigint generated always as identity primary key,
   user_id    uuid references auth.users (id) on delete set null,
   name       text not null,
@@ -277,8 +277,8 @@ create table public.analytics_events (
   constraint analytics_events_properties_size check (pg_column_size(properties) <= 8192)
 );
 
-create index analytics_events_name_time_idx on public.analytics_events (name, created_at desc);
-create index analytics_events_user_idx on public.analytics_events (user_id, created_at desc) where user_id is not null;
+create index if not exists analytics_events_name_time_idx on public.analytics_events (name, created_at desc);
+create index if not exists analytics_events_user_idx on public.analytics_events (user_id, created_at desc) where user_id is not null;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Triggers
@@ -297,14 +297,17 @@ begin
 end;
 $$;
 
+drop trigger if exists profiles_touch_updated_at on public.profiles;
 create trigger profiles_touch_updated_at
   before update on public.profiles
   for each row execute function public.touch_updated_at();
 
+drop trigger if exists games_touch_updated_at on public.games;
 create trigger games_touch_updated_at
   before update on public.games
   for each row execute function public.touch_updated_at();
 
+drop trigger if exists comments_touch_updated_at on public.comments;
 create trigger comments_touch_updated_at
   before update on public.comments
   for each row execute function public.touch_updated_at();

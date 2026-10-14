@@ -31,6 +31,7 @@ create table if not exists public.user_preferences (
   constraint user_preferences_appearance_format check (appearance is null or appearance in ('dark', 'light', 'system'))
 );
 
+drop trigger if exists user_preferences_touch_updated_at on public.user_preferences;
 create trigger user_preferences_touch_updated_at
   before update on public.user_preferences
   for each row execute function public.touch_updated_at();
