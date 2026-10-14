@@ -2052,7 +2052,7 @@ components:
         tileCount:
           type: integer
           minimum: 1
-          description: How many moves a complete run holds: tiles for Stack 10, taps for Chain. The client does not choose it.
+          description: "How many moves a complete run holds: tiles for Stack 10, taps for Chain. The client does not choose it."
         startedAt: { type: string, format: date-time }
         expiresAt:
           type: string
