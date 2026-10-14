@@ -23,6 +23,21 @@
 //     403 — and this package reports it as a forbidden call. The Go layer's own
 //     role check (in the service) exists to answer quickly and with a better
 //     message, not because the database would otherwise allow the read.
+//
+// When the deployment holds the server-only secret key
+// (`SUPABASE_SECRET_KEY`), staff calls take a second path that is what makes
+// an allowlisted administrator without a `user_roles` row work:
+//
+//   - The call runs as the service role against a `*_svc` wrapper, which only
+//     `service_role` may execute (ordinary tokens answer `permission denied`
+//     before any body runs). The wrapper acts for the verified administrator
+//     the service passes as `p_actor` — the user id from the verified token,
+//     after the service's ADMIN_EMAILS check, never client input — and the
+//     audit rows name that actor.
+//   - Without the secret the caller's own token is used exactly as before, so
+//     the database guards decide: an allowlisted administrator without a role
+//     row is then refused by the database, honestly, as a missing bridge
+//     rather than as success.
 package supabaseadmin
 
 import (
@@ -57,12 +72,20 @@ const maxBodyBytes = 1 << 20
 type Client struct {
 	baseURL string
 	apiKey  string
-	http    *http.Client
+	// secret is the server-only secret key. Empty means unconfigured: staff
+	// calls use the caller's own token and the database guards decide. It is
+	// never logged, never returned, and never sent anywhere but the Data API
+	// as the service credential — the same header a browser already carries
+	// the publishable key in, with the privileged value.
+	secret string
+	http   *http.Client
 }
 
 // New builds the client. It refuses to start without the project URL and the
 // publishable key: a client that cannot authenticate its calls would turn every
-// request into a confusing failure.
+// request into a confusing failure. The secret key is optional: with it the
+// staff calls run privileged (after the service's own authorization); without
+// it they run as the caller.
 func New(cfg *config.Config) (*Client, error) {
 	if !cfg.HasAuthAPI() {
 		return nil, errors.New("SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY are required for the admin API")
@@ -70,10 +93,15 @@ func New(cfg *config.Config) (*Client, error) {
 	return &Client{
 		baseURL: strings.TrimRight(cfg.Supabase.ProjectURL, "/"),
 		apiKey:  cfg.Supabase.PublishableKey,
+		secret:  strings.TrimSpace(cfg.Supabase.SecretKey),
 		// Bounded so a slow database never holds an admin request open.
 		http: &http.Client{Timeout: 10 * time.Second},
 	}, nil
 }
+
+// Privileged reports whether staff calls run as the service role. The service
+// uses it to log, once per refusal, whether the bridge was even available.
+func (c *Client) Privileged() bool { return c.secret != "" }
 
 // Identity is the caller's own role and account state, read from
 // `public.user_roles` by the database. It is the authorization decision this
@@ -153,10 +181,12 @@ type Overview struct {
 	TopGames         []TopGame     `json:"topGames"`
 }
 
-// Overview reads the dashboard aggregate.
-func (c *Client) Overview(ctx context.Context, token string) (Overview, error) {
+// Overview reads the dashboard aggregate. actor is the verified administrator
+// the service authorized; it is required on the privileged path and ignored
+// on the caller-token path.
+func (c *Client) Overview(ctx context.Context, token, actor string) (Overview, error) {
 	var overview Overview
-	if err := c.rpc(ctx, "overview", "admin_overview", nil, token, &overview); err != nil {
+	if err := c.invoke(ctx, "overview", "admin_overview", "admin_overview_svc", nil, token, actor, &overview); err != nil {
 		return Overview{}, err
 	}
 	return overview, nil
@@ -195,10 +225,10 @@ type Analytics struct {
 }
 
 // Analytics reads the platform aggregate for the last `days` days.
-func (c *Client) Analytics(ctx context.Context, token string, days int) (Analytics, error) {
+func (c *Client) Analytics(ctx context.Context, token, actor string, days int) (Analytics, error) {
 	var analytics Analytics
 	payload := map[string]any{"p_days": days}
-	if err := c.rpc(ctx, "analytics", "admin_analytics", payload, token, &analytics); err != nil {
+	if err := c.invoke(ctx, "analytics", "admin_analytics", "admin_analytics_svc", payload, token, actor, &analytics); err != nil {
 		return Analytics{}, err
 	}
 	return analytics, nil
@@ -238,7 +268,7 @@ type Game struct {
 
 // Games reads one page of the moderation directory. `status` and `search` are
 // filters; an empty string means "not applied".
-func (c *Client) Games(ctx context.Context, token, status, search string, page Page) ([]Game, error) {
+func (c *Client) Games(ctx context.Context, token, actor, status, search string, page Page) ([]Game, error) {
 	payload := map[string]any{
 		"p_status": nullable(status),
 		"p_search": nullable(search),
@@ -246,7 +276,7 @@ func (c *Client) Games(ctx context.Context, token, status, search string, page P
 		"p_offset": page.Offset,
 	}
 	var rows []Game
-	if err := c.rpc(ctx, "games", "admin_game_directory", payload, token, &rows); err != nil {
+	if err := c.invoke(ctx, "games", "admin_game_directory", "admin_game_directory_svc", payload, token, actor, &rows); err != nil {
 		return nil, err
 	}
 	return rows, nil
@@ -269,7 +299,7 @@ type User struct {
 }
 
 // Users reads one page of the account directory.
-func (c *Client) Users(ctx context.Context, token, search, role string, page Page) ([]User, error) {
+func (c *Client) Users(ctx context.Context, token, actor, search, role string, page Page) ([]User, error) {
 	payload := map[string]any{
 		"p_search": nullable(search),
 		"p_role":   nullable(role),
@@ -277,7 +307,7 @@ func (c *Client) Users(ctx context.Context, token, search, role string, page Pag
 		"p_offset": page.Offset,
 	}
 	var rows []User
-	if err := c.rpc(ctx, "users", "admin_user_directory", payload, token, &rows); err != nil {
+	if err := c.invoke(ctx, "users", "admin_user_directory", "admin_user_directory_svc", payload, token, actor, &rows); err != nil {
 		return nil, err
 	}
 	return rows, nil
@@ -300,14 +330,14 @@ type Report struct {
 }
 
 // Reports reads one page of the moderation queue.
-func (c *Client) Reports(ctx context.Context, token, status string, page Page) ([]Report, error) {
+func (c *Client) Reports(ctx context.Context, token, actor, status string, page Page) ([]Report, error) {
 	payload := map[string]any{
 		"p_status": nullable(status),
 		"p_limit":  page.Limit + 1,
 		"p_offset": page.Offset,
 	}
 	var rows []Report
-	if err := c.rpc(ctx, "reports", "admin_report_directory", payload, token, &rows); err != nil {
+	if err := c.invoke(ctx, "reports", "admin_report_directory", "admin_report_directory_svc", payload, token, actor, &rows); err != nil {
 		return nil, err
 	}
 	return rows, nil
@@ -329,7 +359,7 @@ type Comment struct {
 
 // Comments reads one page of the comment moderation list. `state` is visible,
 // hidden or all (empty means all).
-func (c *Client) Comments(ctx context.Context, token, state, search string, page Page) ([]Comment, error) {
+func (c *Client) Comments(ctx context.Context, token, actor, state, search string, page Page) ([]Comment, error) {
 	payload := map[string]any{
 		"p_state":  nullable(state),
 		"p_search": nullable(search),
@@ -337,7 +367,7 @@ func (c *Client) Comments(ctx context.Context, token, state, search string, page
 		"p_offset": page.Offset,
 	}
 	var rows []Comment
-	if err := c.rpc(ctx, "comments", "admin_comment_directory", payload, token, &rows); err != nil {
+	if err := c.invoke(ctx, "comments", "admin_comment_directory", "admin_comment_directory_svc", payload, token, actor, &rows); err != nil {
 		return nil, err
 	}
 	return rows, nil
@@ -355,7 +385,7 @@ type Score struct {
 }
 
 // Scores reads one page of verified scores.
-func (c *Client) Scores(ctx context.Context, token, gameSlug, username string, page Page) ([]Score, error) {
+func (c *Client) Scores(ctx context.Context, token, actor, gameSlug, username string, page Page) ([]Score, error) {
 	payload := map[string]any{
 		"p_game_slug": nullable(gameSlug),
 		"p_username":  nullable(username),
@@ -363,7 +393,7 @@ func (c *Client) Scores(ctx context.Context, token, gameSlug, username string, p
 		"p_offset":    page.Offset,
 	}
 	var rows []Score
-	if err := c.rpc(ctx, "scores", "admin_score_directory", payload, token, &rows); err != nil {
+	if err := c.invoke(ctx, "scores", "admin_score_directory", "admin_score_directory_svc", payload, token, actor, &rows); err != nil {
 		return nil, err
 	}
 	return rows, nil
@@ -380,9 +410,9 @@ type Category struct {
 }
 
 // Categories reads every category with its real counts.
-func (c *Client) Categories(ctx context.Context, token string) ([]Category, error) {
+func (c *Client) Categories(ctx context.Context, token, actor string) ([]Category, error) {
 	var rows []Category
-	if err := c.rpc(ctx, "categories", "admin_category_directory", nil, token, &rows); err != nil {
+	if err := c.invoke(ctx, "categories", "admin_category_directory", "admin_category_directory_svc", nil, token, actor, &rows); err != nil {
 		return nil, err
 	}
 	return rows, nil
@@ -400,10 +430,10 @@ type ModerationAction struct {
 }
 
 // ModerationLog reads one page of the audit trail.
-func (c *Client) ModerationLog(ctx context.Context, token string, page Page) ([]ModerationAction, error) {
+func (c *Client) ModerationLog(ctx context.Context, token, actor string, page Page) ([]ModerationAction, error) {
 	payload := map[string]any{"p_limit": page.Limit + 1, "p_offset": page.Offset}
 	var rows []ModerationAction
-	if err := c.rpc(ctx, "moderation-log", "admin_moderation_log", payload, token, &rows); err != nil {
+	if err := c.invoke(ctx, "moderation-log", "admin_moderation_log", "admin_moderation_log_svc", payload, token, actor, &rows); err != nil {
 		return nil, err
 	}
 	return rows, nil
@@ -426,43 +456,44 @@ type ActionResult struct {
 	Action         string  `json:"action"`
 }
 
-// SetGameStatus publishes, rejects, archives or returns a game to review.
-func (c *Client) SetGameStatus(ctx context.Context, token, gameID, status, reason string) (ActionResult, error) {
+// SetGameStatus publishes, rejects, archives or returns a game to review. The
+// audit row names the verified actor, never a request value.
+func (c *Client) SetGameStatus(ctx context.Context, token, actor, gameID, status, reason string) (ActionResult, error) {
 	payload := map[string]any{
 		"p_game_id": gameID,
 		"p_status":  status,
 		"p_reason":  nullable(reason),
 	}
 	var result ActionResult
-	if err := c.rpc(ctx, "set-game-status", "admin_set_game_status", payload, token, &result); err != nil {
+	if err := c.invoke(ctx, "set-game-status", "admin_set_game_status", "admin_set_game_status_svc", payload, token, actor, &result); err != nil {
 		return ActionResult{}, err
 	}
 	return result, nil
 }
 
 // SetReportStatus moves a report through its workflow.
-func (c *Client) SetReportStatus(ctx context.Context, token, reportID, status, reason string) (ActionResult, error) {
+func (c *Client) SetReportStatus(ctx context.Context, token, actor, reportID, status, reason string) (ActionResult, error) {
 	payload := map[string]any{
 		"p_report_id": reportID,
 		"p_status":    status,
 		"p_reason":    nullable(reason),
 	}
 	var result ActionResult
-	if err := c.rpc(ctx, "set-report-status", "admin_set_report_status", payload, token, &result); err != nil {
+	if err := c.invoke(ctx, "set-report-status", "admin_set_report_status", "admin_set_report_status_svc", payload, token, actor, &result); err != nil {
 		return ActionResult{}, err
 	}
 	return result, nil
 }
 
 // SetCommentHidden hides or restores a comment.
-func (c *Client) SetCommentHidden(ctx context.Context, token, commentID string, hidden bool, reason string) (ActionResult, error) {
+func (c *Client) SetCommentHidden(ctx context.Context, token, actor, commentID string, hidden bool, reason string) (ActionResult, error) {
 	payload := map[string]any{
 		"p_comment_id": commentID,
 		"p_hidden":     hidden,
 		"p_reason":     nullable(reason),
 	}
 	var result ActionResult
-	if err := c.rpc(ctx, "set-comment-hidden", "admin_set_comment_hidden", payload, token, &result); err != nil {
+	if err := c.invoke(ctx, "set-comment-hidden", "admin_set_comment_hidden", "admin_set_comment_hidden_svc", payload, token, actor, &result); err != nil {
 		return ActionResult{}, err
 	}
 	return result, nil
@@ -470,14 +501,14 @@ func (c *Client) SetCommentHidden(ctx context.Context, token, commentID string, 
 
 // SetSuspension suspends or restores an account. The database refuses this to
 // anyone but an administrator, and refuses it for the caller's own account.
-func (c *Client) SetSuspension(ctx context.Context, token, userID string, suspended bool, reason string) (ActionResult, error) {
+func (c *Client) SetSuspension(ctx context.Context, token, actor, userID string, suspended bool, reason string) (ActionResult, error) {
 	payload := map[string]any{
 		"p_user_id":   userID,
 		"p_suspended": suspended,
 		"p_reason":    nullable(reason),
 	}
 	var result ActionResult
-	if err := c.rpc(ctx, "set-suspension", "admin_set_suspension", payload, token, &result); err != nil {
+	if err := c.invoke(ctx, "set-suspension", "admin_set_suspension", "admin_set_suspension_svc", payload, token, actor, &result); err != nil {
 		return ActionResult{}, err
 	}
 	return result, nil
@@ -485,16 +516,52 @@ func (c *Client) SetSuspension(ctx context.Context, token, userID string, suspen
 
 // ── Transport ───────────────────────────────────────────────────────────────
 
-// rpc posts one named-argument call to a database function and decodes the
-// answer. `payload` nil sends `{}`, which is what a function whose only argument
-// has a default expects.
+// invoke posts one staff call, choosing the credential by configuration.
 //
-// The caller's token is required: a call without one would be answered as `anon`
-// and refused by the function's own grant, which is a deployment bug, not a
-// caller's mistake — so it is refused here instead of being sent.
+// With the server-only secret configured the call runs privileged: as the
+// service role, against the `*_svc` wrapper, carrying the verified actor the
+// service authorized. That path is what serves an allowlisted administrator
+// who holds no `user_roles` row. A privileged call without a verified actor
+// is refused locally — attribution is mandatory, never best-effort.
+//
+// Without the secret the caller's own token is used against the row-gated
+// function, exactly as before: the database guards then decide, and an
+// allowlisted administrator without a role row is refused by the database.
+// That refusal is honest (a missing bridge, surfaced as unavailable by the
+// service) — never silent success and never a bypass.
+func (c *Client) invoke(ctx context.Context, op, function, svcFunction string, payload map[string]any, token, actor string, dst any) error {
+	if c.secret != "" {
+		if strings.TrimSpace(actor) == "" {
+			return &Error{Op: op, cause: errors.New("no verified actor for a privileged call")}
+		}
+		if payload == nil {
+			payload = map[string]any{}
+		}
+		payload["p_actor"] = actor
+		return c.rpcAs(ctx, op, svcFunction, payload, c.secret, c.secret, dst)
+	}
+	return c.rpc(ctx, op, function, payload, token, dst)
+}
+
+// rpc posts one named-argument call to a database function and decodes the
+// answer, carrying the caller's own token. `payload` nil sends `{}`, which is
+// what a function whose only argument has a default expects.
 func (c *Client) rpc(ctx context.Context, op, function string, payload any, token string, dst any) error {
-	if token == "" {
-		return &Error{Op: op, cause: errors.New("no caller token")}
+	return c.rpcAs(ctx, op, function, payload, c.apiKey, token, dst)
+}
+
+// rpcAs posts one named-argument call to a database function with explicit
+// credentials: apiKey identifies the project, bearer identifies the caller
+// (the caller's own token, or the server-only secret for privileged calls).
+//
+// A call without a bearer would be answered as `anon` and refused by the
+// function's own grant, which is a deployment bug, not a caller's mistake —
+// so it is refused here instead of being sent. The secret itself is never
+// part of an error: Error carries only the operation, the HTTP status and the
+// SQLSTATE.
+func (c *Client) rpcAs(ctx context.Context, op, function string, payload any, apiKey, bearer string, dst any) error {
+	if bearer == "" {
+		return &Error{Op: op, cause: errors.New("no credential")}
 	}
 
 	body := []byte("{}")
@@ -511,8 +578,8 @@ func (c *Client) rpc(ctx context.Context, op, function string, payload any, toke
 	if err != nil {
 		return &Error{Op: op, cause: err}
 	}
-	request.Header.Set("apikey", c.apiKey)
-	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("apikey", apiKey)
+	request.Header.Set("Authorization", "Bearer "+bearer)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("X-Client-Info", "onemore-admin-service")

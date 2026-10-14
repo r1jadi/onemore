@@ -29,7 +29,8 @@ export const Route = createFileRoute("/admin/settings")({
  * What is real is the service list — it is the routing table this deployment
  * actually runs — and it is reported without a health claim, because nothing here
  * collects uptime or latency. The one live fact on the page is the caller's own
- * role, read from the database that decides it.
+ * role, read from the server that decides it: the allowlist for the role itself,
+ * the database for the profile it names.
  */
 export function SystemSettings() {
   const services = useAdminSystemServices();

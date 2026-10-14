@@ -94,12 +94,18 @@ Row Level Security.
 | `admin_*_directory()` (games, users, reports, comments, scores, categories, moderation log) | —    | execute, then `admin_guard_staff()`                                               | all          |
 | `admin_set_game_status()`, `admin_set_report_status()`, `admin_set_comment_hidden()`        | —    | execute, then `admin_guard_staff()`; writes the audit row in the same transaction | all          |
 | `admin_set_suspension()`                                                                    | —    | execute, then `admin_guard_admin()` — a moderator is refused                      | all          |
+| `admin_*_svc()` (privileged wrappers, one per function above)                             | —    | revoked — ordinary tokens answer `permission denied` before any body runs         | execute only |
 
 What those functions guarantee:
 
-- **the caller is never a parameter.** Each derives the actor from `auth.uid()`
+- **the caller is never a parameter — except the verified actor on the
+  privileged path.** Each row-gated function derives the actor from `auth.uid()`
   through `public.current_role()`; a request body can name the _target_ and
-  nothing else, so a body cannot forge an actor or a role;
+  nothing else, so a body cannot forge an actor or a role. The single exception
+  is the `*_svc` wrappers' `p_actor`: they run as the service role (which only
+  the Go admin service holds, after its own ADMIN_EMAILS check), so the actor
+  they carry is attribution by a trusted server, not proof offered by a client —
+  and a stolen key is already a full compromise, not a new capability;
 - **a refusal raises `42501`**, the same SQLSTATE a missing grant raises, so a
   refusal cannot be told apart from a table the caller was never granted;
 - **the decision and its audit are one write.** Publishing a game, resolving a
@@ -130,10 +136,12 @@ It bypasses RLS. Therefore:
 - it exists only in server-side environments (Vercel SSR env, the API's secret
   store) — never in a `VITE_` variable, never in a client bundle, never in a log;
 - each use should be justified by "a user cannot be trusted to do this";
-- **no service holds it today.** Auth, users, games, the play sessions and the
-  admin API all pass the _caller's_ token to the Data API, so RLS stays the
-  boundary and a service bug cannot read a table no policy allows; the migrations
-  and an operator's SQL console are the only writers of privileged state;
+- **only the admin API's games deployment holds it.** It verifies ADMIN_EMAILS
+  first and then calls the `service_role`-only `*_svc` wrappers with the
+  verified actor; without it those routes fail closed. Auth, users, games, the
+  play sessions and every other caller still pass the _caller's_ token to the
+  Data API, so RLS stays the boundary everywhere else; the migrations and an
+  operator's SQL console are the only other writers of privileged state;
 - leaking it means a full database compromise: rotate it immediately
   (see [env-and-secrets.md](env-and-secrets.md)).
 

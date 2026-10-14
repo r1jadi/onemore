@@ -64,6 +64,8 @@ type fakeBackend struct {
 	lastPage  supabaseadmin.Page
 	lastToken string
 	lastArgs  []string
+	// lastActor records the verified actor the handler attributed the call to.
+	lastActor string
 }
 
 func (f *fakeBackend) record(name string, args ...string) {
@@ -89,96 +91,109 @@ func (f *fakeBackend) Identity(_ context.Context, token string) (supabaseadmin.I
 	return f.identity, nil
 }
 
-func (f *fakeBackend) Overview(_ context.Context, token string) (supabaseadmin.Overview, error) {
+func (f *fakeBackend) Overview(_ context.Context, token, actor string) (supabaseadmin.Overview, error) {
 	f.record("Overview")
 	f.lastToken = token
+	f.lastActor = actor
 	return f.overview, f.readErr
 }
 
-func (f *fakeBackend) Analytics(_ context.Context, token string, _ int) (supabaseadmin.Analytics, error) {
+func (f *fakeBackend) Analytics(_ context.Context, token, actor string, _ int) (supabaseadmin.Analytics, error) {
 	f.record("Analytics")
 	f.lastToken = token
+	f.lastActor = actor
 	return f.analytics, f.readErr
 }
 
-func (f *fakeBackend) Games(_ context.Context, token, status, search string, page supabaseadmin.Page) ([]supabaseadmin.Game, error) {
+func (f *fakeBackend) Games(_ context.Context, token, actor, status, search string, page supabaseadmin.Page) ([]supabaseadmin.Game, error) {
 	f.record("Games", status, search)
 	f.lastPage = page
 	f.lastToken = token
+	f.lastActor = actor
 	return f.games, f.readErr
 }
 
-func (f *fakeBackend) Users(_ context.Context, token, search, role string, page supabaseadmin.Page) ([]supabaseadmin.User, error) {
+func (f *fakeBackend) Users(_ context.Context, token, actor, search, role string, page supabaseadmin.Page) ([]supabaseadmin.User, error) {
 	f.record("Users", search, role)
 	f.lastPage = page
 	f.lastToken = token
+	f.lastActor = actor
 	return f.users, f.readErr
 }
 
-func (f *fakeBackend) Reports(_ context.Context, token, status string, page supabaseadmin.Page) ([]supabaseadmin.Report, error) {
+func (f *fakeBackend) Reports(_ context.Context, token, actor, status string, page supabaseadmin.Page) ([]supabaseadmin.Report, error) {
 	f.record("Reports", status)
 	f.lastPage = page
 	f.lastToken = token
+	f.lastActor = actor
 	return f.reports, f.readErr
 }
 
-func (f *fakeBackend) Comments(_ context.Context, token, state, search string, page supabaseadmin.Page) ([]supabaseadmin.Comment, error) {
+func (f *fakeBackend) Comments(_ context.Context, token, actor, state, search string, page supabaseadmin.Page) ([]supabaseadmin.Comment, error) {
 	f.record("Comments", state, search)
 	f.lastPage = page
 	f.lastToken = token
+	f.lastActor = actor
 	return f.comments, f.readErr
 }
 
-func (f *fakeBackend) Scores(_ context.Context, token, slug, username string, page supabaseadmin.Page) ([]supabaseadmin.Score, error) {
+func (f *fakeBackend) Scores(_ context.Context, token, actor, slug, username string, page supabaseadmin.Page) ([]supabaseadmin.Score, error) {
 	f.record("Scores", slug, username)
 	f.lastPage = page
 	f.lastToken = token
+	f.lastActor = actor
 	return f.scores, f.readErr
 }
 
-func (f *fakeBackend) Categories(_ context.Context, token string) ([]supabaseadmin.Category, error) {
+func (f *fakeBackend) Categories(_ context.Context, token, actor string) ([]supabaseadmin.Category, error) {
 	f.record("Categories")
 	f.lastToken = token
+	f.lastActor = actor
 	return f.categories, f.readErr
 }
 
-func (f *fakeBackend) ModerationLog(_ context.Context, token string, page supabaseadmin.Page) ([]supabaseadmin.ModerationAction, error) {
+func (f *fakeBackend) ModerationLog(_ context.Context, token, actor string, page supabaseadmin.Page) ([]supabaseadmin.ModerationAction, error) {
 	f.record("ModerationLog")
 	f.lastPage = page
 	f.lastToken = token
+	f.lastActor = actor
 	return f.log, f.readErr
 }
 
-func (f *fakeBackend) SetGameStatus(_ context.Context, token, gameID, status, reason string) (supabaseadmin.ActionResult, error) {
+func (f *fakeBackend) SetGameStatus(_ context.Context, token, actor, gameID, status, reason string) (supabaseadmin.ActionResult, error) {
 	f.record("SetGameStatus", gameID, status, reason)
 	f.lastToken = token
+	f.lastActor = actor
 	if f.actionErr != nil {
 		return supabaseadmin.ActionResult{}, f.actionErr
 	}
 	return f.action, nil
 }
 
-func (f *fakeBackend) SetReportStatus(_ context.Context, token, reportID, status, reason string) (supabaseadmin.ActionResult, error) {
+func (f *fakeBackend) SetReportStatus(_ context.Context, token, actor, reportID, status, reason string) (supabaseadmin.ActionResult, error) {
 	f.record("SetReportStatus", reportID, status, reason)
 	f.lastToken = token
+	f.lastActor = actor
 	if f.actionErr != nil {
 		return supabaseadmin.ActionResult{}, f.actionErr
 	}
 	return f.action, nil
 }
 
-func (f *fakeBackend) SetCommentHidden(_ context.Context, token, commentID string, hidden bool, reason string) (supabaseadmin.ActionResult, error) {
+func (f *fakeBackend) SetCommentHidden(_ context.Context, token, actor, commentID string, hidden bool, reason string) (supabaseadmin.ActionResult, error) {
 	f.record("SetCommentHidden", commentID, reason)
 	f.lastToken = token
+	f.lastActor = actor
 	if f.actionErr != nil {
 		return supabaseadmin.ActionResult{}, f.actionErr
 	}
 	return f.action, nil
 }
 
-func (f *fakeBackend) SetSuspension(_ context.Context, token, userID string, suspended bool, reason string) (supabaseadmin.ActionResult, error) {
+func (f *fakeBackend) SetSuspension(_ context.Context, token, actor, userID string, suspended bool, reason string) (supabaseadmin.ActionResult, error) {
 	f.record("SetSuspension", userID, reason)
 	f.lastToken = token
+	f.lastActor = actor
 	if f.actionErr != nil {
 		return supabaseadmin.ActionResult{}, f.actionErr
 	}
@@ -442,18 +457,19 @@ func TestClaimNeverGrants(t *testing.T) {
 	}
 }
 
-// TestDatabaseModeratorIsDeniedEverywhere: a database moderator row plus a
-// moderator claim, for an email outside ADMIN_EMAILS, reaches no staff route —
-// not the queue and not the suspension — and the database is never touched
-// for staff work.
-func TestDatabaseModeratorIsDeniedEverywhere(t *testing.T) {
+// TestDatabaseModeratorReachesStaffButNotSuspension: a database moderator row
+// (non-allowlisted email, moderator claim) reaches staff reads and moderation
+// writes through the moderator tier — and is refused the admin-only suspension
+// before the database is touched. The session reports a moderator, never an
+// administrator.
+func TestDatabaseModeratorReachesStaffButNotSuspension(t *testing.T) {
 	t.Setenv("ADMIN_EMAILS", "admin@example.com")
 	backend := &fakeBackend{identity: staffIdentity("moderator")}
 	server, sign := newTestServer(t, backend)
 	token := sign(testModerator, "moderator")
 
-	if status, payload := call(t, server, http.MethodGet, ReportsPath, token, nil); status != http.StatusForbidden {
-		t.Fatalf("a database moderator reading the queue = %d, want 403 (%v)", status, payload)
+	if status, payload := call(t, server, http.MethodGet, ReportsPath, token, nil); status != http.StatusOK {
+		t.Fatalf("a database moderator reading the queue = %d, want 200 (%v)", status, payload)
 	}
 
 	status, _ := call(t, server, http.MethodPatch, "/api/v1/admin/users/"+testPlayer, token,
@@ -461,13 +477,13 @@ func TestDatabaseModeratorIsDeniedEverywhere(t *testing.T) {
 	if status != http.StatusForbidden {
 		t.Fatalf("a database moderator suspending an account = %d, want 403", status)
 	}
-	if backend.called("SetSuspension") || backend.called("Reports") {
-		t.Error("a refused request reached the database")
+	if backend.called("SetSuspension") {
+		t.Error("a refused suspension reached the database")
 	}
 
 	status, payload := call(t, server, http.MethodGet, SessionPath, token, nil)
-	if status != http.StatusOK || payload["isAdmin"] != false || payload["isStaff"] != false {
-		t.Errorf("session = %d %v, want a non-admin", status, payload)
+	if status != http.StatusOK || payload["role"] != "moderator" || payload["isAdmin"] != false || payload["isStaff"] != true {
+		t.Errorf("session = %d %v, want a moderator", status, payload)
 	}
 }
 
@@ -778,7 +794,10 @@ func TestModerationWritesReachTheDatabase(t *testing.T) {
 }
 
 // TestModerationRejectionsAreMapped: a change the database refuses is a 400, a
-// missing row is a 404, and a refused role is a 403 — never a 200.
+// missing row is a 404, and a refused database call is a 503 — never a 200. A
+// refusal of an already-authorized caller is a deployment fault (a missing
+// bridge or a refused privileged call), not a privilege answer, so it is
+// reported as unavailable rather than as "not staff".
 func TestModerationRejectionsAreMapped(t *testing.T) {
 	// newTestServer signs tokens for staff@example.com.
 	t.Setenv("ADMIN_EMAILS", "staff@example.com")
@@ -794,7 +813,7 @@ func TestModerationRejectionsAreMapped(t *testing.T) {
 	}{
 		{"an illegal transition", &supabaseadmin.Error{Op: "set-game-status", Status: http.StatusBadRequest, Code: "22023"}, http.StatusBadRequest, "bad_request"},
 		{"a missing row", &supabaseadmin.Error{Op: "set-game-status", Status: http.StatusNotFound, Code: "P0002"}, http.StatusNotFound, "not_found"},
-		{"a refused role", &supabaseadmin.Error{Op: "set-game-status", Status: http.StatusForbidden, Code: "42501"}, http.StatusForbidden, "forbidden"},
+		{"a refused database call", &supabaseadmin.Error{Op: "set-game-status", Status: http.StatusForbidden, Code: "42501"}, http.StatusServiceUnavailable, "service_unavailable"},
 		{"an outage", errors.New("connection refused"), http.StatusServiceUnavailable, "service_unavailable"},
 	}
 

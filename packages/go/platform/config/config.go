@@ -52,8 +52,15 @@ type RateLimit struct {
 	Burst             int
 }
 
-// Supabase holds the project metadata used to verify access tokens. No secret
-// values belong here — the service role key never reaches a Go service.
+// Supabase holds the project metadata used to verify access tokens.
+//
+// PublishableKey is not a secret (see below). SecretKey is: the project's
+// secret key (`sb_secret_…`, legacy `SUPABASE_SERVICE_ROLE_KEY`). It bypasses
+// Row Level Security by design, so it is strictly server-only — never a VITE_*
+// variable, never logged, never sent to a client — and it is only loaded into
+// services that perform privileged server-side work after their own
+// authorization check (today: the admin API mounted in the games deployment,
+// which verifies ADMIN_EMAILS first). Every other service must leave it unset.
 type Supabase struct {
 	ProjectURL  string
 	JWKSURL     string
@@ -66,6 +73,10 @@ type Supabase struct {
 	// Supabase Auth on a caller's behalf (services/auth). The secret key is never
 	// read into a service's configuration: nothing here bypasses RLS.
 	PublishableKey string
+	// SecretKey authorizes privileged server-side database calls that run as the
+	// service role. Empty means unconfigured: privileged paths stay disabled and
+	// fail closed rather than falling back to an unprivileged identity.
+	SecretKey string
 }
 
 // Logging holds structured logging settings.
@@ -141,6 +152,10 @@ func Load(service string) (*Config, error) {
 			JWTIssuer:      Getenv("SUPABASE_JWT_ISSUER"),
 			JWTSecret:      Getenv("SUPABASE_JWT_SECRET"),
 			PublishableKey: Getenv("SUPABASE_PUBLISHABLE_KEY", "SUPABASE_ANON_KEY"),
+			// Server-only privileged credential. The legacy service-role name is
+			// accepted so an existing secret store keeps working; the new name
+			// wins when both are set. Never a VITE_* variable.
+			SecretKey: Getenv("SUPABASE_SECRET_KEY", "SUPABASE_SERVICE_ROLE_KEY"),
 		},
 		Logging: Logging{
 			Level:  defaultString(Getenv("LOG_LEVEL"), "info"),
@@ -245,6 +260,15 @@ func (c *Config) HasAuthMaterial() bool {
 // its credential endpoints until both are set.
 func (c *Config) HasAuthAPI() bool {
 	return c.Supabase.ProjectURL != "" && c.Supabase.PublishableKey != ""
+}
+
+// HasPrivilegedData reports whether the service may make privileged
+// service-role database calls. The key bypasses Row Level Security, so callers
+// must authorize first (the admin service verifies ADMIN_EMAILS) and must fail
+// closed — never fall back to pretending an unprivileged call succeeded — when
+// this is false.
+func (c *Config) HasPrivilegedData() bool {
+	return c.Supabase.SecretKey != ""
 }
 
 func parseEnvironment(raw string) (Environment, error) {

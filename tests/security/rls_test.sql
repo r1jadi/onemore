@@ -795,6 +795,41 @@ select rls_test.denied(
 
 reset role;
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Staff functions without a role row
+-- ─────────────────────────────────────────────────────────────────────────────
+--
+-- The signup trigger gives every account a `user` row, so an account with no
+-- row at all is one the operator never assigned — the allowlisted-but-
+-- unassigned case the application layer authorizes from ADMIN_EMAILS. The row
+-- guards must still refuse it here: staff comes from a row, never from the
+-- absence of one, and the API layer above is what grants allowlisted callers.
+-- The fixture account is removed again at the end of the section, so no later
+-- count can see it.
+insert into auth.users (id, email)
+values ('66666666-6666-4666-8666-666666666666', 'rowless@example.com');
+delete from public.user_roles where user_id = '66666666-6666-4666-8666-666666666666';
+
+select set_config('request.jwt.claims',
+  json_build_object('sub', '66666666-6666-4666-8666-666666666666', 'role', 'authenticated')::text, true);
+set local role authenticated;
+
+select rls_test.ok(
+  (public.admin_identity() ->> 'isStaff') = 'false'
+    and (public.admin_identity() ->> 'role') = 'user',
+  'without a role row the database reports a plain user, which is what the API echoes before its own check'
+);
+select rls_test.denied($$select public.admin_overview()$$,
+  'without a role row the overview guard refuses');
+select rls_test.denied($$select * from public.admin_user_directory()$$,
+  'without a role row the account directory guard refuses');
+select rls_test.denied(
+  $$select public.admin_set_comment_hidden('bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb', true, 'x')$$,
+  'without a role row a moderation write is refused');
+
+reset role;
+delete from auth.users where id = '66666666-6666-4666-8666-666666666666';
+
 select set_config('request.jwt.claims',
   json_build_object('sub', :'carol', 'role', 'authenticated')::text, true);
 set local role authenticated;
@@ -1030,6 +1065,210 @@ select rls_test.allow(
   $$update public.comments set is_hidden = true where id = 'bbbbbbbb-3333-4333-8333-bbbbbbbbbbbb'$$,
   'the service role can hide a comment'
 );
+
+reset role;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Privileged admin-data bridge (service_role-only *_svc wrappers)
+-- ─────────────────────────────────────────────────────────────────────────────
+--
+-- An allowlisted administrator without a `user_roles` row is served through
+-- these wrappers: the Go service verifies ADMIN_EMAILS, then calls with the
+-- service credential and the verified actor. This section asserts both
+-- directions: ordinary tokens fail at the grant before any body runs, and the
+-- service role is served real data with the verified actor attributed. The
+-- row-gated functions keep their behaviour for everyone else — the suite
+-- above already proves that, and the current_role assertion below pins the
+-- bridge flag absent for ordinary callers.
+
+\set bridge_actor '99999999-9999-4999-8999-999999999999'
+\set bridge_comment 'eeeeeeee-1111-4111-8111-eeeeeeeeeeee'
+
+-- Fresh fixtures, created as the owner like the other suites' fixtures. The
+-- actor deliberately holds no role row at all: the bridge must not need one.
+insert into public.comments (id, game_id, author_id, body)
+values (:'bridge_comment', :'published_game', :'bob', 'Bridge fixture comment');
+
+-- The grants, stated plainly: no privileged wrapper is executable by anon or
+-- authenticated, and every read wrapper is executable by service_role. (The
+-- enum-typed write wrappers are asserted behaviourally below instead of by
+-- signature string. `admin_actor()` is deliberately absent from these lists:
+-- the invoker report trigger calls it with the caller's own rights, so it
+-- stays executable like `current_role()` — and it reveals nothing, because
+-- the flag has no setter these roles can reach.)
+select rls_test.ok(
+  (select bool_and(not has_function_privilege('anon', f, 'execute'))
+     from unnest(array[
+       'public.admin_overview_svc(uuid)',
+       'public.admin_analytics_svc(uuid, integer)',
+       'public.admin_game_directory_svc(uuid, text, text, integer, integer)',
+       'public.admin_user_directory_svc(uuid, text, text, integer, integer)',
+       'public.admin_report_directory_svc(uuid, text, integer, integer)',
+       'public.admin_comment_directory_svc(uuid, text, text, integer, integer)',
+       'public.admin_score_directory_svc(uuid, text, text, integer, integer)',
+       'public.admin_category_directory_svc(uuid)',
+       'public.admin_moderation_log_svc(uuid, integer, integer)'
+     ]) as f),
+  'no privileged wrapper is executable by anon');
+select rls_test.ok(
+  (select bool_and(not has_function_privilege('authenticated', f, 'execute'))
+     from unnest(array[
+       'public.admin_overview_svc(uuid)',
+       'public.admin_analytics_svc(uuid, integer)',
+       'public.admin_game_directory_svc(uuid, text, text, integer, integer)',
+       'public.admin_user_directory_svc(uuid, text, text, integer, integer)',
+       'public.admin_report_directory_svc(uuid, text, integer, integer)',
+       'public.admin_comment_directory_svc(uuid, text, text, integer, integer)',
+       'public.admin_score_directory_svc(uuid, text, text, integer, integer)',
+       'public.admin_category_directory_svc(uuid)',
+       'public.admin_moderation_log_svc(uuid, integer, integer)'
+     ]) as f),
+  'no privileged wrapper is executable by authenticated');
+select rls_test.ok(
+  (select bool_and(has_function_privilege('service_role', f, 'execute'))
+     from unnest(array[
+       'public.admin_overview_svc(uuid)',
+       'public.admin_analytics_svc(uuid, integer)',
+       'public.admin_game_directory_svc(uuid, text, text, integer, integer)',
+       'public.admin_user_directory_svc(uuid, text, text, integer, integer)',
+       'public.admin_report_directory_svc(uuid, text, integer, integer)',
+       'public.admin_comment_directory_svc(uuid, text, text, integer, integer)',
+       'public.admin_score_directory_svc(uuid, text, text, integer, integer)',
+       'public.admin_category_directory_svc(uuid)',
+       'public.admin_moderation_log_svc(uuid, integer, integer)'
+     ]) as f),
+  'every privileged read wrapper is executable by service_role');
+select rls_test.ok(
+  has_function_privilege('authenticated', 'public.admin_actor()', 'execute')
+    and public.admin_actor() is null,
+  'the bridge-actor helper stays callable (the invoker trigger needs it) and answers null outside the bridge');
+
+-- Outside the bridge there is no actor, so the role helpers answer exactly
+-- what they always have.
+select rls_test.ok(
+  public.admin_actor() is null,
+  'outside the bridge there is no bridge actor'
+);
+
+select set_config('request.jwt.claims',
+  json_build_object('sub', :'alice', 'role', 'authenticated')::text, true);
+set local role authenticated;
+
+select rls_test.ok(
+  public.current_role() = 'user'::public.app_role,
+  'an ordinary caller still resolves to the least-privileged role'
+);
+select rls_test.ok(
+  public.admin_actor() is null,
+  'a player sees no bridge actor');
+select rls_test.denied(
+  $$select public.admin_overview_svc('99999999-9999-4999-8999-999999999999'::uuid)$$,
+  'a player cannot call the privileged overview');
+select rls_test.denied(
+  $$select public.admin_analytics_svc('99999999-9999-4999-8999-999999999999'::uuid)$$,
+  'a player cannot call the privileged analytics');
+select rls_test.denied(
+  $$select * from public.admin_game_directory_svc('99999999-9999-4999-8999-999999999999'::uuid)$$,
+  'a player cannot call the privileged game directory');
+select rls_test.denied(
+  $$select * from public.admin_user_directory_svc('99999999-9999-4999-8999-999999999999'::uuid)$$,
+  'a player cannot call the privileged account directory');
+select rls_test.denied(
+  $$select * from public.admin_report_directory_svc('99999999-9999-4999-8999-999999999999'::uuid)$$,
+  'a player cannot call the privileged moderation queue');
+select rls_test.denied(
+  $$select * from public.admin_comment_directory_svc('99999999-9999-4999-8999-999999999999'::uuid)$$,
+  'a player cannot call the privileged comment list');
+select rls_test.denied(
+  $$select * from public.admin_score_directory_svc('99999999-9999-4999-8999-999999999999'::uuid)$$,
+  'a player cannot call the privileged score list');
+select rls_test.denied(
+  $$select * from public.admin_category_directory_svc('99999999-9999-4999-8999-999999999999'::uuid)$$,
+  'a player cannot call the privileged category list');
+select rls_test.denied(
+  $$select * from public.admin_moderation_log_svc('99999999-9999-4999-8999-999999999999'::uuid)$$,
+  'a player cannot call the privileged audit trail');
+select rls_test.denied(
+  $$select public.admin_set_game_status_svc('99999999-9999-4999-8999-999999999999'::uuid, 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', 'archived', 'x')$$,
+  'a player cannot call the privileged game moderation');
+select rls_test.denied(
+  $$select public.admin_set_report_status_svc('99999999-9999-4999-8999-999999999999'::uuid, 'dddddddd-1111-4111-8111-dddddddddddd', 'dismissed', 'x')$$,
+  'a player cannot call the privileged report moderation');
+select rls_test.denied(
+  $$select public.admin_set_comment_hidden_svc('99999999-9999-4999-8999-999999999999'::uuid, 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb', true, 'x')$$,
+  'a player cannot call the privileged comment moderation');
+select rls_test.denied(
+  $$select public.admin_set_suspension_svc('99999999-9999-4999-8999-999999999999'::uuid, '22222222-2222-4222-8222-222222222222', true, 'x')$$,
+  'a player cannot call the privileged suspension');
+
+reset role;
+
+select set_config('request.jwt.claims', json_build_object('role', 'anon')::text, true);
+set local role anon;
+
+select rls_test.denied(
+  $$select public.admin_overview_svc('99999999-9999-4999-8999-999999999999'::uuid)$$,
+  'an anonymous caller cannot call the privileged overview');
+select rls_test.denied(
+  $$select * from public.admin_user_directory_svc('99999999-9999-4999-8999-999999999999'::uuid)$$,
+  'an anonymous caller cannot call the privileged account directory');
+
+reset role;
+
+set local role service_role;
+
+-- A privileged call without a verified actor is the caller's own mistake, not
+-- a grant question.
+select rls_test.raises(
+  $$select public.admin_overview_svc(null)$$,
+  '22023',
+  'a privileged call without a verified actor is refused');
+
+-- Reads serve real data to an actor that holds no role row at all.
+select rls_test.ok(
+  (public.admin_overview_svc('99999999-9999-4999-8999-999999999999'::uuid) ->> 'totalUsers')::bigint >= 5,
+  'the privileged overview counts the real profile rows without a staff row');
+select rls_test.ok(
+  jsonb_array_length(public.admin_overview_svc('99999999-9999-4999-8999-999999999999'::uuid) -> 'series') = 14,
+  'the privileged overview series is fourteen real days');
+select rls_test.ok(
+  rls_test.count_rows($$
+    select 1 from public.admin_game_directory_svc('99999999-9999-4999-8999-999999999999'::uuid)
+    where slug = 'fixture-admin-only' and status = 'draft'$$) = 1,
+  'the privileged game directory includes a draft no other role can see');
+select rls_test.ok(
+  rls_test.count_rows($$
+    select 1 from public.admin_user_directory_svc('99999999-9999-4999-8999-999999999999'::uuid)
+    where id = '55555555-5555-4555-8555-555555555555'
+      and is_suspended and email = 'erin@example.com'$$) = 1,
+  'the privileged account directory carries the restricted columns');
+
+-- Writes attribute the verified actor, not the key — and restore what they
+-- change, so no later count can see this section.
+select rls_test.ok(
+  (public.admin_set_comment_hidden_svc('44444444-4444-4444-8444-444444444444'::uuid, :'bridge_comment'::uuid, true, 'Bridge fixture') ->> 'hidden') = 'true',
+  'a privileged moderation write hides through the bridge');
+select rls_test.ok(
+  rls_test.count_rows($$select 1 from public.moderation_actions
+    where action = 'hide_comment' and moderator_id = '44444444-4444-4444-8444-444444444444'$$) = 1,
+  'the privileged write records the verified actor, not the key');
+select rls_test.ok(
+  (public.admin_set_comment_hidden_svc('44444444-4444-4444-8444-444444444444'::uuid, :'bridge_comment'::uuid, false, null) ->> 'hidden') = 'false',
+  'the privileged write restores without a reason');
+select rls_test.raises(
+  $$select public.admin_set_suspension_svc('44444444-4444-4444-8444-444444444444'::uuid, '44444444-4444-4444-8444-444444444444'::uuid, true, 'Locking myself out')$$,
+  '22023',
+  'the bridge still refuses self-suspension');
+select rls_test.ok(
+  (public.admin_set_suspension_svc('44444444-4444-4444-8444-444444444444'::uuid, :'bob'::uuid, true, 'Bridge fixture') ->> 'suspended') = 'true',
+  'a privileged suspension works through the bridge');
+select rls_test.ok(
+  rls_test.count_rows($$select 1 from public.admin_user_directory_svc('44444444-4444-4444-8444-444444444444'::uuid)
+    where id = '22222222-2222-4222-8222-222222222222' and is_suspended$$) = 1,
+  'the privileged suspension is visible through the privileged directory');
+select rls_test.ok(
+  (public.admin_set_suspension_svc('44444444-4444-4444-8444-444444444444'::uuid, :'bob'::uuid, false, null) ->> 'suspended') = 'false',
+  'a privileged restoration works through the bridge');
 
 reset role;
 

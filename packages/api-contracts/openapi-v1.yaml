@@ -13,9 +13,12 @@ info:
     * **optional** — works anonymously, personalises when a valid token is sent.
     * **authenticated** — a verified Supabase access token is required. The
       caller's user id always comes from that token; it is never a parameter.
-    * **moderator** / **admin** — an authenticated caller whose verified token
-      email is in the server-side `ADMIN_EMAILS` allowlist (the single source
-      of truth; token role claims and database rows never grant access).
+    * **moderator** / **admin** — **admin** is an authenticated caller whose
+      verified token email is in the server-side `ADMIN_EMAILS` allowlist (the
+      single source of truth for administrator access; token role claims and
+      database rows never grant it). **moderator** is that, or an authenticated
+      caller whose own `public.user_roles` row says moderator — staff reads and
+      moderation writes, never suspension.
 
     ## Errors
     Failures always use the same envelope:
@@ -1221,18 +1224,23 @@ paths:
         "429": { $ref: "#/components/responses/RateLimited" }
         "501": { $ref: "#/components/responses/NotImplemented" }
 
-  # The admin surface. Every operation requires a verified token, and every one
-  # of them also checks the caller's role in the database (`public.user_roles`)
-  # with the caller's own token, so a token claim alone grants nothing. The role
-  # named in each description is the role the database must report.
+  # The admin surface. Every operation requires a verified token. Administrator
+  # access comes from the server-side ADMIN_EMAILS allowlist matched against
+  # the verified token email (a token claim or a database row alone grants
+  # nothing); moderator access additionally comes from the caller's own
+  # `public.user_roles` row. The role named in each description is what the
+  # service requires; a database refusal of an authorized caller is answered
+  # `503`, never as success.
   /admin/session:
     get:
       operationId: getAdminSession
       tags: [admin]
       summary: Read the caller's own role and account state
       description: |
-        Answers what the database says the caller is: their role from
-        `public.user_roles`, their username and whether the account is suspended.
+        Answers what the caller is: administrator for a verified token email in
+        the server-side allowlist, else moderator or user from the caller's own
+        `public.user_roles` row — plus their username and whether the account
+        is suspended.
         This is the one admin route an ordinary signed-in account may call — the
         dashboard needs it to decide what to show, and an account that is not
         staff must be able to learn that. It exposes the caller's own row and

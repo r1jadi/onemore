@@ -251,7 +251,8 @@ reads the variable and falls back to same-origin `/api/v1`.
 | `CORS_ALLOWED_ORIGINS`     | `https://onemorestartup.vercel.app`           | Required in production; `*` is rejected. A wrong value surfaces in the browser as a network failure, never as an auth error — see the troubleshooting row for two-origin CORS errors. |
 | `PUBLIC_SITE_URL`          | `https://onemorestartup.vercel.app`           | Origin the auth service proposes as Supabase `emailRedirectTo` (`…/auth/callback`); must also be allowlisted in Supabase redirect URLs. `SITE_URL` is accepted as a fallback name. |
 | `RATE_LIMIT_ENABLED`       | `1`                                           | Cannot be disabled in production                                                                                                                                                                                               |
-| `ADMIN_EMAILS`             | `admin@example.com,another@example.com`       | Single source of truth for admin access (server-only, never `VITE_`): comma-separated verified emails, matched case-insensitively per request; missing/empty grants no one; claims and `user_roles` never grant. Set for **Production** and **Preview** (preview needs its own test admins, never production secrets). Takes effect on the next request after deploy; removal revokes with no database cleanup. |
+| `ADMIN_EMAILS`             | `admin@example.com,another@example.com`       | Single source of truth for administrator access (server-only, never `VITE_`): comma-separated verified emails, matched case-insensitively per request; missing/empty grants no one; claims never grant, and a `user_roles` row grants the moderator tier at most, never suspension. Set for **Production** and **Preview** (preview needs its own test admins, never production secrets). Takes effect on the next request after deploy; removal revokes with no database cleanup. |
+| `SUPABASE_SECRET_KEY`      | the `games-admin` secret key (`sb_secret_…`)  | Privileged Data API credential for the admin bridge (server-only, never `VITE_`, never logged): after verifying `ADMIN_EMAILS`, the games deployment calls the `service_role`-only `*_svc` database wrappers with the verified actor — this is what serves an allowlisted administrator who holds no `user_roles` row. Without it those callers are answered `503`. Set for **Production** and **Preview**; no other service reads it. Legacy name `SUPABASE_SERVICE_ROLE_KEY` is accepted. |
 | `LOG_LEVEL`, `LOG_FORMAT`  | `info`, `json` (defaults)                     | Optional; structured logs are what Vercel captures                                                                                                                                                                             |
 | `SERVICE_NAME`             | optional                                      | Appears in log lines; both services log a sensible default already                                                                                                                                                             |
 
@@ -265,9 +266,6 @@ Deliberately **not** set:
   JWKS, so no shared HS256 secret exists to leak or rotate. Setting only
   `SUPABASE_URL` is enough; removing the secret is a security improvement, not a
   missing value.
-- `SUPABASE_SECRET_KEY` — no service reads it, and none may: each authorizes its
-  Supabase calls with the _caller's_ token so Row Level Security stays the
-  boundary. The deployment runs with no database credential at all.
 - `UPSTREAM_AUTH_URL`, `UPSTREAM_USERS_URL` — injected by the service bindings.
   See above.
 - `UPSTREAM_<OTHER>_URL` — the gateway answers `503` for a group whose upstream

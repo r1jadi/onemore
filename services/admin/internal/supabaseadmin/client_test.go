@@ -133,7 +133,7 @@ func TestErrorMapping(t *testing.T) {
 				_, _ = w.Write([]byte(testCase.body))
 			})
 
-			_, err := client.SetGameStatus(context.Background(), "token", "id", "published", "")
+			_, err := client.SetGameStatus(context.Background(), "token", "actor-id", "id", "published", "")
 			var dataErr *Error
 			if !errors.As(err, &dataErr) {
 				t.Fatalf("error = %v, want a data error", err)
@@ -171,7 +171,7 @@ func TestDirectoryArgsAreNamedAndNullable(t *testing.T) {
 		_, _ = w.Write([]byte(`[]`))
 	})
 
-	if _, err := client.Games(context.Background(), "token", "", "", Page{Limit: 50}); err != nil {
+	if _, err := client.Games(context.Background(), "token", "actor-id", "", "", Page{Limit: 50}); err != nil {
 		t.Fatalf("games: %v", err)
 	}
 	if value, present := body["p_status"]; !present || value != nil {
@@ -205,5 +205,159 @@ func TestParsePageValidates(t *testing.T) {
 	}
 	if page.Limit != 10 || page.Offset != 20 {
 		t.Errorf("page = %+v", page)
+	}
+}
+
+// newPrivilegedClient points a client with the server-only secret at a
+// stand-in for PostgREST, so a test can prove the privileged path sends the
+// service credential, the `*_svc` function and the verified actor.
+func newPrivilegedClient(t *testing.T, handler http.HandlerFunc) (*Client, *int) {
+	t.Helper()
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		handler(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := New(&config.Config{
+		Supabase: config.Supabase{
+			ProjectURL:     server.URL,
+			PublishableKey: "sb_publishable_test",
+			SecretKey:      "sb_secret_test",
+		},
+	})
+	if err != nil {
+		t.Fatalf("building privileged client: %v", err)
+	}
+	if !client.Privileged() {
+		t.Fatal("the client did not pick up the secret")
+	}
+	return client, &requests
+}
+
+// TestPrivilegedCallUsesServiceCredentialAndActor: with the secret configured
+// the call runs as the service role against the `*_svc` wrapper and carries
+// the verified actor — the caller's own token is not used, and the secret
+// travels only in the headers, never in the URL or the body.
+func TestPrivilegedCallUsesServiceCredentialAndActor(t *testing.T) {
+	var (
+		path   string
+		apiKey string
+		authz  string
+		rawURL string
+		body   map[string]any
+	)
+	client, requests := newPrivilegedClient(t, func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		rawURL = r.URL.String()
+		apiKey = r.Header.Get("apikey")
+		authz = r.Header.Get("Authorization")
+		encoded, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(encoded, &body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"totalUsers":7,"series":[],"activity":[],"topGames":[]}`))
+	})
+
+	overview, err := client.Overview(context.Background(), "caller-token", "actor-uuid")
+	if err != nil {
+		t.Fatalf("overview: %v", err)
+	}
+	if *requests != 1 {
+		t.Fatalf("requests = %d, want 1", *requests)
+	}
+	if path != "/rest/v1/rpc/admin_overview_svc" {
+		t.Errorf("path = %q, want the privileged wrapper", path)
+	}
+	if apiKey != "sb_secret_test" || authz != "Bearer sb_secret_test" {
+		t.Errorf("apikey = %q Authorization = %q, want the service credential on both", apiKey, authz)
+	}
+	if body["p_actor"] != "actor-uuid" {
+		t.Errorf("p_actor = %v, want the verified actor", body["p_actor"])
+	}
+	if strings.Contains(rawURL, "sb_secret_test") {
+		t.Errorf("the secret leaked into the URL: %q", rawURL)
+	}
+	if overview.TotalUsers != 7 {
+		t.Errorf("overview decoded as %+v", overview)
+	}
+}
+
+// TestPrivilegedWriteCarriesActor: moderation writes attribute the verified
+// actor on the privileged path, so the audit row names the administrator.
+func TestPrivilegedWriteCarriesActor(t *testing.T) {
+	var body map[string]any
+	client, _ := newPrivilegedClient(t, func(w http.ResponseWriter, r *http.Request) {
+		encoded, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(encoded, &body)
+		if r.URL.Path != "/rest/v1/rpc/admin_set_game_status_svc" {
+			t.Errorf("path = %q, want the privileged wrapper", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"gameId":"x","status":"published","action":"publish_game"}`))
+	})
+
+	if _, err := client.SetGameStatus(context.Background(), "caller-token", "actor-uuid", "game-id", "published", "Good"); err != nil {
+		t.Fatalf("set-game-status: %v", err)
+	}
+	if body["p_actor"] != "actor-uuid" || body["p_game_id"] != "game-id" {
+		t.Errorf("body = %v, want the actor beside the target", body)
+	}
+}
+
+// TestPrivilegedCallWithoutActorIsRefusedLocally: attribution is mandatory —
+// a privileged call without a verified actor never leaves the process, so a
+// handler bug cannot produce an unattributed privileged write.
+func TestPrivilegedCallWithoutActorIsRefusedLocally(t *testing.T) {
+	client, requests := newPrivilegedClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("a request was sent without a verified actor")
+	})
+
+	if _, err := client.Overview(context.Background(), "caller-token", ""); err == nil {
+		t.Fatal("an empty actor was accepted on the privileged path")
+	}
+	if _, err := client.Overview(context.Background(), "caller-token", "   "); err == nil {
+		t.Fatal("a blank actor was accepted on the privileged path")
+	}
+	if *requests != 0 {
+		t.Fatalf("requests = %d, want none", *requests)
+	}
+}
+
+// TestWithoutSecretUsesCallerPath: without the secret the client keeps the
+// historical behaviour — the caller's own token against the row-gated
+// function — so existing deployments without the bridge keep working and the
+// database guards keep deciding.
+func TestWithoutSecretUsesCallerPath(t *testing.T) {
+	var (
+		path   string
+		apiKey string
+		authz  string
+		body   map[string]any
+	)
+	client, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		apiKey = r.Header.Get("apikey")
+		authz = r.Header.Get("Authorization")
+		encoded, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(encoded, &body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"totalUsers":7,"series":[],"activity":[],"topGames":[]}`))
+	})
+	if client.Privileged() {
+		t.Fatal("a client without a secret reports itself privileged")
+	}
+
+	if _, err := client.Overview(context.Background(), "caller-token", "actor-uuid"); err != nil {
+		t.Fatalf("overview: %v", err)
+	}
+	if path != "/rest/v1/rpc/admin_overview" {
+		t.Errorf("path = %q, want the row-gated function", path)
+	}
+	if apiKey != "sb_publishable_test" || authz != "Bearer caller-token" {
+		t.Errorf("apikey = %q Authorization = %q, want the project key and the caller token", apiKey, authz)
+	}
+	if _, present := body["p_actor"]; present {
+		t.Errorf("p_actor = %v on the caller path: the row-gated functions take no actor", body["p_actor"])
 	}
 }

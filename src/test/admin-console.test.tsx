@@ -205,6 +205,95 @@ describe("the admin gate", () => {
   });
 });
 
+describe("staff hierarchy", () => {
+  // Every dashboard section is gated on the staff boolean, never on a role
+  // string — so an administrator and a moderator see the same navigation, and
+  // only the suspend action distinguishes them. The links are read from one
+  // settled navigation per test (not one accessible-name query per link) so
+  // the assertion stays cheap no matter how many sections exist.
+  const sections = [
+    "Overview",
+    "Reports",
+    "Review queue",
+    "Comments",
+    "Games",
+    "Categories",
+    "Featured",
+    "Leaderboards",
+    "Users",
+    "Analytics",
+    "Notifications",
+    "Settings",
+  ];
+
+  async function navLabels(): Promise<string[]> {
+    const navs = await screen.findAllByRole("navigation", { name: "Admin" });
+    expect(navs.length).toBeGreaterThan(0);
+    return navs.flatMap((nav) =>
+      within(nav)
+        .getAllByRole("link")
+        .map((link) => link.textContent ?? ""),
+    );
+  }
+
+  it("shows an administrator every section with suspend enabled", async () => {
+    const spy = adminApi("admin", {
+      "/admin/overview": () => jsonResponse(overviewPayload()),
+      "/admin/users": () =>
+        jsonResponse({
+          items: [userPayload({ username: "player", displayName: "Player", role: "user" })],
+          hasMore: false,
+        }),
+    });
+    await signedIn(spy);
+
+    await renderPage(() => <AdminShell />);
+    const labels = await navLabels();
+    for (const section of sections) {
+      expect(
+        labels.some((text) => text.startsWith(section)),
+        section,
+      ).toBe(true);
+    }
+    expect(screen.getAllByText("Administrator").length).toBeGreaterThan(0);
+  });
+
+  it("shows a moderator every section with the moderator label", async () => {
+    const spy = adminApi("moderator", {
+      "/admin/overview": () => jsonResponse(overviewPayload()),
+    });
+    await signedIn(spy);
+
+    await renderPage(() => <AdminShell />);
+    const labels = await navLabels();
+    for (const section of sections) {
+      expect(
+        labels.some((text) => text.startsWith(section)),
+        section,
+      ).toBe(true);
+    }
+    expect(screen.getAllByText("Moderator").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Administrator")).not.toBeInTheDocument();
+  });
+
+  it("enables suspend for an administrator on the users page", async () => {
+    const spy = adminApi("admin", {
+      "/admin/users": () =>
+        jsonResponse({
+          items: [userPayload({ username: "player", displayName: "Player", role: "user" })],
+          hasMore: false,
+        }),
+    });
+    await signedIn(spy);
+
+    await renderPage(() => <UsersAdmin />);
+    await screen.findAllByText(/@player/);
+    expect(screen.queryByRole("button", { name: /Admin only/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /Suspend/ })[0]).toBeEnabled();
+    expect(screen.queryByText(/requires an administrator/)).not.toBeInTheDocument();
+  });
+});
+
 describe("a failed read", () => {
   it("shows the API's message and a retry, and never prototype rows", async () => {
     const unavailable = () =>

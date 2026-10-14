@@ -2,19 +2,29 @@
 //
 // What it is, and what it deliberately is not:
 //
-//   - **ADMIN_EMAILS is the single source of truth for admin access.** The
-//     platform middleware verifies the access token and grants only a verified
-//     token email in the server-side allowlist; token role claims and database
-//     rows (`public.user_roles`) never grant access. The wrapper below re-checks
-//     the same allowlist on every staff request, so removal takes effect on the
-//     next call. Nothing here reads a role, a user id, an email or an admin flag
-//     from a request body, query string or header.
+//   - **ADMIN_EMAILS is the single source of truth for administrator access.**
+//     The platform middleware verifies the access token and the staff wrapper
+//     grants a verified token email in the server-side allowlist; token role
+//     claims and database rows never grant administrator access. The wrapper
+//     re-checks the same allowlist on every staff request, so removal takes
+//     effect on the next call. Nothing here reads a role, a user id, an email
+//     or an admin flag from a request body, query string or header.
+//     Administrators inherit every moderator permission, plus suspension.
 //
-//   - **No endpoint holds a secret.** Every database call carries the caller's own
-//     token, so the Data API answers as that user. This process has no
-//     service-role key, which is why a bug in a handler cannot read a table no
-//     policy allows. The row-gated staff functions remain as defense-in-depth on
-//     the data path; they are never consulted for the authorization decision.
+//   - **Moderators come from the database row.** A verified caller whose email
+//     is not allowlisted but whose own `public.user_roles` row says moderator
+//     reaches staff reads and moderation writes — never suspension, which is
+//     refused at the router tier, the wrapper tier and the database guard. A
+//     stale administrator row for an email outside the allowlist grants
+//     nothing, and the session reports it as a plain user.
+//
+//   - **Allowlisted administrators without a row are served privileged.** When
+//     the deployment holds the server-only secret key, staff database calls
+//     run as the service role against `*_svc` wrappers that only it may
+//     execute, carrying the verified actor for attribution. Without the secret
+//     the caller's own token is used and the database guards decide — an
+//     allowlisted administrator without a row is then refused honestly as
+//     unavailable, never as success.
 //
 //   - **Every number is measured.** Counts come from persisted rows; a value that
 //     cannot be computed is `null` rather than zero; a screen with no data behind
@@ -122,21 +132,52 @@ var (
 // handlers are tested without a network, and so a deployment that has not been
 // given Supabase credentials can still boot, serve its probes and answer 503 on
 // the admin routes instead of crash-looping.
+//
+// Every staff method takes the verified actor (the user id from the verified
+// token, after the service's authorization check — never client input) alongside
+// the caller's token. The privileged client sends the actor as `p_actor` on its
+// service-role call; the caller-token client ignores it and lets the database
+// guards decide.
 type Backend interface {
 	Identity(ctx context.Context, token string) (supabaseadmin.Identity, error)
-	Overview(ctx context.Context, token string) (supabaseadmin.Overview, error)
-	Analytics(ctx context.Context, token string, days int) (supabaseadmin.Analytics, error)
-	Games(ctx context.Context, token, status, search string, page supabaseadmin.Page) ([]supabaseadmin.Game, error)
-	Users(ctx context.Context, token, search, role string, page supabaseadmin.Page) ([]supabaseadmin.User, error)
-	Reports(ctx context.Context, token, status string, page supabaseadmin.Page) ([]supabaseadmin.Report, error)
-	Comments(ctx context.Context, token, state, search string, page supabaseadmin.Page) ([]supabaseadmin.Comment, error)
-	Scores(ctx context.Context, token, gameSlug, username string, page supabaseadmin.Page) ([]supabaseadmin.Score, error)
-	Categories(ctx context.Context, token string) ([]supabaseadmin.Category, error)
-	ModerationLog(ctx context.Context, token string, page supabaseadmin.Page) ([]supabaseadmin.ModerationAction, error)
-	SetGameStatus(ctx context.Context, token, gameID, status, reason string) (supabaseadmin.ActionResult, error)
-	SetReportStatus(ctx context.Context, token, reportID, status, reason string) (supabaseadmin.ActionResult, error)
-	SetCommentHidden(ctx context.Context, token, commentID string, hidden bool, reason string) (supabaseadmin.ActionResult, error)
-	SetSuspension(ctx context.Context, token, userID string, suspended bool, reason string) (supabaseadmin.ActionResult, error)
+	Overview(ctx context.Context, token, actor string) (supabaseadmin.Overview, error)
+	Analytics(ctx context.Context, token, actor string, days int) (supabaseadmin.Analytics, error)
+	Games(ctx context.Context, token, actor, status, search string, page supabaseadmin.Page) ([]supabaseadmin.Game, error)
+	Users(ctx context.Context, token, actor, search, role string, page supabaseadmin.Page) ([]supabaseadmin.User, error)
+	Reports(ctx context.Context, token, actor, status string, page supabaseadmin.Page) ([]supabaseadmin.Report, error)
+	Comments(ctx context.Context, token, actor, state, search string, page supabaseadmin.Page) ([]supabaseadmin.Comment, error)
+	Scores(ctx context.Context, token, actor, gameSlug, username string, page supabaseadmin.Page) ([]supabaseadmin.Score, error)
+	Categories(ctx context.Context, token, actor string) ([]supabaseadmin.Category, error)
+	ModerationLog(ctx context.Context, token, actor string, page supabaseadmin.Page) ([]supabaseadmin.ModerationAction, error)
+	SetGameStatus(ctx context.Context, token, actor, gameID, status, reason string) (supabaseadmin.ActionResult, error)
+	SetReportStatus(ctx context.Context, token, actor, reportID, status, reason string) (supabaseadmin.ActionResult, error)
+	SetCommentHidden(ctx context.Context, token, actor, commentID string, hidden bool, reason string) (supabaseadmin.ActionResult, error)
+	SetSuspension(ctx context.Context, token, actor, userID string, suspended bool, reason string) (supabaseadmin.ActionResult, error)
+}
+
+// staffTier is what a staff request was authorized as: an allowlisted
+// administrator (full access, including suspension) or a database moderator
+// (staff reads and moderation writes, never suspension).
+type staffTier string
+
+const (
+	tierAdmin     staffTier = "admin"
+	tierModerator staffTier = "moderator"
+)
+
+type tierKey int
+
+const staffTierKey tierKey = 1
+
+// withTier stores the authorization tier on a request context.
+func withTier(ctx context.Context, tier staffTier) context.Context {
+	return context.WithValue(ctx, staffTierKey, tier)
+}
+
+// tierFromContext returns the authorization tier stored by the staff wrapper.
+func tierFromContext(ctx context.Context) (staffTier, bool) {
+	tier, ok := ctx.Value(staffTierKey).(staffTier)
+	return tier, ok
 }
 
 // ── Response shapes ─────────────────────────────────────────────────────────
@@ -368,41 +409,49 @@ func newService(backend Backend, logger *slog.Logger, services []string, maxBody
 
 // register mounts the routes.
 //
-// The tiers are the platform's: `AuthenticatedFunc` for the session endpoint,
-// `ModeratorFunc`/`AdminFunc` for everything else. Under the single-source
-// model both staff tiers enforce the same allowlist, and the wrapper below
-// re-checks it on every staff request — database rows and token claims grant
-// nothing.
+// The tiers are the platform's: `AuthenticatedFunc` for the session endpoint
+// and for the staff routes below, `AdminFunc` for the suspension route. The
+// staff wrapper authorizes every staff request after authentication —
+// allowlisted verified emails as administrators, database moderator rows as
+// moderators — and database rows never grant administrator access.
 func (s *service) register(router *httpx.Router) {
 	router.AuthenticatedFunc("GET "+SessionPath, s.session)
 
-	router.ModeratorFunc("GET "+OverviewPath, s.staff(s.overview))
-	router.ModeratorFunc("GET "+AnalyticsPath, s.staff(s.analytics))
-	router.ModeratorFunc("GET "+GamesPath, s.staff(s.listGames))
-	router.ModeratorFunc("PATCH "+GamePath, s.staff(s.moderateGame))
-	router.ModeratorFunc("GET "+CategoriesPath, s.staff(s.listCategories))
-	router.ModeratorFunc("GET "+ReportsPath, s.staff(s.listReports))
-	router.ModeratorFunc("PATCH "+ReportPath, s.staff(s.moderateReport))
-	router.ModeratorFunc("GET "+CommentsPath, s.staff(s.listComments))
-	router.ModeratorFunc("PATCH "+CommentPath, s.staff(s.moderateComment))
-	router.ModeratorFunc("GET "+UsersPath, s.staff(s.listUsers))
-	router.ModeratorFunc("GET "+LeaderboardsPath, s.staff(s.listScores))
-	router.ModeratorFunc("GET "+ModerationLogPath, s.staff(s.listModeration))
-	router.ModeratorFunc("GET "+SystemServicesPath, s.staff(s.systemServices))
+	router.AuthenticatedFunc("GET "+OverviewPath, s.staff(s.overview))
+	router.AuthenticatedFunc("GET "+AnalyticsPath, s.staff(s.analytics))
+	router.AuthenticatedFunc("GET "+GamesPath, s.staff(s.listGames))
+	router.AuthenticatedFunc("PATCH "+GamePath, s.staff(s.moderateGame))
+	router.AuthenticatedFunc("GET "+CategoriesPath, s.staff(s.listCategories))
+	router.AuthenticatedFunc("GET "+ReportsPath, s.staff(s.listReports))
+	router.AuthenticatedFunc("PATCH "+ReportPath, s.staff(s.moderateReport))
+	router.AuthenticatedFunc("GET "+CommentsPath, s.staff(s.listComments))
+	router.AuthenticatedFunc("PATCH "+CommentPath, s.staff(s.moderateComment))
+	router.AuthenticatedFunc("GET "+UsersPath, s.staff(s.listUsers))
+	router.AuthenticatedFunc("GET "+LeaderboardsPath, s.staff(s.listScores))
+	router.AuthenticatedFunc("GET "+ModerationLogPath, s.staff(s.listModeration))
+	router.AuthenticatedFunc("GET "+SystemServicesPath, s.staff(s.systemServices))
 
 	// Suspension is the one action that changes whether a person can use the
-	// platform at all, so it is registered on the admin tier — the same
-	// allowlist decides, like every other staff route.
+	// platform at all, so it stays on the admin tier: the allowlist alone
+	// admits, and the handler re-checks the tier before the database is
+	// touched. A database moderator row — however stale — never reaches it.
 	router.AdminFunc("PATCH "+UserPath, s.staff(s.suspendUser))
 }
 
-// staff re-checks the single source of truth on every staff request: the
-// verified token email against the server-side ADMIN_EMAILS allowlist.
-// Database rows and token claims grant nothing. The allowlist is read per
-// request from the environment (never from the request), compared
-// case-insensitively, and an empty allowlist grants no one — so removal takes
-// effect on the caller's next request rather than when a token expires, and no
-// cached session, token claim or frontend state can keep the privilege.
+// staff authorizes every staff request, after the router verified the token.
+//
+//   - A verified email in the server-side ADMIN_EMAILS allowlist is an
+//     administrator: full access, no claim or database row required, and
+//     removal takes effect on the next request.
+//   - Otherwise the service reads the caller's own role row (as the caller,
+//     via the backend): a moderator row grants the moderator tier — staff
+//     reads and moderation writes, never suspension. An administrator row for
+//     an email outside the allowlist grants nothing: rows never promote.
+//   - Anything else is refused with 403 before the database is touched for
+//     staff work.
+//
+// The tier travels on the request context so handlers that need it
+// (suspension) can re-check without trusting the request.
 func (s *service) staff(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := authn.BearerToken(r.Header.Get("Authorization"))
@@ -411,18 +460,18 @@ func (s *service) staff(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		// The verified email only: set by the middleware from the Supabase JWT
-		// after signature verification. Never a body, query or header value.
-		verifiedEmail := ""
+		// The verified identity only: set by the middleware from the Supabase
+		// JWT after signature verification. Never a body, query or header value.
+		var verified identity.Identity
 		if id, ok := identity.FromContext(r.Context()); ok && !id.Anonymous {
-			verifiedEmail = id.Email
+			verified = id
 		}
-		if !adminallowlist.IsAllowlisted(verifiedEmail) {
-			// Deliberately the same message whatever the caller's row or claim
-			// holds: a caller learns that they are not staff, and nothing about
-			// who is.
-			httpx.WriteError(w, r, httpx.NewError(httpx.CodeForbidden,
-				"This area requires a moderator account."))
+		if adminallowlist.IsAllowlisted(verified.Email) {
+			if s.backend == nil {
+				s.notConfigured(w, r, "serve the admin API")
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(withTier(r.Context(), tierAdmin)))
 			return
 		}
 
@@ -430,19 +479,36 @@ func (s *service) staff(next http.HandlerFunc) http.HandlerFunc {
 			s.notConfigured(w, r, "serve the admin API")
 			return
 		}
+		who, err := s.backend.Identity(r.Context(), token)
+		if err != nil {
+			s.identityFailure(w, r, err)
+			return
+		}
+		if !who.IsStaff || who.IsAdmin {
+			// Not staff at all — or a stale administrator row for an email the
+			// allowlist does not contain, which must never promote. Either way
+			// the caller learns only that they are not staff.
+			httpx.WriteError(w, r, httpx.NewError(httpx.CodeForbidden,
+				"This area requires a moderator account."))
+			return
+		}
 
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(withTier(r.Context(), tierModerator)))
 	}
 }
 
 // session answers who the caller is. It is the only route in this group an
 // ordinary user may call, and it is how the app decides whether to show the
-// dashboard at all — a decision enforced here, never only in the UI. The role
-// fields come solely from the allowlist: an allowlisted verified email is
-// reported as an administrator (role admin, staff and admin true), anything
-// else as a non-admin user — regardless of token claims or database rows. The
-// username, display name and suspension state are the caller's own profile row
-// (not a privilege); the allowlist itself is never sent.
+// dashboard at all — a decision enforced here, never only in the UI.
+//
+// The administrator fields come from the allowlist first: an allowlisted
+// verified email is reported as an administrator (role admin, staff and admin
+// true) with no claim or row required. Otherwise the caller's own database row
+// decides between moderator and user — and a stale administrator row for an
+// email outside the allowlist is still reported as a non-admin user, because
+// rows never promote. The username, display name and suspension state are the
+// caller's own profile row (not a privilege); the allowlist itself is never
+// sent.
 func (s *service) session(w http.ResponseWriter, r *http.Request) {
 	id, ok := identity.FromContext(r.Context())
 	if !ok || id.Anonymous {
@@ -461,11 +527,13 @@ func (s *service) session(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	allowlisted := adminallowlist.IsAllowlisted(id.Email)
 	role := identity.RoleUser
 	isStaff, isAdmin := false, false
-	if allowlisted {
+	switch {
+	case adminallowlist.IsAllowlisted(id.Email):
 		role, isStaff, isAdmin = identity.RoleAdmin, true, true
+	case who.IsStaff && !who.IsAdmin:
+		role, isStaff = identity.RoleModerator, true
 	}
 
 	httpx.WriteJSON(w, r, http.StatusOK, sessionView{
@@ -481,7 +549,7 @@ func (s *service) session(w http.ResponseWriter, r *http.Request) {
 
 func (s *service) overview(w http.ResponseWriter, r *http.Request) {
 	token := s.token(r)
-	overview, err := s.backend.Overview(r.Context(), token)
+	overview, err := s.backend.Overview(r.Context(), token, s.actor(r))
 	if err != nil {
 		s.dataFailure(w, r, "read the overview", err)
 		return
@@ -553,7 +621,7 @@ func (s *service) analytics(w http.ResponseWriter, r *http.Request) {
 		days = value
 	}
 
-	analytics, err := s.backend.Analytics(r.Context(), s.token(r), days)
+	analytics, err := s.backend.Analytics(r.Context(), s.token(r), s.actor(r), days)
 	if err != nil {
 		s.dataFailure(w, r, "read analytics", err)
 		return
@@ -624,7 +692,7 @@ func (s *service) listGames(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := s.backend.Games(r.Context(), s.token(r), status, search, page)
+	rows, err := s.backend.Games(r.Context(), s.token(r), s.actor(r), status, search, page)
 	if err != nil {
 		s.dataFailure(w, r, "list games", err)
 		return
@@ -675,7 +743,7 @@ func (s *service) listUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := s.backend.Users(r.Context(), s.token(r), search, role, page)
+	rows, err := s.backend.Users(r.Context(), s.token(r), s.actor(r), search, role, page)
 	if err != nil {
 		s.dataFailure(w, r, "list accounts", err)
 		return
@@ -715,7 +783,7 @@ func (s *service) listReports(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := s.backend.Reports(r.Context(), s.token(r), status, page)
+	rows, err := s.backend.Reports(r.Context(), s.token(r), s.actor(r), status, page)
 	if err != nil {
 		s.dataFailure(w, r, "list reports", err)
 		return
@@ -763,7 +831,7 @@ func (s *service) listComments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := s.backend.Comments(r.Context(), s.token(r), state, search, page)
+	rows, err := s.backend.Comments(r.Context(), s.token(r), s.actor(r), state, search, page)
 	if err != nil {
 		s.dataFailure(w, r, "list comments", err)
 		return
@@ -806,7 +874,7 @@ func (s *service) listScores(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := s.backend.Scores(r.Context(), s.token(r), gameSlug, username, page)
+	rows, err := s.backend.Scores(r.Context(), s.token(r), s.actor(r), gameSlug, username, page)
 	if err != nil {
 		s.dataFailure(w, r, "list scores", err)
 		return
@@ -829,7 +897,7 @@ func (s *service) listScores(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *service) listCategories(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.backend.Categories(r.Context(), s.token(r))
+	rows, err := s.backend.Categories(r.Context(), s.token(r), s.actor(r))
 	if err != nil {
 		s.dataFailure(w, r, "list categories", err)
 		return
@@ -858,7 +926,7 @@ func (s *service) listModeration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := s.backend.ModerationLog(r.Context(), s.token(r), page)
+	rows, err := s.backend.ModerationLog(r.Context(), s.token(r), s.actor(r), page)
 	if err != nil {
 		s.dataFailure(w, r, "read the moderation log", err)
 		return
@@ -934,7 +1002,7 @@ func (s *service) moderateGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := s.backend.SetGameStatus(r.Context(), s.token(r), gameID, status, body.Reason)
+	result, err := s.backend.SetGameStatus(r.Context(), s.token(r), s.actor(r), gameID, status, body.Reason)
 	if err != nil {
 		s.moderationFailure(w, r, "moderate a game", err)
 		return
@@ -974,7 +1042,7 @@ func (s *service) moderateReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := s.backend.SetReportStatus(r.Context(), s.token(r), reportID, status, body.Reason)
+	result, err := s.backend.SetReportStatus(r.Context(), s.token(r), s.actor(r), reportID, status, body.Reason)
 	if err != nil {
 		s.moderationFailure(w, r, "moderate a report", err)
 		return
@@ -1013,7 +1081,7 @@ func (s *service) moderateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := s.backend.SetCommentHidden(r.Context(), s.token(r), commentID, *body.Hidden, body.Reason)
+	result, err := s.backend.SetCommentHidden(r.Context(), s.token(r), s.actor(r), commentID, *body.Hidden, body.Reason)
 	if err != nil {
 		s.moderationFailure(w, r, "moderate a comment", err)
 		return
@@ -1031,10 +1099,17 @@ type suspendUserRequest struct {
 	Reason    string `json:"reason"`
 }
 
-// suspendUser suspends or restores an account. Like every staff route it is
-// gated by the allowlist alone: the tier middleware and the staff wrapper both
-// enforce it before the database is touched.
+// suspendUser suspends or restores an account. Suspension is administrator-only:
+// the router's admin tier admits allowlisted emails, and the tier re-check below
+// refuses anything else — including a database moderator row — before the
+// database is touched. The database function re-checks the role a third time.
 func (s *service) suspendUser(w http.ResponseWriter, r *http.Request) {
+	if tier, _ := tierFromContext(r.Context()); tier != tierAdmin {
+		httpx.WriteError(w, r, httpx.NewError(httpx.CodeForbidden,
+			"This action requires an administrator account."))
+		return
+	}
+
 	userID, ok := s.pathID(w, r, "userID", "account")
 	if !ok {
 		return
@@ -1054,7 +1129,7 @@ func (s *service) suspendUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := s.backend.SetSuspension(r.Context(), s.token(r), userID, *body.Suspended, body.Reason)
+	result, err := s.backend.SetSuspension(r.Context(), s.token(r), s.actor(r), userID, *body.Suspended, body.Reason)
 	if err != nil {
 		s.moderationFailure(w, r, "suspend an account", err)
 		return
@@ -1153,6 +1228,15 @@ func (s *service) token(r *http.Request) string {
 	return authn.BearerToken(r.Header.Get("Authorization"))
 }
 
+// actor is the verified user id the request carries: the attribution every
+// privileged database call names. It comes from the verified token identity
+// only — never from a body, query or header value. Empty when no verified
+// identity exists, which the privileged client refuses locally (fail closed)
+// rather than sending an unattributed call.
+func (s *service) actor(r *http.Request) string {
+	return identity.MustFromContext(r.Context()).UserID
+}
+
 // moderationFailure maps a refused moderation write onto the platform's
 // envelope. The database's own text is never sent: it describes the schema.
 func (s *service) moderationFailure(w http.ResponseWriter, r *http.Request, operation string, err error) {
@@ -1168,12 +1252,18 @@ func (s *service) moderationFailure(w http.ResponseWriter, r *http.Request, oper
 		httpx.WriteError(w, r, httpx.NewError(httpx.CodeBadRequest,
 			"That change is not allowed."))
 	case errors.As(err, &dataErr) && dataErr.IsForbidden():
-		// The guard inside the function refused. For a staff route that means the
-		// action needs a stronger role than the caller holds.
-		s.logger.WarnContext(r.Context(), "a moderation write was refused by the database",
-			slog.String("operation", operation), slog.String("code", dataErr.Code))
-		httpx.WriteError(w, r, httpx.NewError(httpx.CodeForbidden,
-			"This action requires an administrator account."))
+		// The database refused an already-authorized staff caller. That is a
+		// deployment fault, not a privilege answer: it means the privileged
+		// bridge is missing (an allowlisted administrator without a role row
+		// and no secret configured) or a privileged call was refused. Telling
+		// an authorized administrator they are "not staff" would be a lie, so
+		// the route answers unavailable and the log records whether the
+		// bridge was even available. No secret value is ever logged.
+		s.logger.ErrorContext(r.Context(), "an admin write was refused by the database",
+			slog.String("operation", operation),
+			slog.String("code", dataErr.Code),
+			slog.Bool("privileged", s.privileged()))
+		s.unavailable(w, r, operation, err)
 	default:
 		s.dataFailure(w, r, operation, err)
 	}
@@ -1194,13 +1284,26 @@ func (s *service) identityFailure(w http.ResponseWriter, r *http.Request, err er
 func (s *service) dataFailure(w http.ResponseWriter, r *http.Request, operation string, err error) {
 	var dataErr *supabaseadmin.Error
 	if errors.As(err, &dataErr) && dataErr.IsForbidden() {
+		// As in moderationFailure: an already-authorized staff caller refused
+		// by the database is a deployment fault (a missing bridge or a
+		// refused privileged call), not a privilege answer. Answer unavailable
+		// and log whether the bridge was even available.
 		s.logger.ErrorContext(r.Context(), "an admin read was refused by the database",
-			slog.String("operation", operation), slog.String("code", dataErr.Code))
-		httpx.WriteError(w, r, httpx.NewError(httpx.CodeForbidden,
-			"This area requires a moderator account."))
+			slog.String("operation", operation),
+			slog.String("code", dataErr.Code),
+			slog.Bool("privileged", s.privileged()))
+		s.unavailable(w, r, operation, err)
 		return
 	}
 	s.unavailable(w, r, operation, err)
+}
+
+// privileged reports whether staff database calls run as the service role.
+// It drives logging only — never authorization, which the staff wrapper
+// decided before the backend was touched.
+func (s *service) privileged() bool {
+	priv, ok := s.backend.(interface{ Privileged() bool })
+	return ok && priv.Privileged()
 }
 
 // unavailable answers a route whose database dependency failed or is missing. It

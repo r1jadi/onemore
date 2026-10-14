@@ -302,6 +302,47 @@ func TestClientSuppliedAdminMarkersAreIgnored(t *testing.T) {
 	}
 }
 
+// TestAllowlistedReachesEveryWrite: the three moderation writes join the
+// suspension route in answering an allowlisted caller with a user claim behind
+// a user row — every staff tier, every action, no claim or row required.
+func TestAllowlistedReachesEveryWrite(t *testing.T) {
+	t.Setenv("ADMIN_EMAILS", "admin@example.com")
+	backend := &fakeBackend{
+		identity: staffIdentity("user"),
+		action:   supabaseadmin.ActionResult{GameID: testGameID, Action: "publish_game"},
+	}
+	server, sign := newAllowlistServer(t, backend)
+	// Claim user on purpose: the allowlist — not the stale claim — authorizes.
+	token := sign(testPlayer, "user", "admin@example.com")
+
+	writes := []struct {
+		name   string
+		method string
+		path   string
+		body   any
+		want   string
+	}{
+		{"moderate game", http.MethodPatch, "/api/v1/admin/games/" + testGameID,
+			map[string]any{"status": "published", "reason": "Good game"}, "SetGameStatus"},
+		{"moderate report", http.MethodPatch, "/api/v1/admin/reports/" + testGameID,
+			map[string]any{"status": "resolved", "reason": "Handled"}, "SetReportStatus"},
+		{"moderate comment", http.MethodPatch, "/api/v1/admin/comments/" + testCommentID,
+			map[string]any{"hidden": true, "reason": "Abuse"}, "SetCommentHidden"},
+		{"suspend account", http.MethodPatch, "/api/v1/admin/users/" + testPlayer,
+			map[string]any{"suspended": true, "reason": "Abuse"}, "SetSuspension"},
+	}
+	for _, write := range writes {
+		t.Run(write.name, func(t *testing.T) {
+			if status, payload := call(t, server, write.method, write.path, token, write.body); status != http.StatusOK {
+				t.Errorf("%s %s = %d, want 200 (%v)", write.method, write.path, status, payload)
+			}
+			if !backend.called(write.want) {
+				t.Errorf("%s never reached the database", write.name)
+			}
+		})
+	}
+}
+
 // TestAllowlistedModeratorGateAndSuspension: an allowlisted email passes every
 // staff tier and reaches the suspension route — with a user claim behind a
 // user row, proving claims and rows grant nothing.
