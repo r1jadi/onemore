@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/r1jadi/onemore/packages/go/platform/adminallowlist"
 )
 
 // Environment names the deployment stage a service runs in.
@@ -84,6 +86,13 @@ type Config struct {
 	CORSAllowedOrigins []string
 	// Upstreams maps a logical service name to its base URL (gateway only).
 	Upstreams map[string]string
+	// AdminEmails is the server-side ADMIN_EMAILS allowlist snapshot taken at
+	// startup: lower-cased, trimmed, deduplicated. Enforcement reads the live
+	// environment per request (see adminallowlist.Get) so a change takes
+	// effect on the next request; this snapshot exists for startup logging
+	// and for tests that assert what was configured. Empty means no
+	// allowlist grants (fail-closed); database roles still apply.
+	AdminEmails []string
 }
 
 // Getenv reads an environment variable, preferring the service-scoped name so a
@@ -139,6 +148,7 @@ func Load(service string) (*Config, error) {
 		},
 		CORSAllowedOrigins: splitList(Getenv("CORS_ALLOWED_ORIGINS")),
 		Upstreams:          loadUpstreams(),
+		AdminEmails:        parseAdminEmails(Getenv("ADMIN_EMAILS")),
 	}
 
 	if cfg.Supabase.JWKSURL == "" && cfg.Supabase.ProjectURL != "" {
@@ -264,6 +274,13 @@ func loadUpstreams() map[string]string {
 		}
 	}
 	return upstreams
+}
+
+// parseAdminEmails parses ADMIN_EMAILS with the single implementation in
+// adminallowlist, so the snapshot and the per-request check cannot disagree
+// on trimming, casing or fail-closed behaviour.
+func parseAdminEmails(raw string) []string {
+	return adminallowlist.Parse(raw)
 }
 
 func splitList(raw string) []string {

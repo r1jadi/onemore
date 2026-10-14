@@ -102,7 +102,66 @@ indistinguishable from a measured one.
 | `SUPABASE_URL`                                              | project URL, for the Data API calls                                         |
 | `SUPABASE_PUBLISHABLE_KEY`                                  | the same publishable key the browser holds — the token does the authorizing |
 | `SUPABASE_JWT_SECRET` / `SUPABASE_JWKS_URL`                 | token verification (derived from `SUPABASE_URL` when unset)                 |
+| `ADMIN_EMAILS`                                              | administrator allowlist (server-only): comma-separated verified emails      |
 | `ENVIRONMENT`, `CORS_ALLOWED_ORIGINS`, `RATE_LIMIT_ENABLED` | the platform's shared middleware                                            |
+
+## The ADMIN_EMAILS allowlist
+
+`ADMIN_EMAILS` (exact name, never a `VITE_` variable) grants administrator
+access to the accounts it names, managed in Vercel rather than in SQL:
+
+```dotenv
+ADMIN_EMAILS=admin@example.com,another@example.com
+```
+
+Rules:
+
+- **Server-only.** Read per request from the process environment by the Go
+  API (`packages/go/platform/adminallowlist`). Never inlined into the browser
+  bundle, never sent to the client — `GET /admin/session` reports the
+  elevated role, never the allowlist itself.
+- **Verified email only.** Compared case-insensitively (whitespace ignored)
+  against `identity.Identity.Email`, which `authn.Verifier` sets from the
+  JWT's `email` claim after signature, audience, issuer and expiry checks. A
+  client-supplied email, user id, role or `isAdmin` flag — in a body, query
+  string or header — is never trusted (identity headers are stripped, strict
+  bodies reject unknown fields).
+- **Fail-closed.** Missing or empty grants no one. Database roles keep
+  working.
+- **Immediate.** Read on every request, so removing an address revokes its
+  Go API access on the next call — not when a token expires and not from any
+  client-cached role. (On Vercel an env change redeploys; the fresh process
+  reads the new value.)
+
+### How it interacts with database roles and RLS
+
+| Caller                                              | Go tier (`AdminFunc`/`ModeratorFunc`) | Go `staff` wrapper | Database functions / RLS |
+| --------------------------------------------------- | ------------------------------------- | ------------------ | ------------------------ |
+| Verified email in `ADMIN_EMAILS`                    | pass (allowlist OR claim)             | pass (elevated to admin for this request) | staff reads/writes still call the caller's-token RPCs, which re-check `is_staff()`/`is_admin()` from `user_roles` |
+| `user_roles` row `admin`/`moderator`, not allowlisted | pass iff the token claim is strong enough | pass iff the row is staff | pass per the row (unchanged) |
+| Ordinary user, not allowlisted                      | 403 (moderator routes), 403/401 as documented | 403, database never reached | refused (`42501`) on any direct RPC too |
+
+Consequences worth stating plainly:
+
+- The allowlist is an **additional Go-layer grant**, OR'd with the existing
+  row+claim checks. It removes the need to set the `app_metadata.role` claim
+  for allowlisted accounts, and revoking at the Go layer is immediate.
+- It does **not** replace the row for data access and does **not** weaken
+  RLS: no migration was changed, no grant was added, and no service holds the
+  service-role/secret key. A direct browser call to
+  `POST /rest/v1/rpc/admin_overview` with a caller token is still answered
+  from the row alone — an allowlisted address without a staff row cannot read
+  staff data that way, and removing an address from the allowlist does not by
+  itself demote its row. Full revocation of a row-backed account is env
+  removal **plus** the existing row demotion (`update user_roles set role =
+  'user' …`); for allowlist-only accounts env removal alone suffices at the
+  Go API.
+- For allowlisted accounts to read staff aggregates through the Go API today,
+  grant the row once with the existing procedure
+  ([ADR 0013](../../docs/decisions/0013-admin-authorization.md#granting-and-revoking-a-role))
+  and then manage day-to-day membership in Vercel. A future change could sync
+  the allowlist into rows with a privileged writer; that writer does not exist
+  today by design.
 
 Missing Data API configuration is not fatal: the service still serves its probes
 and answers `503` on the admin routes, which is diagnosable, where a crash loop is

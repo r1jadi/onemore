@@ -82,3 +82,29 @@ func TestVercelProductionEnvironmentBootsWithJwksOnly(t *testing.T) {
 		t.Errorf("Environment = %q, want production", cfg.Environment)
 	}
 }
+
+func TestAdminEmailsSnapshotIsParsedButNeverRequired(t *testing.T) {
+	// The allowlist is fail-closed and optional: a deployment without it boots
+	// and keeps its database roles; enforcement reads the live environment per
+	// request (see adminallowlist), this snapshot is for logging and tests.
+	clearAddressEnv(t)
+	t.Setenv("ENVIRONMENT", "development")
+	t.Setenv("ADMIN_EMAILS", "  Admin@Example.com ,another@example.com,,not-an-email ")
+
+	cfg, err := Load("gateway")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.AdminEmails) != 2 || cfg.AdminEmails[0] != "admin@example.com" || cfg.AdminEmails[1] != "another@example.com" {
+		t.Fatalf("AdminEmails = %v, want the two parsed addresses", cfg.AdminEmails)
+	}
+
+	t.Setenv("ADMIN_EMAILS", "")
+	cfg, err = Load("gateway")
+	if err != nil {
+		t.Fatalf("Load without an allowlist: %v", err)
+	}
+	if len(cfg.AdminEmails) != 0 {
+		t.Fatalf("AdminEmails = %v, want empty (fail-closed, but booting)", cfg.AdminEmails)
+	}
+}

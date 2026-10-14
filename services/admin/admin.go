@@ -41,6 +41,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/r1jadi/onemore/packages/go/platform/adminallowlist"
 	"github.com/r1jadi/onemore/packages/go/platform/apierr"
 	"github.com/r1jadi/onemore/packages/go/platform/authn"
 	"github.com/r1jadi/onemore/packages/go/platform/config"
@@ -400,8 +401,13 @@ func (s *service) register(router *httpx.Router) {
 //
 // The middleware above has already verified the token; this asks the database for
 // the row that actually decides authorization and refuses anything the row does
-// not support. It runs on every staff request, so a role revoked in the database
-// takes effect on the caller's next request rather than when their token expires.
+// not support — unless the caller's verified email is in the server-side
+// ADMIN_EMAILS allowlist, which is an additional admin grant OR'd with the row.
+// The allowlist is read per request from the environment (never from the
+// request), compared case-insensitively against the verified token email, and
+// an empty allowlist grants no one. It runs on every staff request, so a role
+// revoked in the database — or removed from the allowlist — takes effect on
+// the caller's next request rather than when their token expires.
 func (s *service) staff(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.backend == nil {
@@ -414,6 +420,14 @@ func (s *service) staff(next http.HandlerFunc) http.HandlerFunc {
 			httpx.WriteError(w, r, httpx.NewError(httpx.CodeUnauthorized, "Sign in to continue."))
 			return
 		}
+
+		// The verified email only: set by the middleware from the Supabase JWT
+		// after signature verification. Never a body, query or header value.
+		verifiedEmail := ""
+		if id, ok := identity.FromContext(r.Context()); ok && !id.Anonymous {
+			verifiedEmail = id.Email
+		}
+		allowlisted := adminallowlist.IsAllowlisted(verifiedEmail)
 
 		who, err := s.backend.Identity(r.Context(), token)
 		if err != nil {
@@ -430,6 +444,19 @@ func (s *service) staff(next http.HandlerFunc) http.HandlerFunc {
 			default:
 				s.unavailable(w, r, "read the caller's role", err)
 			}
+			return
+		}
+
+		if allowlisted {
+			// The allowlist grants administrator: elevate the database view for
+			// this request, keeping the caller's own username and account
+			// state. The database functions still re-check the row, so a
+			// caller without a staff row cannot read staff data through a
+			// direct Data API call — see the README's interaction table.
+			who.Role = identity.RoleAdmin
+			who.IsStaff = true
+			who.IsAdmin = true
+			next(w, r.WithContext(withStaff(r.Context(), who)))
 			return
 		}
 
@@ -459,9 +486,12 @@ func staffFrom(ctx context.Context) supabaseadmin.Identity {
 // session answers who the caller is. It is the only route in this group an
 // ordinary user may call, and it is how the app decides whether to show the
 // dashboard at all — a decision that is still enforced here and in the database,
-// never only in the UI.
+// never only in the UI. A verified email in ADMIN_EMAILS is reported as an
+// administrator (role admin, staff and admin true), so the UI reflects the
+// actual server-authorized status; the allowlist itself is never sent.
 func (s *service) session(w http.ResponseWriter, r *http.Request) {
-	if id, ok := identity.FromContext(r.Context()); !ok || id.Anonymous {
+	id, ok := identity.FromContext(r.Context())
+	if !ok || id.Anonymous {
 		httpx.WriteError(w, r, httpx.NewError(httpx.CodeUnauthorized, "Sign in to continue."))
 		return
 	}
@@ -474,6 +504,19 @@ func (s *service) session(w http.ResponseWriter, r *http.Request) {
 	who, err := s.backend.Identity(r.Context(), token)
 	if err != nil {
 		s.identityFailure(w, r, err)
+		return
+	}
+
+	if adminallowlist.IsAllowlisted(id.Email) {
+		httpx.WriteJSON(w, r, http.StatusOK, sessionView{
+			UserID:      who.UserID,
+			Username:    who.Username,
+			DisplayName: who.DisplayName,
+			Role:        identity.RoleAdmin,
+			IsStaff:     true,
+			IsAdmin:     true,
+			IsSuspended: who.IsSuspended,
+		})
 		return
 	}
 
