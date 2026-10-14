@@ -15,6 +15,7 @@ import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { rootSeo } from "../lib/seo";
 import { AppShell } from "@/components/layout/AppShell";
+import { SafeAreaDiagnostics } from "@/components/dev/SafeAreaDiagnostics";
 import { Toaster } from "@/components/ui/sonner";
 import { LanguageProvider } from "@/lib/settings/language";
 import { ThemeProvider } from "@/lib/settings/theme";
@@ -169,6 +170,8 @@ function RootComponent() {
           <Outlet />
         </AppShell>
       )}
+      {/* Dev-only safe-area/PWA probe (dead-code-eliminated in production). */}
+      {import.meta.env.DEV ? <SafeAreaDiagnostics /> : null}
       <Toaster position="top-center" theme="dark" />
     </QueryClientProvider>
   );
