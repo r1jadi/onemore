@@ -75,6 +75,8 @@ export type Profile = {
  */
 export type ProfilePatch = {
   displayName?: string;
+  /** A new username. Only sent when it differs from the stored one. */
+  username?: string;
   bio?: string | null;
   avatarPath?: string | null;
   /** The `updatedAt` the edit was made against. See `updateProfile`. */

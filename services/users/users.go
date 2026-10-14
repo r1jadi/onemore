@@ -17,8 +17,8 @@
 //     so a bug here cannot read another account's data or grant a role.
 //
 // What a caller may write is the database's decision, not this service's: the
-// UPDATE grant on `profiles` covers `display_name`, `bio`, `avatar_path` and
-// `onboarded_at` only. `username`, `is_suspended` and the timestamps are not
+// UPDATE grant on `profiles` covers `username`, `display_name`, `bio`,
+// `avatar_path` and `onboarded_at`. `is_suspended` and the timestamps are not
 // writable by any client, and a request that names one of them is rejected with a
 // 400 that names the field rather than silently dropped.
 package users
@@ -72,6 +72,12 @@ const (
 // key.
 var avatarPathPattern = regexp.MustCompile(`^[0-9a-f-]{36}/[a-z0-9._-]{1,120}$`)
 
+// usernamePattern mirrors `profiles_username_format`: 3–24 lowercase letters,
+// digits and underscores. Case-insensitive uniqueness comes from the citext
+// unique index, so the pattern is what keeps two spellings of one name from
+// ever reaching it.
+var usernamePattern = regexp.MustCompile(`^[a-z0-9_]{3,24}$`)
+
 // Backend is the profile surface this service needs. It is an interface so the
 // handlers are tested without a network, and so a deployment that has not been
 // given Supabase credentials can still boot, serve its probes, and answer 503 on
@@ -104,10 +110,11 @@ type profileView struct {
 // `bio` and `avatarPath` are raw JSON so the handler can tell "absent" from
 // "explicitly null": a nil `*string` cannot, and clearing a bio is a legitimate
 // edit that must not be indistinguishable from leaving it alone. Neither field is
-// a writable username, role or suspension flag — a request that carries one of
-// those has an unknown field here and is refused by the strict decoder.
+// a writable role or suspension flag — a request that carries one of those has
+// an unknown field here and is refused by the strict decoder.
 type patchRequest struct {
 	DisplayName *string `json:"displayName"`
+	Username    *string `json:"username"`
 	Bio         json.RawMessage
 	AvatarPath  json.RawMessage
 	// ExpectedUpdatedAt is the optimistic-concurrency control. A client that
@@ -228,6 +235,22 @@ func validated(w http.ResponseWriter, r *http.Request, request patchRequest) (su
 			return reject(w, r, "displayName", "maxLength", "Use at most 60 characters for your display name.")
 		}
 		patch.DisplayName = name
+		fields++
+	}
+
+	if request.Username != nil {
+		// Usernames cannot contain spaces, so trimming is not a transformation
+		// of intent — it forgives an accidental touch of the space bar.
+		name := strings.TrimSpace(*request.Username)
+		switch {
+		case name == "":
+			return reject(w, r, "username", "required", "Add a username.")
+		case utf8.RuneCountInString(name) < 3 || utf8.RuneCountInString(name) > 24:
+			return reject(w, r, "username", "length", "Use 3–24 characters for your username.")
+		case !usernamePattern.MatchString(name):
+			return reject(w, r, "username", "format", "Use only lowercase letters, numbers and underscores.")
+		}
+		patch.Username = name
 		fields++
 	}
 
@@ -358,7 +381,11 @@ func (s *service) dataFailure(w http.ResponseWriter, r *http.Request, operation 
 			httpx.WriteError(w, r, httpx.NewError(httpx.CodeForbidden, "That profile field cannot be changed."))
 			return
 		case dataErr.IsUniqueViolation():
-			httpx.WriteError(w, r, httpx.NewError(httpx.CodeConflict, "That value is already taken."))
+			// The only unique-writable column on this table is the username, so
+			// a conflict here always names it — and the form shows it under the
+			// input it belongs to instead of as a concurrency error.
+			httpx.WriteError(w, r, httpx.NewError(httpx.CodeConflict, "That username is taken.",
+				apierr.Detail{Field: "username", Rule: "taken"}))
 			return
 		case dataErr.IsConstraintViolation():
 			httpx.WriteError(w, r, httpx.NewError(httpx.CodeUnprocessable, "Check the details you entered and try again."))

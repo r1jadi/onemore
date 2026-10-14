@@ -66,14 +66,15 @@ type Profile struct {
 }
 
 // Patch is a set of column values to write. A nil field is left unchanged, so a
-// request that names one field cannot clear another. `Username` is deliberately
-// absent: it is not in the UPDATE grant, and a client asking for it is refused
-// before this package is called.
+// request that names one field cannot clear another. `Username` is a plain
+// string like `DisplayName`: it cannot be empty (the service validates the
+// format first), so an empty value means "leave it alone".
 //
 // Clearing a nullable column (setting `bio` to null) cannot be expressed by a nil
 // field, so the pointers are paired with explicit "set" flags.
 type Patch struct {
 	DisplayName string
+	Username    string
 	Bio         *string
 	SetBio      bool
 	AvatarPath  *string
@@ -199,6 +200,9 @@ func (c *Client) Update(ctx context.Context, accessToken, userID string, patch P
 	payload := map[string]any{}
 	if patch.DisplayName != "" {
 		payload["display_name"] = patch.DisplayName
+	}
+	if patch.Username != "" {
+		payload["username"] = patch.Username
 	}
 	if patch.SetBio {
 		payload["bio"] = patch.Bio

@@ -20,7 +20,7 @@ export const settingsGroups = [
     label: "Account",
     items: [
       { slug: "account", title: "Account", desc: "Email, phone, password", icon: User },
-      { slug: "profile", title: "Profile", desc: "Photo, name, bio", icon: UserCircle },
+      { slug: "profile", title: "Profile", desc: "Photo, name, username, bio", icon: UserCircle },
       {
         slug: "security",
         title: "Security",

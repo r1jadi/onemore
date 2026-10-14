@@ -199,8 +199,8 @@ function Signup() {
               error={nameError}
             />
             <p className="text-xs text-muted-foreground">
-              Your username is generated automatically and shown in your profile. It can&apos;t be
-              changed yet.
+              Your username is generated automatically and shown in your profile. You can change it
+              later in Settings.
             </p>
           </div>
           <Button type="submit" variant="play" size="xl" className="mt-auto w-full lg:mt-6">

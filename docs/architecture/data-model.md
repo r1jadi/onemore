@@ -45,11 +45,13 @@ of:
    write grant for `authenticated`, so no profile update — by a user, a handler
    bug or a future feature — can grant a role. Role changes require the
    `service_role` key (the admin service).
-2. **Privileged columns are not granted.** `profiles.is_suspended`,
-   `profiles.username` and `comments.is_hidden` have no `UPDATE` grant for
-   `authenticated`. Postgres column grants are additive, so a column granted "for
-   staff" would be granted to everyone; hiding a comment is therefore a
-   moderation service action using `service_role`.
+2. **Privileged columns are not granted.** `profiles.is_suspended` and
+   `comments.is_hidden` have no `UPDATE` grant for `authenticated`. Postgres
+   column grants are additive, so a column granted "for staff" would be granted
+   to everyone; hiding a comment is therefore a moderation service action using
+   `service_role`. (`profiles.username` is the deliberate exception: it is
+   granted, owner-scoped by the update policy, and uniqueness is enforced by
+   the citext index.)
 3. **Scores are the database's arithmetic.** `scores` has no `INSERT` grant for
    `authenticated`, and no service holds a key that could write one either:
    `public.complete_stack10_run` replays the submitted run from the session's seed

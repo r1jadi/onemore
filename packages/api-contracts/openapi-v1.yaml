@@ -367,12 +367,16 @@ paths:
       tags: [users]
       summary: Update the signed-in profile
       description: |
-        Only presentation fields are writable: `username`, `role`,
-        `is_suspended` and the timestamps are **rejected**, not ignored — the
-        refusal names the field. The database enforces the same rule a second
-        time: the UPDATE grant on `profiles` covers `display_name`, `bio`,
-        `avatar_path` and `onboarded_at` only, so a request that got past this
-        service still could not write a role.
+        Only presentation fields are writable: `role`, `is_suspended` and the
+        timestamps are **rejected**, not ignored — the refusal names the field.
+        The database enforces the same rule a second time: the UPDATE grant on
+        `profiles` covers `username`, `display_name`, `bio`, `avatar_path` and
+        `onboarded_at`, so a request that got past this service still could not
+        write a role.
+
+        Usernames are 3–24 lowercase letters, digits and underscores, unique
+        case-insensitively. A name someone else holds is refused with
+        `409 conflict` naming the field.
 
         Concurrency is opt-in. Send back the `updatedAt` you read and the write
         applies only if the row still holds that value; otherwise it is refused
@@ -389,6 +393,14 @@ paths:
               additionalProperties: false
               properties:
                 displayName: { type: string, minLength: 1, maxLength: 60 }
+                username:
+                  type: string
+                  minLength: 3
+                  maxLength: 24
+                  pattern: "^[a-z0-9_]{3,24}$"
+                  description: |
+                    3–24 lowercase letters, digits and underscores, unique
+                    case-insensitively. Only sent when the name actually changed.
                 bio:
                   type: [string, "null"]
                   maxLength: 300
@@ -428,8 +440,10 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "409":
           description: >-
-            The profile changed since the caller read it, so `expectedUpdatedAt`
-            no longer matches. The body still exists; reload and retry.
+            Either the profile changed since the caller read it, so
+            `expectedUpdatedAt` no longer matches — or the requested username is
+            already taken. A taken name carries the field in the error details,
+            so the two cases are told apart.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

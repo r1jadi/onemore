@@ -232,7 +232,7 @@ describe("updateProfile", () => {
     expect(request.path).toBe("/api/v1/users/me");
     expect(request.headers.get("Authorization")).toBe("Bearer access-token-1");
     // Exactly the documented fields: the endpoint rejects unknown ones, and
-    // `username` and `role` are not the caller's to write.
+    // `role` is not the caller's to write.
     expect(request.body).toEqual({
       displayName: "Player Two",
       bio: null,
@@ -241,6 +241,38 @@ describe("updateProfile", () => {
     expect(updated.displayName).toBe("Player Two");
     // The row the database returned is what is on screen, including its new
     // version, which the next edit has to use.
+    expect(getProfileState()).toEqual({ status: "ready", profile: updated });
+  });
+
+  it("writes a rename and adopts it without signing out", async () => {
+    const spy = mockFetch((url, init) =>
+      url.endsWith("/auth/sign-in")
+        ? jsonResponse(sessionPayload())
+        : url.endsWith("/users/me") && init?.method === "PATCH"
+          ? jsonResponse(profilePayload({ username: "player_two" }), 200)
+          : jsonResponse(profilePayload()),
+    );
+    await signInAs();
+    const loaded = await loadProfile();
+    if (loaded.status !== "ready") throw new Error("expected a loaded profile");
+
+    const updated = await updateProfile({
+      username: "player_two",
+      expectedUpdatedAt: loaded.profile.updatedAt,
+    });
+
+    const request = requestOf(spy, 2);
+    expect(request.method).toBe("PATCH");
+    expect(request.path).toBe("/api/v1/users/me");
+    // The rename names no account: the row comes from the token, so there is
+    // no user id in the body to manipulate.
+    expect(request.body).toEqual({
+      username: "player_two",
+      expectedUpdatedAt: "2026-10-08T09:30:00.000Z",
+    });
+    expect(updated.username).toBe("player_two");
+    // The store holds the renamed row: every surface reading the profile shows
+    // the new name with no further request and no new session.
     expect(getProfileState()).toEqual({ status: "ready", profile: updated });
   });
 

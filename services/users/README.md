@@ -61,17 +61,18 @@ that does not exist yet, and there is no route for it to be added by accident.
 
 ### Editing
 
-`PATCH` accepts **only** `displayName`, `bio`, `avatarPath` and `expectedUpdatedAt`.
-Anything else is refused, not ignored: `username`, `role` and `isSuspended` are not
-writable by a client (the database grants UPDATE on
-`display_name, bio, avatar_path, onboarded_at` and nothing else), and the strict
-decoder answers `400` with `details[0] = {field, rule: "unknown"}` before the
-database is ever called. It is refused twice over on purpose — the message a
-client gets, and the grant that makes it true.
+`PATCH` accepts **only** `displayName`, `username`, `bio`, `avatarPath` and
+`expectedUpdatedAt`. Anything else is refused, not ignored: `role` and
+`isSuspended` are not writable by a client (the database grants UPDATE on
+`username, display_name, bio, avatar_path, onboarded_at` and nothing else), and
+the strict decoder answers `400` with `details[0] = {field, rule: "unknown"}`
+before the database is ever called. It is refused twice over on purpose — the
+message a client gets, and the grant that makes it true.
 
 | Field | Rule |
 | --- | --- |
 | `displayName` | Trimmed; required; at most 60 characters (`422` with `field: "displayName"`) |
+| `username` | 3–24 lowercase letters, digits, underscores, unique case-insensitively (`422` with `field: "username"`; a taken name is `409` with `field: "username"`) |
 | `bio` | At most 300 characters; `null` clears it; `""` also clears it |
 | `avatarPath` | `<account id>/<file>`; `null` (or `""`) removes the picture |
 | `expectedUpdatedAt` | Optional. The `updatedAt` the client read; the write applies only if the row still holds it |
@@ -187,11 +188,13 @@ envelope) against a fake profile backend and covers: both verbs, a missing token
 an invalid, forged or expired token, a token that names a *different* account
 (the subject in the token always wins — a query or body can never aim the read),
 a missing row, a backend that is not configured (`503`), trimming, clearing with
-`null`, unmentioned fields staying untouched, unknown fields (`username`, `role`,
-`isSuspended`, timestamps) being refused before the backend is reached, over-long
-and malformed values, an empty patch, a stale `expectedUpdatedAt` (`409`), a read
-failure (`503`), a database privilege failure (`403`), and that neither a token
-nor `is_suspended` can appear in a response or a log line.
+`null`, unmentioned fields staying untouched, unknown fields (`role`,
+`isSuspended`, timestamps, `id`) being refused before the backend is reached,
+username renames (valid, invalid, taken as a field-attributed `409`, and unable
+to aim another account), over-long and malformed values, an empty patch, a stale
+`expectedUpdatedAt` (`409`), a read failure (`503`), a database privilege failure
+(`403`), and that neither a token nor `is_suspended` can appear in a response or
+a log line.
 
 `internal/supabaseprofile/client_test.go` covers the client against a stub Data
 API: the named projection (never `*`), the caller's token in `Authorization`, the

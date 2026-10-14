@@ -24,9 +24,10 @@ import {
  * through `PATCH /api/v1/users/me`, which resolves the row from the verified
  * token — the form has no user id to send even if it wanted to.
  *
- * The username is shown but not editable: the database grants UPDATE on the
- * presentation columns only, so a rename is a deliberate product decision rather
- * than something this form should attempt and then report as a failure.
+ * Usernames follow the database rule: 3–24 lowercase letters, digits and
+ * underscores, unique case-insensitively. The form validates the shape before
+ * sending; a name someone else holds is refused by the unique index and
+ * reported under the field.
  */
 export function ProfileForm() {
   const state = useProfile();
@@ -38,7 +39,7 @@ export function ProfileForm() {
       <div className="px-4 md:px-0">
         <EmptyState
           title="Sign in to edit your profile"
-          body="Your name, bio and photo belong to your account."
+          body="Your name, username, bio and photo belong to your account."
           action={
             <Button asChild>
               <Link to="/login">Log in</Link>
@@ -98,24 +99,57 @@ function Loading() {
   );
 }
 
+/**
+ * The client side of the username rule. It mirrors `profiles_username_format`
+ * (`^[a-z0-9_]{3,24}$`) so a bad value fails here with a message instead of as
+ * a server refusal — the database stays the authority behind it.
+ */
+function validateUsername(value: string): string | undefined {
+  if (value === "") return "Add a username.";
+  // Spread into code points, the way the API counts runes: a length error and
+  // a format error stay distinct even for non-ASCII input.
+  const length = [...value].length;
+  if (length < 3 || length > 24) {
+    return "Use 3–24 characters for your username.";
+  }
+  if (!/^[a-z0-9_]+$/.test(value)) {
+    return "Use only lowercase letters, numbers and underscores.";
+  }
+  return undefined;
+}
+
 function Editor({ profile }: { profile: Profile }) {
   // The form edits a draft that starts as the stored profile. Keeping it as
   // `undefined` until the first keystroke means the fields always show what the
   // server holds, and an edit in progress is never silently replaced by a
   // refresh — except after a conflict, where the draft is the thing at fault.
-  const [draft, setDraft] = useState<{ displayName: string; bio: string }>();
+  const [draft, setDraft] = useState<{ displayName: string; username: string; bio: string }>();
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<string>();
-  const [errors, setErrors] = useState<{ displayName?: string; bio?: string }>({});
+  const [errors, setErrors] = useState<{ displayName?: string; username?: string; bio?: string }>(
+    {},
+  );
   const file = useRef<HTMLInputElement>(null);
 
-  const value = draft ?? { displayName: profile.displayName, bio: profile.bio ?? "" };
+  const value = draft ?? {
+    displayName: profile.displayName,
+    username: profile.username,
+    bio: profile.bio ?? "",
+  };
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const displayName = value.displayName.trim();
     if (displayName === "") {
       setErrors({ displayName: "Add a display name." });
+      setBanner(undefined);
+      return;
+    }
+
+    const username = value.username.trim();
+    const usernameError = validateUsername(username);
+    if (usernameError) {
+      setErrors({ username: usernameError });
       setBanner(undefined);
       return;
     }
@@ -127,6 +161,9 @@ function Editor({ profile }: { profile: Profile }) {
     try {
       await updateProfile({
         displayName,
+        // An unchanged username is not sent: the row's `updatedAt` is the
+        // concurrency control, and a no-op write would still move it.
+        ...(username !== profile.username ? { username } : {}),
         // An emptied bio is stored as "no bio", not as an empty string.
         bio: bio === "" ? null : bio,
         // The version this form was loaded against. If the row moved on, the API
@@ -136,19 +173,23 @@ function Editor({ profile }: { profile: Profile }) {
       setDraft(undefined);
       toast.success("Profile saved");
     } catch (error) {
-      if (error instanceof ApiError && error.status === 409) {
-        // Somebody else's edit landed first. Re-read so the form shows the stored
-        // values, and let the user apply their edit again on top of them.
+      if (error instanceof ApiError && error.status === 409 && !fieldError(error, "username")) {
+        // Somebody else's edit landed first — but not a taken username, which
+        // names its field below and keeps the draft. Re-read so the form shows
+        // the stored values, and let the user apply their edit again on top.
         setDraft(undefined);
         void refreshProfile();
       }
       const attributed = {
         displayName: fieldError(error, "displayName"),
+        username: fieldError(error, "username"),
         bio: fieldError(error, "bio"),
       };
       setErrors(attributed);
       // A message shown under its own field is not repeated in the banner.
-      if (!attributed.displayName && !attributed.bio) setBanner(profileErrorMessage(error));
+      if (!attributed.displayName && !attributed.username && !attributed.bio) {
+        setBanner(profileErrorMessage(error));
+      }
     } finally {
       setBusy(false);
     }
@@ -206,9 +247,12 @@ function Editor({ profile }: { profile: Profile }) {
       <Field
         id="username"
         label="Username"
-        value={profile.username}
-        readOnly
-        hint="Can't be changed"
+        value={value.username}
+        maxLength={24}
+        required
+        hint="3–24 characters: lowercase letters, numbers, underscores."
+        error={errors.username}
+        onChange={(event) => setDraft({ ...value, username: event.target.value })}
       />
       <div className="space-y-1.5">
         <Label htmlFor="bio">Bio</Label>

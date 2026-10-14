@@ -134,7 +134,10 @@ describe("ProfileForm", () => {
       "Puzzles in the morning.",
     );
     expect((screen.getByLabelText("Username") as HTMLInputElement).value).toBe("player_one");
-    expect((screen.getByLabelText("Username") as HTMLInputElement).readOnly).toBe(true);
+    expect((screen.getByLabelText("Username") as HTMLInputElement).readOnly).toBe(false);
+    expect(
+      screen.getByText("3–24 characters: lowercase letters, numbers, underscores."),
+    ).toBeInTheDocument();
     expect(screen.queryByDisplayValue("Rijad Halili")).toBeNull();
     expect(screen.queryByDisplayValue("rijad")).toBeNull();
 
@@ -154,11 +157,103 @@ describe("ProfileForm", () => {
       // instead of overwritten.
       expectedUpdatedAt: "2026-10-08T09:30:00.000Z",
     });
+    // An unchanged username is not sent: the row's updatedAt is the concurrency
+    // control, and a no-op write would still move it. No user id travels either.
+    expect(JSON.parse(String(init!.body))).not.toHaveProperty("username");
+    expect(JSON.parse(String(init!.body))).not.toHaveProperty("userId");
+    expect(JSON.parse(String(init!.body))).not.toHaveProperty("id");
 
     // The form shows what was stored, trimmed the way the API stores it.
     await waitFor(() =>
       expect((screen.getByLabelText("Display name") as HTMLInputElement).value).toBe("Player Two"),
     );
+  });
+
+  it("renames the account and shows the stored name without signing out", async () => {
+    const spy = mockFetch((url, init) => {
+      if (url.endsWith("/auth/sign-in")) return jsonResponse(sessionPayload());
+      if (init?.method === "PATCH") {
+        const sent = JSON.parse(String(init.body)) as { username: string };
+        return jsonResponse(profilePayload({ username: sent.username }));
+      }
+      return jsonResponse(profilePayload());
+    });
+    await signInAs();
+    await renderForm();
+
+    const username = (await screen.findByLabelText("Username")) as HTMLInputElement;
+    fireEvent.change(username, { target: { value: "player_two" } });
+    await act(async () => {
+      fireEvent.submit(username.closest("form")!);
+    });
+
+    const [request] = patchRequests(spy);
+    expect(request).toBeDefined();
+    const body = JSON.parse(String(request![1]!.body));
+    expect(body.username).toBe("player_two");
+    // The rename names no account: the row comes from the token.
+    expect(body).not.toHaveProperty("userId");
+    expect(body).not.toHaveProperty("id");
+
+    // The form shows what was stored, with no further request and no new session.
+    await waitFor(() =>
+      expect((screen.getByLabelText("Username") as HTMLInputElement).value).toBe("player_two"),
+    );
+  });
+
+  it("refuses a bad username without calling the API", async () => {
+    const spy = mockFetch((url) =>
+      url.endsWith("/auth/sign-in")
+        ? jsonResponse(sessionPayload())
+        : jsonResponse(profilePayload()),
+    );
+    await signInAs();
+    await renderForm();
+
+    const username = (await screen.findByLabelText("Username")) as HTMLInputElement;
+    for (const [value, message] of [
+      ["   ", "Add a username."],
+      ["ab", "Use 3–24 characters for your username."],
+      ["Rijad", "Use only lowercase letters, numbers and underscores."],
+      ["rija d", "Use only lowercase letters, numbers and underscores."],
+    ] as const) {
+      fireEvent.change(username, { target: { value } });
+      await act(async () => {
+        fireEvent.submit(username.closest("form")!);
+      });
+      expect(await screen.findByText(message)).toBeInTheDocument();
+    }
+    expect(patchRequests(spy)).toHaveLength(0);
+  });
+
+  it("shows a taken username under the field and keeps the draft", async () => {
+    let reads = 0;
+    const spy = mockFetch((url, init) => {
+      if (url.endsWith("/auth/sign-in")) return jsonResponse(sessionPayload());
+      if (init?.method === "PATCH") {
+        return errorResponse(409, "conflict", "That username is taken.", [
+          { field: "username", rule: "taken" },
+        ]);
+      }
+      reads += 1;
+      return jsonResponse(profilePayload());
+    });
+    await signInAs();
+    await renderForm();
+    const readsAfterLoad = reads;
+
+    const username = (await screen.findByLabelText("Username")) as HTMLInputElement;
+    fireEvent.change(username, { target: { value: "taken_name" } });
+    await act(async () => {
+      fireEvent.submit(username.closest("form")!);
+    });
+
+    expect(await screen.findByText("That username is taken.")).toBeInTheDocument();
+    // A taken name is not a concurrent edit: the draft stays so it can be
+    // fixed, and the profile is not re-read from underneath it.
+    expect((screen.getByLabelText("Username") as HTMLInputElement).value).toBe("taken_name");
+    expect(reads).toBe(readsAfterLoad);
+    expect(patchRequests(spy)).toHaveLength(1);
   });
 
   it("keeps the user's draft and shows the API's message under the field it names", async () => {

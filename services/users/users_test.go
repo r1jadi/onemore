@@ -85,6 +85,9 @@ func (f *fakeBackend) Update(_ context.Context, accessToken, userID string, patc
 	if patch.DisplayName != "" {
 		updated.DisplayName = patch.DisplayName
 	}
+	if patch.Username != "" {
+		updated.Username = patch.Username
+	}
 	if patch.SetBio {
 		updated.Bio = patch.Bio
 	}
@@ -513,15 +516,17 @@ func TestPatchLeavesUnmentionedFieldsAlone(t *testing.T) {
 
 func TestPatchRejectsFieldsNoClientMayWrite(t *testing.T) {
 	// These are refused, not ignored: the contract says so, and silently dropping
-	// a field teaches a client that it worked.
+	// a field teaches a client that it worked. `username` used to be in this
+	// list; it is writable now and has its own tests below.
 	for _, body := range []string{
-		`{"username":"someone_else"}`,
 		`{"role":"admin"}`,
 		`{"isSuspended":true}`,
 		`{"is_suspended":true}`,
 		`{"onboardedAt":"2026-01-01T00:00:00Z"}`,
 		`{"createdAt":"2026-01-01T00:00:00Z"}`,
 		`{"displayName":"ok","updatedAt":"2026-01-01T00:00:00Z"}`,
+		`{"id":"` + testOtherID + `"}`,
+		`{"userId":"` + testOtherID + `"}`,
 	} {
 		t.Run(body, func(t *testing.T) {
 			backend := &fakeBackend{profile: profileFixture()}
@@ -542,6 +547,105 @@ func TestPatchRejectsFieldsNoClientMayWrite(t *testing.T) {
 				t.Error("a refused request still reached the database")
 			}
 		})
+	}
+}
+
+func TestPatchRenamesTheCallersOwnRow(t *testing.T) {
+	backend := &fakeBackend{profile: profileFixture()}
+	h := newHarness(t, backend, true)
+
+	response := h.do(t, http.MethodPatch, ProfilePath,
+		`{"username":"rijad_2"}`, token(t, testUserID))
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH = %d, want 200", response.StatusCode)
+	}
+	body := decoded(t, response)
+	if body["username"] != "rijad_2" {
+		t.Errorf("username = %v, want the renamed value", body["username"])
+	}
+
+	patch := backend.lastPatch()
+	if patch.Username != "rijad_2" {
+		t.Errorf("backend received username %q, want rijad_2", patch.Username)
+	}
+	for _, seen := range backend.userIDs() {
+		if seen != testUserID {
+			t.Errorf("backend was asked for %q, want the token subject", seen)
+		}
+	}
+}
+
+func TestPatchRejectsInvalidUsernames(t *testing.T) {
+	cases := map[string]string{
+		"a blank username":    `{"username":"   "}`,
+		"a two-letter name":   `{"username":"ab"}`,
+		"a 25-character name": `{"username":"` + strings.Repeat("a", 25) + `"}`,
+		"uppercase letters":   `{"username":"Rijad"}`,
+		"a space":             `{"username":"rija d"}`,
+		"a dash":              `{"username":"rija-d"}`,
+		"an at-sign":          `{"username":"@rijad"}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			backend := &fakeBackend{profile: profileFixture()}
+			h := newHarness(t, backend, true)
+
+			response := h.do(t, http.MethodPatch, ProfilePath, body, token(t, testUserID))
+			if response.StatusCode != http.StatusUnprocessableEntity {
+				t.Fatalf("status = %d, want 422", response.StatusCode)
+			}
+			if field := errorField(t, response); field != "username" {
+				t.Errorf("field = %q, want username", field)
+			}
+			if len(backend.userIDs()) != 0 {
+				t.Error("an invalid request still reached the database")
+			}
+		})
+	}
+}
+
+func TestPatchReportsATakenUsernameAsAFieldConflict(t *testing.T) {
+	// Two writers can race on one name; the unique index decides, and the loser
+	// gets a 409 that names the field — not the concurrency 409, which carries
+	// no field and means "reload and try again".
+	backend := &fakeBackend{
+		profile:   profileFixture(),
+		updateErr: &supabaseprofile.Error{Op: "update-profile", Status: http.StatusConflict, Code: "23505"},
+	}
+	h := newHarness(t, backend, true)
+
+	response := h.do(t, http.MethodPatch, ProfilePath,
+		`{"username":"taken_name"}`, token(t, testUserID))
+	if response.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", response.StatusCode)
+	}
+	code, field := errorEnvelope(t, response)
+	if code != "conflict" {
+		t.Errorf("code = %q, want conflict", code)
+	}
+	if field != "username" {
+		t.Errorf("field = %q, want username, so the form shows it under the input", field)
+	}
+}
+
+func TestPatchUsernameCannotAimAnotherAccount(t *testing.T) {
+	// There is no id parameter anywhere in this service: query values and body
+	// fields that try to name somebody else are either unknown (400) or ignored,
+	// and the backend only ever sees the token subject.
+	backend := &fakeBackend{profile: profileFixture()}
+	h := newHarness(t, backend, true)
+
+	response := h.do(t, http.MethodPatch, ProfilePath+"?id="+testOtherID,
+		`{"username":"new_name"}`, token(t, testUserID))
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH = %d, want 200", response.StatusCode)
+	}
+	response.Body.Close()
+
+	for _, seen := range backend.userIDs() {
+		if seen != testUserID {
+			t.Errorf("backend was asked for %q, want only the token subject %q", seen, testUserID)
+		}
 	}
 }
 

@@ -298,9 +298,26 @@ func TestUpdateWritesOnlyTheNamedColumns(t *testing.T) {
 	if _, present := request.body["onboarded_at"]; present {
 		t.Fatalf("an unmentioned column must be absent, got %v", request.body)
 	}
-	// The database refuses `username`, so it is not in the patch type at all.
 	if _, present := request.body["username"]; present {
-		t.Fatalf("username is not writable, got %v", request.body)
+		t.Fatalf("an unmentioned column must be absent, got %v", request.body)
+	}
+}
+
+func TestUpdateWritesTheUsernameWhenNamed(t *testing.T) {
+	client, requests := stubServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, http.StatusOK, profileRow)
+	})
+
+	_, _, err := client.Update(context.Background(), testAccessToken, testUserID, Patch{
+		Username: "rijad_2",
+	}, time.Time{})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	body := (*requests)[0].body
+	if body["username"] != "rijad_2" {
+		t.Fatalf("expected username to be written, got %v", body)
 	}
 }
 

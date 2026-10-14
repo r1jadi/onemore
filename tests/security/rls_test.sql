@@ -390,9 +390,29 @@ select rls_test.denied(
   $$update public.profiles set is_suspended = false where id = '55555555-5555-4555-8555-555555555555'$$,
   'a player cannot clear another account''s suspension'
 );
-select rls_test.denied(
-  $$update public.profiles set username = 'someone_else' where id = '11111111-1111-4111-8111-111111111111'$$,
-  'usernames are not updatable through the Data API'
+-- Usernames are writable by their own account only. The format CHECK and the
+-- case-insensitive unique index stay the authority behind the API's validation:
+-- 'BOB' never reaches the index because the format check rejects uppercase
+-- first, so case-insensitivity needs no separate assertion here.
+select rls_test.allow(
+  $$update public.profiles set username = 'alice_renamed' where id = '11111111-1111-4111-8111-111111111111'$$,
+  'a player can rename their own account'
+);
+select rls_test.ok(
+  (select username = 'alice_renamed' from public.profiles where id = :'alice'),
+  'the renamed username is what the row holds'
+);
+select rls_test.rejected(
+  $$update public.profiles set username = (select username from public.profiles where id = '22222222-2222-4222-8222-222222222222') where id = '11111111-1111-4111-8111-111111111111'$$,
+  'a username someone else holds is rejected, so concurrent renames cannot collide'
+);
+select rls_test.blocked(
+  $$update public.profiles set username = 'alice_writes_bob' where id = '22222222-2222-4222-8222-222222222222'$$,
+  'a player cannot rename another account'
+);
+select rls_test.rejected(
+  $$update public.profiles set username = 'No Capitals' where id = '11111111-1111-4111-8111-111111111111'$$,
+  'a username outside the format is rejected'
 );
 
 -- Escalation attempts
@@ -587,6 +607,10 @@ set local role authenticated;
 select rls_test.denied(
   $$update public.profiles set display_name = 'still here' where id = '55555555-5555-4555-8555-555555555555'$$,
   'a suspended account cannot update its profile'
+);
+select rls_test.denied(
+  $$update public.profiles set username = 'erin_returns' where id = '55555555-5555-4555-8555-555555555555'$$,
+  'a suspended account cannot rename itself either'
 );
 select rls_test.visible(
   $$select id from public.profiles where id = '55555555-5555-4555-8555-555555555555'$$,
