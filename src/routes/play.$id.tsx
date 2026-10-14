@@ -41,7 +41,7 @@ function PlayScreen() {
 
   return (
     <div className="fixed inset-0 flex flex-col bg-background">
-      <header className="flex items-center gap-3 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3">
+      <header className="flex items-center gap-3 px-4 pt-[calc(0.75rem+env(safe-area-inset-top))] pb-3">
         <Button asChild variant="glass" size="icon" aria-label="Quit game">
           <Link to="/games/$id" params={{ id }}>
             <X />

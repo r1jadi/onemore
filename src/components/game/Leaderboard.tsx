@@ -117,7 +117,7 @@ export function LeaderboardList({
         ))}
       </ol>
       {pinMe && me && (
-        <div className="sticky bottom-16 mt-2 flex items-center gap-3 border-y border-primary/30 bg-surface px-4 py-3 md:bottom-0 md:rounded-lg md:border md:px-2">
+        <div className="sticky bottom-[calc(4rem+env(safe-area-inset-bottom))] mt-2 flex items-center gap-3 border-y border-primary/30 bg-surface px-4 py-3 md:bottom-0 md:rounded-lg md:border md:px-2">
           <span className="w-6 text-center font-mono text-sm tabular text-muted-foreground">
             {me.rank}
           </span>

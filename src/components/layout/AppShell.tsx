@@ -120,6 +120,15 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <main className="min-w-0 flex-1">{children}</main>
 
+      {/* Opaque fill for the home-indicator strip: the translucent bar above
+          keeps blurring page content, while this layer guarantees the
+          safe-area region is painted to the bottom edge in the navigation
+          background instead of showing through as a dark strip. Zero-height
+          (no-op) on devices without a bottom inset; hidden on desktop. */}
+      <div
+        aria-hidden
+        className="fixed inset-x-0 bottom-0 z-30 h-[env(safe-area-inset-bottom)] bg-background md:hidden"
+      />
       <nav
         aria-label="Main"
         className={cn(

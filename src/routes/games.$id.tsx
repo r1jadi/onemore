@@ -216,7 +216,7 @@ function Detail({ game }: { game: Game }) {
 
       <MoreLikeThis game={game} />
 
-      <div className="fixed inset-x-0 bottom-16 z-30 glass border-x-0 border-b-0 p-3 md:hidden">
+      <div className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-30 glass border-x-0 border-b-0 p-3 md:hidden">
         {game.playable ? (
           <Button asChild variant="play" size="lg" className="w-full">
             <Link to="/play/$id" params={{ id: game.slug }}>

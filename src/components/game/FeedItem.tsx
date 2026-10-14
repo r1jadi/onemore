@@ -118,7 +118,7 @@ export function FeedItem({ game }: { game: Game }) {
         </Link>
 
         {/* Info */}
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 pb-20 md:pb-0 scrim-bottom">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-0 scrim-bottom">
           <div className="pointer-events-auto space-y-3 p-4 pr-20 md:pr-4">
             {game.isOfficial && (
               <div className="flex items-center gap-2 text-sm font-medium">

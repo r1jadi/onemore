@@ -245,7 +245,7 @@ function AdminDashboard({
 
       <div className="min-w-0 flex-1">
         <div className="sticky top-0 z-40 glass border-x-0 border-t-0 md:hidden">
-          <div className="flex items-center gap-2 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-2">
+          <div className="flex items-center gap-2 px-4 pt-[calc(0.75rem+env(safe-area-inset-top))] pb-2">
             <Link to="/" aria-label="Back to onemore" className="press flex items-center gap-2">
               <LogoMark className="size-6" />
               <span className="text-sm font-semibold">onemore admin</span>
