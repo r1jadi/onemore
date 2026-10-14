@@ -2,20 +2,19 @@
 //
 // What it is, and what it deliberately is not:
 //
-//   - **Authorization happens twice, and neither layer trusts the request.** The
-//     platform middleware verifies the access token and checks its role claim;
-//     then this service asks the database what role the caller actually holds
-//     (`public.admin_identity()`, read from `public.user_roles`) and refuses
-//     anything the row does not support. A claim and a row can disagree — one is
-//     written by Supabase's admin API, the other by this database — and when they
-//     do, the row wins. Nothing here reads a role, a user id or an admin flag from
-//     a request body or query string.
+//   - **ADMIN_EMAILS is the single source of truth for admin access.** The
+//     platform middleware verifies the access token and grants only a verified
+//     token email in the server-side allowlist; token role claims and database
+//     rows (`public.user_roles`) never grant access. The wrapper below re-checks
+//     the same allowlist on every staff request, so removal takes effect on the
+//     next call. Nothing here reads a role, a user id, an email or an admin flag
+//     from a request body, query string or header.
 //
 //   - **No endpoint holds a secret.** Every database call carries the caller's own
-//     token, so the Data API answers as that user and the staff functions check
-//     `public.is_staff()`/`public.is_admin()` themselves. This process has no
+//     token, so the Data API answers as that user. This process has no
 //     service-role key, which is why a bug in a handler cannot read a table no
-//     policy allows.
+//     policy allows. The row-gated staff functions remain as defense-in-depth on
+//     the data path; they are never consulted for the authorization decision.
 //
 //   - **Every number is measured.** Counts come from persisted rows; a value that
 //     cannot be computed is `null` rather than zero; a screen with no data behind
@@ -370,10 +369,10 @@ func newService(backend Backend, logger *slog.Logger, services []string, maxBody
 // register mounts the routes.
 //
 // The tiers are the platform's: `AuthenticatedFunc` for the session endpoint,
-// `ModeratorFunc` for everything a moderator may do, `AdminFunc` for the one
-// action that is an administrator's alone. Every one of them is *also* checked
-// against the database by the wrapper below — the middleware rejects a token whose
-// claim is too weak, the database decides what the caller actually is.
+// `ModeratorFunc`/`AdminFunc` for everything else. Under the single-source
+// model both staff tiers enforce the same allowlist, and the wrapper below
+// re-checks it on every staff request — database rows and token claims grant
+// nothing.
 func (s *service) register(router *httpx.Router) {
 	router.AuthenticatedFunc("GET "+SessionPath, s.session)
 
@@ -392,29 +391,20 @@ func (s *service) register(router *httpx.Router) {
 	router.ModeratorFunc("GET "+SystemServicesPath, s.staff(s.systemServices))
 
 	// Suspension is the one action that changes whether a person can use the
-	// platform at all, so it requires an administrator both in the token's claim
-	// and in the database (`admin_set_suspension` re-checks with `is_admin()`).
+	// platform at all, so it is registered on the admin tier — the same
+	// allowlist decides, like every other staff route.
 	router.AdminFunc("PATCH "+UserPath, s.staff(s.suspendUser))
 }
 
-// staff wraps a handler with the database's answer to "what is this caller?".
-//
-// The middleware above has already verified the token; this asks the database for
-// the row that actually decides authorization and refuses anything the row does
-// not support — unless the caller's verified email is in the server-side
-// ADMIN_EMAILS allowlist, which is an additional admin grant OR'd with the row.
-// The allowlist is read per request from the environment (never from the
-// request), compared case-insensitively against the verified token email, and
-// an empty allowlist grants no one. It runs on every staff request, so a role
-// revoked in the database — or removed from the allowlist — takes effect on
-// the caller's next request rather than when their token expires.
+// staff re-checks the single source of truth on every staff request: the
+// verified token email against the server-side ADMIN_EMAILS allowlist.
+// Database rows and token claims grant nothing. The allowlist is read per
+// request from the environment (never from the request), compared
+// case-insensitively, and an empty allowlist grants no one — so removal takes
+// effect on the caller's next request rather than when a token expires, and no
+// cached session, token claim or frontend state can keep the privilege.
 func (s *service) staff(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if s.backend == nil {
-			s.notConfigured(w, r, "check the caller's role")
-			return
-		}
-
 		token := authn.BearerToken(r.Header.Get("Authorization"))
 		if token == "" {
 			httpx.WriteError(w, r, httpx.NewError(httpx.CodeUnauthorized, "Sign in to continue."))
@@ -427,68 +417,32 @@ func (s *service) staff(next http.HandlerFunc) http.HandlerFunc {
 		if id, ok := identity.FromContext(r.Context()); ok && !id.Anonymous {
 			verifiedEmail = id.Email
 		}
-		allowlisted := adminallowlist.IsAllowlisted(verifiedEmail)
-
-		who, err := s.backend.Identity(r.Context(), token)
-		if err != nil {
-			var dataErr *supabaseadmin.Error
-			switch {
-			case errors.As(err, &dataErr) && dataErr.IsUnauthorized():
-				httpx.WriteError(w, r, httpx.NewError(httpx.CodeUnauthorized,
-					"Your session is no longer valid. Sign in again."))
-			case errors.As(err, &dataErr) && dataErr.IsForbidden():
-				// The identity function is not gated, so a refusal here means the
-				// token the Data API received was not accepted as this user.
-				httpx.WriteError(w, r, httpx.NewError(httpx.CodeForbidden,
-					"This area requires a moderator account."))
-			default:
-				s.unavailable(w, r, "read the caller's role", err)
-			}
-			return
-		}
-
-		if allowlisted {
-			// The allowlist grants administrator: elevate the database view for
-			// this request, keeping the caller's own username and account
-			// state. The database functions still re-check the row, so a
-			// caller without a staff row cannot read staff data through a
-			// direct Data API call — see the README's interaction table.
-			who.Role = identity.RoleAdmin
-			who.IsStaff = true
-			who.IsAdmin = true
-			next(w, r.WithContext(withStaff(r.Context(), who)))
-			return
-		}
-
-		if !who.IsStaff {
-			// Deliberately the same message a non-staff claim gets: a caller learns
-			// that they are not staff, and nothing about who is.
+		if !adminallowlist.IsAllowlisted(verifiedEmail) {
+			// Deliberately the same message whatever the caller's row or claim
+			// holds: a caller learns that they are not staff, and nothing about
+			// who is.
 			httpx.WriteError(w, r, httpx.NewError(httpx.CodeForbidden,
 				"This area requires a moderator account."))
 			return
 		}
 
-		next(w, r.WithContext(withStaff(r.Context(), who)))
+		if s.backend == nil {
+			s.notConfigured(w, r, "serve the admin API")
+			return
+		}
+
+		next.ServeHTTP(w, r)
 	}
-}
-
-type staffKey struct{}
-
-func withStaff(ctx context.Context, who supabaseadmin.Identity) context.Context {
-	return context.WithValue(ctx, staffKey{}, who)
-}
-
-func staffFrom(ctx context.Context) supabaseadmin.Identity {
-	who, _ := ctx.Value(staffKey{}).(supabaseadmin.Identity)
-	return who
 }
 
 // session answers who the caller is. It is the only route in this group an
 // ordinary user may call, and it is how the app decides whether to show the
-// dashboard at all — a decision that is still enforced here and in the database,
-// never only in the UI. A verified email in ADMIN_EMAILS is reported as an
-// administrator (role admin, staff and admin true), so the UI reflects the
-// actual server-authorized status; the allowlist itself is never sent.
+// dashboard at all — a decision enforced here, never only in the UI. The role
+// fields come solely from the allowlist: an allowlisted verified email is
+// reported as an administrator (role admin, staff and admin true), anything
+// else as a non-admin user — regardless of token claims or database rows. The
+// username, display name and suspension state are the caller's own profile row
+// (not a privilege); the allowlist itself is never sent.
 func (s *service) session(w http.ResponseWriter, r *http.Request) {
 	id, ok := identity.FromContext(r.Context())
 	if !ok || id.Anonymous {
@@ -496,7 +450,7 @@ func (s *service) session(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.backend == nil {
-		s.notConfigured(w, r, "read your role")
+		s.notConfigured(w, r, "read your profile")
 		return
 	}
 
@@ -507,26 +461,20 @@ func (s *service) session(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if adminallowlist.IsAllowlisted(id.Email) {
-		httpx.WriteJSON(w, r, http.StatusOK, sessionView{
-			UserID:      who.UserID,
-			Username:    who.Username,
-			DisplayName: who.DisplayName,
-			Role:        identity.RoleAdmin,
-			IsStaff:     true,
-			IsAdmin:     true,
-			IsSuspended: who.IsSuspended,
-		})
-		return
+	allowlisted := adminallowlist.IsAllowlisted(id.Email)
+	role := identity.RoleUser
+	isStaff, isAdmin := false, false
+	if allowlisted {
+		role, isStaff, isAdmin = identity.RoleAdmin, true, true
 	}
 
 	httpx.WriteJSON(w, r, http.StatusOK, sessionView{
-		UserID:      who.UserID,
+		UserID:      id.UserID,
 		Username:    who.Username,
 		DisplayName: who.DisplayName,
-		Role:        who.Role,
-		IsStaff:     who.IsStaff,
-		IsAdmin:     who.IsAdmin,
+		Role:        role,
+		IsStaff:     isStaff,
+		IsAdmin:     isAdmin,
 		IsSuspended: who.IsSuspended,
 	})
 }
@@ -1083,9 +1031,9 @@ type suspendUserRequest struct {
 	Reason    string `json:"reason"`
 }
 
-// suspendUser is the only handler that is an administrator's alone. The route is
-// registered with `AdminFunc`, so a moderator's token is refused by the
-// middleware, and the database refuses it again with `is_admin()`.
+// suspendUser suspends or restores an account. Like every staff route it is
+// gated by the allowlist alone: the tier middleware and the staff wrapper both
+// enforce it before the database is touched.
 func (s *service) suspendUser(w http.ResponseWriter, r *http.Request) {
 	userID, ok := s.pathID(w, r, "userID", "account")
 	if !ok {

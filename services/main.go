@@ -18,9 +18,9 @@
 // deployment, because the platform offers one.
 //
 // Sharing a process shares no privilege: the admin routes verify the caller's
-// token and ask the database for their role on every request, exactly as they
-// would in a deployment of their own, and they hold no credential the catalogue
-// routes do not also hold.
+// token and check the allowlist on every request, exactly as they would in a
+// deployment of their own, and they hold no credential the catalogue routes do
+// not also hold.
 package main
 
 import (

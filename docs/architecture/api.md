@@ -41,8 +41,8 @@ the token and the router applies the tier middleware.
 | public        | `Public` / `PublicFunc` | none                                                      | —                       |
 | optional      | `OptionalAuth`          | no token needed; a valid token personalises the response  | anonymous view          |
 | authenticated | `Authenticated`         | verified Supabase access token                            | `401`                   |
-| moderator     | `Moderator`             | token whose `app_metadata.role` is `moderator` or `admin` | `403`                   |
-| admin         | `Admin`                 | token whose `app_metadata.role` is `admin`                | `403`                   |
+| moderator     | `Moderator`             | verified token email in server-side `ADMIN_EMAILS`        | `403`                   |
+| admin         | `Admin`                 | verified token email in server-side `ADMIN_EMAILS`        | `403`                   |
 
 Rules that hold everywhere:
 
@@ -56,14 +56,16 @@ Rules that hold everywhere:
 - when a service has no auth material configured, protected routes answer `503`
   (fail closed) rather than allowing anonymous access.
 
-One group goes further than the tiers. `/api/v1/admin` keeps its tier — so a token
-without a staff claim never reaches a handler — and then checks the **database**,
-per request, for the role the caller actually holds in `public.user_roles`. A
-claim and a row can disagree, and the row wins, so revoking a role takes effect on
-the caller's next request rather than when the token expires. Nothing on that
-surface reads a role, a user id or an admin flag from a body or query string, and
-the admin service holds no service-role key. See
-[0013](../decisions/0013-admin-authorization.md).
+One group goes further than the tiers. `/api/v1/admin` keeps its tier and then
+re-checks the **same allowlist** per request in the service wrapper, so removing
+an email takes effect on the caller's next request rather than when a token
+expires — no cached session, claim, row or frontend state can keep the
+privilege. Token role claims and `public.user_roles` rows never grant access.
+Nothing on that surface reads a role, a user id, an email or an admin flag from
+a body or query string, and the admin service holds no service-role key. The
+row-gated staff functions remain as defense-in-depth on the data path; they are
+never consulted for the authorization decision. See
+[0013](../decisions/0013-admin-authorization.md) for the retired row-based model.
 
 ## Gateway routing
 

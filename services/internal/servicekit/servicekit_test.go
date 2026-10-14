@@ -74,9 +74,17 @@ func newTestServer(t *testing.T, opts testOptions) *httptest.Server {
 
 func token(t *testing.T, subject string, appMeta map[string]any) string {
 	t.Helper()
+	return tokenWithEmail(t, subject, "player@example.com", appMeta)
+}
+
+// tokenWithEmail signs a token for a subject with a verified email claim.
+// ADMIN_EMAILS is the single source of truth, so tests that need a grant sign
+// for an allowlisted address; role claims alone never grant.
+func tokenWithEmail(t *testing.T, subject, email string, appMeta map[string]any) string {
+	t.Helper()
 	claims := jwt.MapClaims{
 		"sub":          subject,
-		"email":        "player@example.com",
+		"email":        email,
 		"aud":          "authenticated",
 		"iat":          time.Now().Add(-time.Minute).Unix(),
 		"exp":          time.Now().Add(time.Hour).Unix(),
@@ -254,7 +262,8 @@ func TestTokenForgedWithAnotherSecretIsRejected(t *testing.T) {
 	}
 }
 
-func TestAdminRouteRejectsNonAdminAndAcceptsAdmin(t *testing.T) {
+func TestAdminRouteIsAllowlistOnly(t *testing.T) {
+	t.Setenv("ADMIN_EMAILS", "admin@example.com")
 	server := newTestServer(t, testOptions{withAuth: true})
 	subject := "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f"
 
@@ -266,24 +275,60 @@ func TestAdminRouteRejectsNonAdminAndAcceptsAdmin(t *testing.T) {
 		t.Fatalf("regular user got %d on an admin route, want 403", plain.StatusCode)
 	}
 
+	// A role claim alone never grants: an admin claim for a non-allowlisted
+	// email is still refused.
+	claimed := get(t, server.URL+"/api/v1/things/admin", map[string]string{
+		"Authorization": "Bearer " + tokenWithEmail(t, subject, "player@example.com", map[string]any{"role": "admin"}),
+	})
+	claimed.Body.Close()
+	if claimed.StatusCode != http.StatusForbidden {
+		t.Fatalf("claimed admin without allowlist got %d, want 403", claimed.StatusCode)
+	}
+
 	admin := get(t, server.URL+"/api/v1/things/admin", map[string]string{
-		"Authorization": "Bearer " + token(t, subject, map[string]any{"role": "admin"}),
+		"Authorization": "Bearer " + tokenWithEmail(t, subject, "admin@example.com", map[string]any{"role": "user"}),
 	})
 	admin.Body.Close()
 	if admin.StatusCode != http.StatusOK {
-		t.Fatalf("admin got %d, want 200", admin.StatusCode)
+		t.Fatalf("allowlisted email got %d, want 200", admin.StatusCode)
 	}
 }
 
-func TestModeratorRouteAcceptsModerator(t *testing.T) {
+func TestModeratorRouteIsAllowlistOnly(t *testing.T) {
+	t.Setenv("ADMIN_EMAILS", "admin@example.com")
 	server := newTestServer(t, testOptions{withAuth: true})
 
+	// A moderator claim for a non-allowlisted email grants nothing.
+	claimed := get(t, server.URL+"/api/v1/things/moderate", map[string]string{
+		"Authorization": "Bearer " + tokenWithEmail(t, "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f", "player@example.com", map[string]any{"role": "moderator"}),
+	})
+	claimed.Body.Close()
+	if claimed.StatusCode != http.StatusForbidden {
+		t.Fatalf("claimed moderator without allowlist got %d, want 403", claimed.StatusCode)
+	}
+
 	response := get(t, server.URL+"/api/v1/things/moderate", map[string]string{
-		"Authorization": "Bearer " + token(t, "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f", map[string]any{"role": "moderator"}),
+		"Authorization": "Bearer " + tokenWithEmail(t, "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f", "admin@example.com", map[string]any{"role": "user"}),
 	})
 	response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", response.StatusCode)
+	}
+}
+
+func TestTierRoutesDenyEveryoneWhenAllowlistIsMissing(t *testing.T) {
+	t.Setenv("ADMIN_EMAILS", "")
+	server := newTestServer(t, testOptions{withAuth: true})
+	subject := "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f"
+
+	for _, path := range []string{"/api/v1/things/admin", "/api/v1/things/moderate"} {
+		response := get(t, server.URL+path, map[string]string{
+			"Authorization": "Bearer " + tokenWithEmail(t, subject, "admin@example.com", map[string]any{"role": "admin"}),
+		})
+		response.Body.Close()
+		if response.StatusCode != http.StatusForbidden {
+			t.Fatalf("GET %s with missing allowlist = %d, want 403", path, response.StatusCode)
+		}
 	}
 }
 

@@ -164,14 +164,14 @@ afterEach(() => {
 });
 
 describe("the admin gate", () => {
-  it("refuses an account the database does not list as staff, and reads nothing else", async () => {
+  it("refuses an account outside the server allowlist, and reads nothing else", async () => {
     const spy = adminApi("user");
     await signedIn(spy);
 
     await renderPage(() => <AdminShell />);
 
-    await screen.findByText("This area requires a moderator account");
-    // The gate is the database's answer, and no staff read follows a refusal.
+    await screen.findByText("This area requires an administrator account");
+    // The gate is the server's allowlist answer, and no staff read follows a refusal.
     expect(paths(spy)).toEqual(["/api/v1/auth/sign-in", "/api/v1/admin/session"]);
     expect(screen.queryByRole("navigation", { name: "Admin" })).not.toBeInTheDocument();
   });
@@ -185,8 +185,8 @@ describe("the admin gate", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it("admits a moderator and shows the API's own queue counts", async () => {
-    const spy = adminApi("moderator", { "/admin/overview": () => jsonResponse(overviewPayload()) });
+  it("admits an allowlisted administrator and shows the API's own queue counts", async () => {
+    const spy = adminApi("admin", { "/admin/overview": () => jsonResponse(overviewPayload()) });
     await signedIn(spy);
 
     await renderPage(() => <AdminShell />);
@@ -201,7 +201,7 @@ describe("the admin gate", () => {
         .some((link) => within(link).queryByText(value) !== null);
     expect(badgeIn(/Reports/, "7")).toBe(true);
     expect(badgeIn(/Review queue/, "3")).toBe(true);
-    expect(screen.getAllByText("Moderator").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Administrator").length).toBeGreaterThan(0);
   });
 });
 

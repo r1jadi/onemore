@@ -1,8 +1,8 @@
 /**
  * Whether the Admin navigation link may be shown. The answer comes from the
- * backend (`GET /admin/session`): only a signed-in caller whose role the
- * database confirms as moderator/admin sees the link. While the check is
- * loading, anonymous, failed or non-staff, the link stays hidden (fail
+ * backend (`GET /admin/session`): only a signed-in caller whose verified email
+ * the server finds in `ADMIN_EMAILS` sees the link. While the check is
+ * loading, anonymous, failed or non-allowlisted, the link stays hidden (fail
  * closed), so it is never briefly exposed. Hiding the link is a convenience;
  * the server still enforces authorization on every admin route.
  */

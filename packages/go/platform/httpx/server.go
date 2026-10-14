@@ -11,8 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/r1jadi/onemore/packages/go/platform/adminallowlist"
-	"github.com/r1jadi/onemore/packages/go/platform/apierr"
 	"github.com/r1jadi/onemore/packages/go/platform/authn"
 	"github.com/r1jadi/onemore/packages/go/platform/config"
 	"github.com/r1jadi/onemore/packages/go/platform/identity"
@@ -81,72 +79,30 @@ func (r *Router) Authenticated(pattern string, handler http.Handler) {
 	r.mux.Handle(pattern, r.requireAuth(true)(handler))
 }
 
-// Admin registers a route that additionally requires the admin role.
+// Admin registers a route that additionally requires administrator access.
 //
-// An allowlisted verified email (ADMIN_EMAILS, server-side, read per request)
-// also passes: the allowlist is an additional admin grant, OR'd with the
-// token's role claim. The email is taken from the verified identity only —
-// never from a body, query or header — and an empty allowlist grants no one.
+// ADMIN_EMAILS is the single source of truth (see authn.RequireAdmin): a
+// verified token email in the server-side allowlist passes, anything else is
+// refused — including token role claims and database rows. The email is taken
+// from the verified identity only, never from a body, query or header, and an
+// empty allowlist grants no one.
 func (r *Router) Admin(pattern string, handler http.Handler) {
-	r.mux.Handle(pattern, r.requireAuth(true)(r.requireAdminRole()(handler)))
+	r.mux.Handle(pattern, r.requireAuth(true)(authn.RequireAdmin()(handler)))
 }
 
 // AdminFunc registers an admin handler function.
 func (r *Router) AdminFunc(pattern string, handler http.HandlerFunc) { r.Admin(pattern, handler) }
 
-// Moderator registers a route that requires a moderator or administrator role.
-// An allowlisted admin email also passes (an admin is staff).
+// Moderator registers a route that requires administrator access under the
+// single-source model (see authn.RequireModerator): the same allowlist
+// decides. There is no separate moderator grant.
 func (r *Router) Moderator(pattern string, handler http.Handler) {
-	r.mux.Handle(pattern, r.requireAuth(true)(r.requireModeratorRole()(handler)))
-}
-
-// requireAdminRole enforces the admin tier with the allowlist OR'd in.
-// It runs after requireAuth, so the identity is verified.
-func (r *Router) requireAdminRole() Middleware {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			id, ok := identity.FromContext(req.Context())
-			if !ok || id.Anonymous {
-				writeTierError(w, req, apierr.New(apierr.CodeUnauthorized, "Sign in to continue."))
-				return
-			}
-			if adminallowlist.IsAllowlisted(id.Email) || id.IsAdmin() {
-				next.ServeHTTP(w, req)
-				return
-			}
-			writeTierError(w, req, apierr.New(apierr.CodeForbidden, "This area requires an administrator account."))
-		})
-	}
-}
-
-// requireModeratorRole enforces the moderator tier with the allowlist OR'd in.
-func (r *Router) requireModeratorRole() Middleware {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			id, ok := identity.FromContext(req.Context())
-			if !ok || id.Anonymous {
-				writeTierError(w, req, apierr.New(apierr.CodeUnauthorized, "Sign in to continue."))
-				return
-			}
-			if adminallowlist.IsAllowlisted(id.Email) || id.IsModerator() {
-				next.ServeHTTP(w, req)
-				return
-			}
-			writeTierError(w, req, apierr.New(apierr.CodeForbidden, "This area requires a moderator account."))
-		})
-	}
+	r.mux.Handle(pattern, r.requireAuth(true)(authn.RequireModerator()(handler)))
 }
 
 // ModeratorFunc registers a moderator handler function.
 func (r *Router) ModeratorFunc(pattern string, handler http.HandlerFunc) {
 	r.Moderator(pattern, handler)
-}
-
-// writeTierError answers a tier refusal with the shared envelope. It mirrors
-// authn's writer (including WWW-Authenticate) without importing it.
-func writeTierError(w http.ResponseWriter, r *http.Request, err error) {
-	w.Header().Set("WWW-Authenticate", `Bearer realm="onemore", version="`+APIVersion+`"`)
-	WriteError(w, r, err)
 }
 
 // AuthenticatedFunc registers an authenticated handler function.

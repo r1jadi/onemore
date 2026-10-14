@@ -13,8 +13,9 @@ info:
     * **optional** — works anonymously, personalises when a valid token is sent.
     * **authenticated** — a verified Supabase access token is required. The
       caller's user id always comes from that token; it is never a parameter.
-    * **moderator** / **admin** — an authenticated caller whose role, read from
-      the token's `app_metadata.role`, is `moderator` or `admin`.
+    * **moderator** / **admin** — an authenticated caller whose verified token
+      email is in the server-side `ADMIN_EMAILS` allowlist (the single source
+      of truth; token role claims and database rows never grant access).
 
     ## Errors
     Failures always use the same envelope:

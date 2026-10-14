@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/r1jadi/onemore/packages/go/platform/adminallowlist"
 	"github.com/r1jadi/onemore/packages/go/platform/apierr"
 	"github.com/r1jadi/onemore/packages/go/platform/identity"
 	"github.com/r1jadi/onemore/packages/go/platform/version"
@@ -64,6 +65,12 @@ func Middleware(opts MiddlewareOptions) func(http.Handler) http.Handler {
 
 // RequireAdmin authorizes admin API calls. The UI hides admin screens, but this
 // check is what actually protects the endpoints.
+//
+// ADMIN_EMAILS is the single source of truth: a verified token email in the
+// server-side allowlist is an administrator, anything else is not. Token role
+// claims (`app_metadata.role`) and database rows (`public.user_roles`) never
+// grant access. The allowlist is read per request so removal takes effect on
+// the next call; missing or empty grants no one.
 func RequireAdmin() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -72,7 +79,7 @@ func RequireAdmin() func(http.Handler) http.Handler {
 				writeAuthError(w, r, apierr.New(apierr.CodeUnauthorized, "Sign in to continue."))
 				return
 			}
-			if !id.IsAdmin() {
+			if !adminallowlist.IsAllowlisted(id.Email) {
 				writeAuthError(w, r, apierr.New(apierr.CodeForbidden, "This area requires an administrator account."))
 				return
 			}
@@ -81,7 +88,10 @@ func RequireAdmin() func(http.Handler) http.Handler {
 	}
 }
 
-// RequireModerator authorizes moderation endpoints (admin or moderator).
+// RequireModerator authorizes moderation endpoints. Under the single-source
+// model there is no separate moderator grant: the same allowlist decides, so
+// an allowlisted administrator reaches moderation endpoints and anyone else
+// is refused with the moderator message.
 func RequireModerator() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -90,7 +100,7 @@ func RequireModerator() func(http.Handler) http.Handler {
 				writeAuthError(w, r, apierr.New(apierr.CodeUnauthorized, "Sign in to continue."))
 				return
 			}
-			if !id.IsModerator() {
+			if !adminallowlist.IsAllowlisted(id.Email) {
 				writeAuthError(w, r, apierr.New(apierr.CodeForbidden, "This area requires a moderator account."))
 				return
 			}

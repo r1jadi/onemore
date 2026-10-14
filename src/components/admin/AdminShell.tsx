@@ -104,8 +104,9 @@ export function AdminShell({ children }: { children?: ReactNode }) {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const session = useAdminSession();
 
-  // The gate. The API enforces this on every route — this decides what to render
-  // so that a person who is not staff sees why rather than a broken dashboard.
+  // The gate. The API enforces the allowlist on every route — this decides what
+  // to render so that a person who is not allowlisted sees why rather than a
+  // broken dashboard.
   if (session.status === "loading") {
     return (
       <div className="mx-auto w-full max-w-7xl px-4 pt-8 md:px-8">
@@ -135,8 +136,8 @@ export function AdminShell({ children }: { children?: ReactNode }) {
   if (!session.data.isStaff) {
     return (
       <AdminGate
-        title="This area requires a moderator account"
-        body="Your account does not hold a moderator or administrator role, so the API has no admin data to show you."
+        title="This area requires an administrator account"
+        body="Your account is not on the administrator allowlist, so the API has no admin data to show you."
       >
         <Button asChild variant="secondary">
           <Link to="/">Back to onemore</Link>

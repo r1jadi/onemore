@@ -10,6 +10,7 @@ import {
   type ErrorComponentProps,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
+import { Analytics } from "@vercel/analytics/react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
@@ -173,6 +174,7 @@ function RootComponent() {
       {/* Dev-only safe-area/PWA probe (dead-code-eliminated in production). */}
       {import.meta.env.DEV ? <SafeAreaDiagnostics /> : null}
       <Toaster position="top-center" theme="dark" />
+      <Analytics />
     </QueryClientProvider>
   );
 }

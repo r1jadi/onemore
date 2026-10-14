@@ -1,9 +1,9 @@
 // Command moderation owns reports and moderation actions.
 //
 // Reporting is open to signed-in users; reading the queue and acting on it
-// requires the moderator or admin role, enforced by the platform middleware and
-// again by Row Level Security. Moderators never gain read access to secrets —
-// only to the reported content.
+// requires an allowlisted administrator email, enforced by the platform
+// middleware. Moderators never gain read access to secrets — only to the
+// reported content.
 package main
 
 import (

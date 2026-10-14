@@ -1,34 +1,30 @@
 # services/admin
 
 The operations API behind the admin dashboard. It is the only service whose
-routes are all staff-gated, and the only one whose authorization is decided by a
-**row** rather than only by a token claim.
+routes are all staff-gated, and authorization is decided by the server-side
+**`ADMIN_EMAILS` allowlist alone** — never by a token claim or a database row.
 
 ## The rule this service exists to enforce
 
-A role claim travels in the access token. The token is signed, so the claim cannot
-be edited — but it is _stale_, and it comes from a different system than the one
-that decides what an account may do:
+**Verified email in `ADMIN_EMAILS` = admin; otherwise = not admin.**
 
-| Where the role lives             | Written by           | Read by                                      |
-| -------------------------------- | -------------------- | -------------------------------------------- |
-| `app_metadata.role` in the token | Supabase's admin API | `authn.Middleware` (the tier check)          |
-| `public.user_roles.role`         | this database        | `public.admin_identity()` (the actual check) |
-
-They can disagree, and when they do the **row wins**. Every staff route therefore
-does two checks:
+The email is taken from the verified Supabase access token on every request and
+compared case-insensitively against the allowlist read from the process
+environment. Token role claims (`app_metadata.role`) and database rows
+(`public.user_roles`) never grant access, so a stale claim, a leftover row, a
+request body, a query string, a header, or frontend state cannot make anyone an
+admin. Every staff route therefore does two allowlist checks:
 
 1. the router's tier middleware (`ModeratorFunc` / `AdminFunc`) verifies the token
-   and refuses one whose claim is too weak — a `401` or `403` before a handler
+   and refuses a non-allowlisted email — a `401` or `403` before a handler
    exists;
-2. `service.staff` calls the database as the caller and asks
-   `public.admin_identity()` what role they actually hold, refusing anything the
-   row does not support.
+2. `service.staff` re-checks the same allowlist and refuses anything it does
+   not contain, without consulting the database for the decision.
 
-Nothing in this service reads a role, a user id or an admin flag from a request
-body or a query string, and no handler trusts the token's claim on its own. A role
-revoked in the database takes effect on the caller's next request rather than when
-their token expires.
+Nothing in this service reads a role, a user id, an email or an admin flag from
+a request body, query string or header. Removing an email takes effect on the
+caller's next request rather than when a token expires, with no database
+cleanup and no manual role change.
 
 ## No secrets in this service
 
@@ -42,25 +38,26 @@ could do.
 ## Routes
 
 All paths are the public ones, `/api/v1/admin/...`, served through the gateway.
-The tier column is the router's; every route also passes the database check above.
+The tier column is the router's allowlist gate; every staff route also passes
+the service's per-request allowlist re-check above.
 
-| Route                         | Method | Tier           | What it answers                                                                                                                                                                                                            |
-| ----------------------------- | ------ | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/admin/session`              | GET    | authenticated  | The caller's own role and account state. The one route an ordinary user may call: being able to learn "you are not staff" is not privileged information, and without it the only answer would be an uninterpretable `403`. |
-| `/admin/overview`             | GET    | moderator + DB | Dashboard aggregate: counts, a 14-day series, recent activity, most-played games.                                                                                                                                          |
-| `/admin/analytics`            | GET    | moderator + DB | Activity over 7–90 days: totals, daily series, top games, top players.                                                                                                                                                     |
-| `/admin/games`                | GET    | moderator + DB | Every game, published or not, with status, owner, real runs, players, best score.                                                                                                                                          |
-| `/admin/games/{gameID}`       | PATCH  | moderator + DB | Publish, reject, archive or return a game to review, with a reason; writes the audit row in the same transaction.                                                                                                          |
-| `/admin/categories`           | GET    | moderator + DB | Categories with published and total game counts. Read-only: the schema has no admin write path for categories.                                                                                                             |
-| `/admin/reports`              | GET    | moderator + DB | The moderation queue, each report joined to its target's title, username or excerpt.                                                                                                                                       |
-| `/admin/reports/{reportID}`   | PATCH  | moderator + DB | Start reviewing, resolve, dismiss or reopen a report, with a reason.                                                                                                                                                       |
-| `/admin/comments`             | GET    | moderator + DB | Comments including hidden ones, filtered by state and text.                                                                                                                                                                |
-| `/admin/comments/{commentID}` | PATCH  | moderator + DB | Hide or restore a comment, with a reason.                                                                                                                                                                                  |
-| `/admin/users`                | GET    | moderator + DB | The account directory: profile, email, role, suspension state, real activity counts.                                                                                                                                       |
-| `/admin/users/{userID}`       | PATCH  | **admin** + DB | Suspend or restore an account, with a reason. Registered with `AdminFunc`, and the database checks `is_admin()` again.                                                                                                     |
-| `/admin/leaderboards`         | GET    | moderator + DB | Verified scores, with the game and the run behind each one.                                                                                                                                                                |
-| `/admin/moderation-log`       | GET    | moderator + DB | The audit trail: every decision, its target, its reason and the moderator who made it.                                                                                                                                     |
-| `/admin/system/services`      | GET    | moderator + DB | The platform's routing table. It answers which services exist — **not** whether they are healthy, because this deployment collects no metrics.                                                                             |
+| Route                         | Method | Tier          | What it answers                                                                                                                                                                                                            |
+| ----------------------------- | ------ | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/admin/session`              | GET    | authenticated | The caller's own admin state (allowlist-derived) and profile. The one route an ordinary user may call: being able to learn "you are not an admin" is not privileged information, and without it the only answer would be an uninterpretable `403`. |
+| `/admin/overview`             | GET    | allowlist     | Dashboard aggregate: counts, a 14-day series, recent activity, most-played games.                                                                                                                                          |
+| `/admin/analytics`            | GET    | allowlist     | Activity over 7–90 days: totals, daily series, top games, top players.                                                                                                                                                     |
+| `/admin/games`                | GET    | allowlist     | Every game, published or not, with status, owner, real runs, players, best score.                                                                                                                                          |
+| `/admin/games/{gameID}`       | PATCH  | allowlist     | Publish, reject, archive or return a game to review, with a reason; writes the audit row in the same transaction.                                                                                                          |
+| `/admin/categories`           | GET    | allowlist     | Categories with published and total game counts. Read-only: the schema has no admin write path for categories.                                                                                                             |
+| `/admin/reports`              | GET    | allowlist     | The moderation queue, each report joined to its target's title, username or excerpt.                                                                                                                                       |
+| `/admin/reports/{reportID}`   | PATCH  | allowlist     | Start reviewing, resolve, dismiss or reopen a report, with a reason.                                                                                                                                                       |
+| `/admin/comments`             | GET    | allowlist     | Comments including hidden ones, filtered by state and text.                                                                                                                                                                |
+| `/admin/comments/{commentID}` | PATCH  | allowlist     | Hide or restore a comment, with a reason.                                                                                                                                                                                  |
+| `/admin/users`                | GET    | allowlist     | The account directory: profile, email, role, suspension state, real activity counts.                                                                                                                                       |
+| `/admin/users/{userID}`       | PATCH  | allowlist     | Suspend or restore an account, with a reason.                                                                                                                                                                              |
+| `/admin/leaderboards`         | GET    | allowlist     | Verified scores, with the game and the run behind each one.                                                                                                                                                                |
+| `/admin/moderation-log`       | GET    | allowlist     | The audit trail: every decision, its target, its reason and the moderator who made it.                                                                                                                                     |
+| `/admin/system/services`      | GET    | allowlist     | The platform's routing table. It answers which services exist — **not** whether they are healthy, because this deployment collects no metrics.                                                                             |
 
 Lists are paged with `limit` (default 50, max 100) and `offset`, and answer
 `{ "items": [...], "hasMore": bool }`. The extra row read is how `hasMore` is
@@ -126,42 +123,41 @@ Rules:
   client-supplied email, user id, role or `isAdmin` flag — in a body, query
   string or header — is never trusted (identity headers are stripped, strict
   bodies reject unknown fields).
-- **Fail-closed.** Missing or empty grants no one. Database roles keep
-  working.
-- **Immediate.** Read on every request, so removing an address revokes its
-  Go API access on the next call — not when a token expires and not from any
-  client-cached role. (On Vercel an env change redeploys; the fresh process
-  reads the new value.)
+- **Fail-closed.** Missing or empty grants no one — including database admins
+  and admin claims.
+- **Immediate.** Read on every request, so removing an address revokes on the
+  next call — not when a token expires and not from any client-cached role.
+  (On Vercel an env change redeploys; the fresh process reads the new value.)
+  No database cleanup or manual role change is required.
 
-### How it interacts with database roles and RLS
+### How it relates to database roles and RLS
 
-| Caller                                              | Go tier (`AdminFunc`/`ModeratorFunc`) | Go `staff` wrapper | Database functions / RLS |
-| --------------------------------------------------- | ------------------------------------- | ------------------ | ------------------------ |
-| Verified email in `ADMIN_EMAILS`                    | pass (allowlist OR claim)             | pass (elevated to admin for this request) | staff reads/writes still call the caller's-token RPCs, which re-check `is_staff()`/`is_admin()` from `user_roles` |
-| `user_roles` row `admin`/`moderator`, not allowlisted | pass iff the token claim is strong enough | pass iff the row is staff | pass per the row (unchanged) |
-| Ordinary user, not allowlisted                      | 403 (moderator routes), 403/401 as documented | 403, database never reached | refused (`42501`) on any direct RPC too |
+| Caller                                               | Go tier (`AdminFunc`/`ModeratorFunc`) | Go `staff` wrapper | `GET /admin/session` |
+| ---------------------------------------------------- | ------------------------------------- | ------------------ | -------------------- |
+| Verified email in `ADMIN_EMAILS`                     | pass                                  | pass               | admin, staff, admin  |
+| Anyone else (any claim, any row, any body/query)     | 403                                   | 403, database never reached for staff work | user, not staff, not admin |
 
 Consequences worth stating plainly:
 
-- The allowlist is an **additional Go-layer grant**, OR'd with the existing
-  row+claim checks. It removes the need to set the `app_metadata.role` claim
-  for allowlisted accounts, and revoking at the Go layer is immediate.
-- It does **not** replace the row for data access and does **not** weaken
-  RLS: no migration was changed, no grant was added, and no service holds the
-  service-role/secret key. A direct browser call to
-  `POST /rest/v1/rpc/admin_overview` with a caller token is still answered
-  from the row alone — an allowlisted address without a staff row cannot read
-  staff data that way, and removing an address from the allowlist does not by
-  itself demote its row. Full revocation of a row-backed account is env
-  removal **plus** the existing row demotion (`update user_roles set role =
-  'user' …`); for allowlist-only accounts env removal alone suffices at the
-  Go API.
-- For allowlisted accounts to read staff aggregates through the Go API today,
-  grant the row once with the existing procedure
-  ([ADR 0013](../../docs/decisions/0013-admin-authorization.md#granting-and-revoking-a-role))
-  and then manage day-to-day membership in Vercel. A future change could sync
-  the allowlist into rows with a privileged writer; that writer does not exist
-  today by design.
+- The allowlist is the **only** grant. Claims and rows are never consulted
+  for the decision — a leftover `app_metadata.role` or `user_roles` row grants
+  nothing at the application layer, and removal needs no row demotion.
+- It does **not** weaken RLS: no migration was changed, no grant was added,
+  and no service holds the service-role/secret key. The `user_roles` table,
+  its RLS policies and the row-gated staff functions stay exactly as they are
+  (defense-in-depth on the data path, and staff visibility for non-admin data
+  surfaces is unchanged).
+- Residual path, stated honestly: the row-gated SQL functions still answer
+  from the row when called directly (e.g. `POST /rest/v1/rpc/admin_overview`
+  with a caller token). The application never calls them directly — every
+  admin screen goes through this service, which denies first — and no new
+  rows are granted by this repository. A follow-up that needs explicit
+  approval (a privileged allowlist sync writer, or a service-role reader)
+  could close the direct path entirely; it is deliberately not done here.
+- `GET /admin/session` reports the allowlist decision, never the allowlist
+  itself. The dashboard, the nav link and the suspend button all follow that
+  response, so no cached session or edited frontend state can keep the
+  privilege.
 
 Missing Data API configuration is not fatal: the service still serves its probes
 and answers `503` on the admin routes, which is diagnosable, where a crash loop is
@@ -194,9 +190,9 @@ the same root is not detected (see
 lists `/api/v1/admin` under the service that answers it, so the gateway's
 `UPSTREAM_GAMES_URL` binding covers it with no extra configuration.
 
-Sharing a process shares no privilege: these routes verify a token and ask the
-database for a role on every request, exactly as they would in a deployment of
-their own, and hold no credential the catalogue routes do not also hold.
+Sharing a process shares no privilege: these routes verify a token and check the
+allowlist on every request, exactly as they would in a deployment of their own,
+and hold no credential the catalogue routes do not also hold.
 
 ## Tests
 
@@ -205,10 +201,12 @@ cd services && go test ./admin/...
 ```
 
 `admin_test.go` boots the real router through `httpx.NewRouter` and asserts the
-tier boundary for every route — anonymous `401`, ordinary user `403`, moderator
-allowed, suspension `403` for a non-admin — plus body validation (unknown fields
-rejected, a malformed id, a missing `hidden`/`suspended`), pagination bounds, and
-that a database refusal is never reported as success.
+single-source boundary for every route — anonymous `401`, non-allowlisted `403`
+(including database/claim admins and moderators), allowlisted `200` with no
+claim or row required — plus body validation (unknown fields rejected, a
+malformed id, a missing `hidden`/`suspended`), pagination bounds, revocation on
+the next request after removal, and that a database refusal is never reported
+as success.
 `internal/supabaseadmin/client_test.go` covers the Data API client: the projection
 it asks for, the token it carries, and the mapping of a Postgres error back onto
 the platform's error envelope.

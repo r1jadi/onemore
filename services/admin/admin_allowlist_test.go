@@ -127,10 +127,9 @@ func TestOrdinaryEmailIsStillRefused(t *testing.T) {
 	}
 }
 
-// TestMissingAllowlistGrantsNoOneButKeepsDatabaseRoles: empty or missing
-// ADMIN_EMAILS must never grant everyone. Existing database admins keep
-// working (the allowlist is OR'd, fail-closed).
-func TestMissingAllowlistGrantsNoOneButKeepsDatabaseRoles(t *testing.T) {
+// TestMissingAllowlistDeniesEveryone: empty or missing ADMIN_EMAILS grants no
+// one — including a database admin with an admin claim. Fail closed.
+func TestMissingAllowlistDeniesEveryone(t *testing.T) {
 	for _, raw := range []string{"", "   "} {
 		t.Run("allowlist="+raw, func(t *testing.T) {
 			t.Setenv("ADMIN_EMAILS", raw)
@@ -143,15 +142,90 @@ func TestMissingAllowlistGrantsNoOneButKeepsDatabaseRoles(t *testing.T) {
 		})
 	}
 
-	t.Run("database admin still works without an allowlist", func(t *testing.T) {
+	t.Run("database admin denied without an allowlist", func(t *testing.T) {
 		t.Setenv("ADMIN_EMAILS", "")
 		backend := &fakeBackend{identity: staffIdentity("admin")}
 		server, sign := newAllowlistServer(t, backend)
 		token := sign(testAdmin, "admin", "db-admin@example.com")
-		if status, payload := call(t, server, http.MethodGet, OverviewPath, token, nil); status != http.StatusOK {
-			t.Errorf("overview as database admin = %d, want 200 (%v)", status, payload)
+		if status, payload := call(t, server, http.MethodGet, OverviewPath, token, nil); status != http.StatusForbidden {
+			t.Errorf("database admin with missing allowlist = %d, want 403 (%v)", status, payload)
+		}
+		status, payload := call(t, server, http.MethodGet, SessionPath, token, nil)
+		if status != http.StatusOK || payload["isAdmin"] != false || payload["isStaff"] != false {
+			t.Errorf("session = %d %v, want a non-admin", status, payload)
 		}
 	})
+}
+
+// TestRemovingEmailRevokesOnNextRequest: the same token passes while its email
+// is allowlisted and is refused after the configuration changes — no stale
+// grant from the claim, the row, or any cache.
+func TestRemovingEmailRevokesOnNextRequest(t *testing.T) {
+	t.Setenv("ADMIN_EMAILS", "admin@example.com")
+	backend := &fakeBackend{identity: staffIdentity("user")}
+	server, sign := newAllowlistServer(t, backend)
+	// A user claim behind a user row: only the allowlist grants.
+	token := sign(testPlayer, "user", "admin@example.com")
+
+	if status, _ := call(t, server, http.MethodGet, OverviewPath, token, nil); status != http.StatusOK {
+		t.Fatalf("overview while allowlisted = %d, want 200", status)
+	}
+
+	t.Setenv("ADMIN_EMAILS", "someone-else@example.com")
+	if status, payload := call(t, server, http.MethodGet, OverviewPath, token, nil); status != http.StatusForbidden {
+		t.Fatalf("overview after removal = %d, want 403 (%v)", status, payload)
+	}
+	status, payload := call(t, server, http.MethodGet, SessionPath, token, nil)
+	if status != http.StatusOK || payload["isAdmin"] != false || payload["isStaff"] != false || payload["role"] != "user" {
+		t.Fatalf("session after removal = %d %v, want a non-admin", status, payload)
+	}
+}
+
+// TestPrivilegedRowAndClaimDeniedOnEveryRoute: a database admin row plus an
+// admin claim, for an email outside ADMIN_EMAILS, reaches no staff route and
+// no staff write. There is no alternative way to become an admin.
+func TestPrivilegedRowAndClaimDeniedOnEveryRoute(t *testing.T) {
+	t.Setenv("ADMIN_EMAILS", "admin@example.com")
+	backend := &fakeBackend{identity: staffIdentity("admin")}
+	server, sign := newAllowlistServer(t, backend)
+	token := sign(testAdmin, "admin", "db-admin@example.com")
+
+	for _, path := range []string{
+		SessionPath, OverviewPath, AnalyticsPath, GamesPath, CategoriesPath,
+		ReportsPath, CommentsPath, UsersPath, LeaderboardsPath,
+		ModerationLogPath, SystemServicesPath,
+	} {
+		status, payload := call(t, server, http.MethodGet, path, token, nil)
+		if path == SessionPath {
+			if status != http.StatusOK || payload["isAdmin"] != false || payload["isStaff"] != false {
+				t.Errorf("GET %s = %d %v, want a non-admin session", path, status, payload)
+			}
+			continue
+		}
+		if status != http.StatusForbidden {
+			t.Errorf("GET %s = %d, want 403 (%v)", path, status, payload)
+		}
+	}
+
+	writes := []struct {
+		method string
+		path   string
+		body   any
+	}{
+		{http.MethodPatch, "/api/v1/admin/games/" + testGameID, map[string]any{"status": "published"}},
+		{http.MethodPatch, "/api/v1/admin/reports/" + testGameID, map[string]any{"status": "resolved", "reason": "no"}},
+		{http.MethodPatch, "/api/v1/admin/comments/" + testCommentID, map[string]any{"hidden": true, "reason": "no"}},
+		{http.MethodPatch, "/api/v1/admin/users/" + testPlayer, map[string]any{"suspended": true, "reason": "no"}},
+	}
+	for _, write := range writes {
+		if status, _ := call(t, server, write.method, write.path, token, write.body); status != http.StatusForbidden {
+			t.Errorf("%s %s = %d, want 403", write.method, write.path, status)
+		}
+	}
+
+	if backend.called("Overview") || backend.called("Games") || backend.called("SetGameStatus") || backend.called("SetSuspension") {
+		t.Error("a refused request reached the database for staff work")
+	}
 }
 
 // TestInvalidIdentityIsUnauthorized: forged, expired and missing tokens are
@@ -228,9 +302,9 @@ func TestClientSuppliedAdminMarkersAreIgnored(t *testing.T) {
 	}
 }
 
-// TestAllowlistedModeratorGateAndSuspension: an allowlisted email passes the
-// moderator tier and reaches the admin-only suspension route at the Go layer
-// (the database re-checks is_admin() itself for the write).
+// TestAllowlistedModeratorGateAndSuspension: an allowlisted email passes every
+// staff tier and reaches the suspension route — with a user claim behind a
+// user row, proving claims and rows grant nothing.
 func TestAllowlistedModeratorGateAndSuspension(t *testing.T) {
 	t.Setenv("ADMIN_EMAILS", "admin@example.com")
 	backend := &fakeBackend{
@@ -244,8 +318,8 @@ func TestAllowlistedModeratorGateAndSuspension(t *testing.T) {
 	if status, _ := call(t, server, http.MethodGet, ReportsPath, token, nil); status != http.StatusOK {
 		t.Errorf("reports as allowlisted = %d, want 200", status)
 	}
-	// The Go admin tier passes; the fake backend stands in for a database that
-	// would re-check is_admin() itself.
+	// The allowlist alone authorizes; the fake backend stands in for the data
+	// call the handler makes with the caller's token.
 	status, _ := call(t, server, http.MethodPatch, "/api/v1/admin/users/"+testPlayer, token,
 		map[string]any{"suspended": true, "reason": "Abuse"})
 	if status != http.StatusOK {

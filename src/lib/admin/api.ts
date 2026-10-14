@@ -6,17 +6,18 @@
  *
  *   - **The server decides who may read what.** Every call carries the caller's
  *     own access token in the `Authorization` header, and the API answers from
- *     the database's answer about that caller's role. There is no role, user id or
- *     admin flag in any request body — this module has nothing to send one with.
+ *     the server-side `ADMIN_EMAILS` allowlist matched against the verified
+ *     token email. There is no role, user id, email or admin flag in any
+ *     request body — this module has nothing to send one with.
  *   - **A value that cannot be measured is `null`.** `avgRunSeconds` is null until
  *     a run has been completed, and a rate the platform does not track is absent
  *     rather than zero. Nothing here substitutes a default for a missing number.
  *   - **A 403 is an answer, not an error to retry.** The API says "moderator or
- *     administrator" when the database does not grant the role, and the screens
+ *     administrator" when the verified email is not allowlisted, and the screens
  *     report that as a state of its own.
  *
  * Storage rule, the same as the catalogue's: nothing is cached across a session,
- * so a role revoked in the database takes effect on the next read.
+ * so removal from the allowlist takes effect on the next read.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
