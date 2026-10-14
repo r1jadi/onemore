@@ -1,0 +1,237 @@
+import {
+  RouterProvider,
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  rootRouteId,
+} from "@tanstack/react-router";
+import { QueryClient } from "@tanstack/react-query";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import type { ReactElement } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { AppShell } from "@/components/layout/AppShell";
+import { clearSession, signIn } from "@/lib/auth/session";
+import { routeTree } from "@/routeTree.gen";
+
+const testUserID = "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f";
+// Matches src/test/setup.ts: publicConfig is computed at import time from the
+// stubbed env, so tests must use the setup value rather than re-stubbing.
+const supabaseBase = "https://project.supabase.co";
+
+function sessionPayload() {
+  return {
+    session: { userId: testUserID, role: "user", email: "player@example.com" },
+    tokens: {
+      accessToken: "access-token-1",
+      refreshToken: "refresh-token-1",
+      tokenType: "bearer",
+      expiresIn: 3600,
+    },
+    user: {
+      id: testUserID,
+      email: "player@example.com",
+      emailConfirmed: true,
+      createdAt: "2026-10-01T00:00:00.000Z",
+    },
+  };
+}
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+/**
+ * The sidebar links somewhere for every entry, so AppShell is mounted in a
+ * real router with a stub page for each destination rather than with links
+ * stubbed out.
+ */
+async function renderShell() {
+  function Host(): ReactElement {
+    return (
+      <AppShell>
+        <p>page content</p>
+      </AppShell>
+    );
+  }
+
+  const root = createRootRoute();
+  const routes = [
+    createRoute({ getParentRoute: () => root, path: "/", component: Host }),
+    ...[
+      "following",
+      "explore",
+      "search",
+      "leaderboards",
+      "notifications",
+      "saved",
+      "recent",
+      "profile",
+      "settings",
+      "admin",
+      "welcome",
+      "login",
+      "signup",
+      "onboarding",
+    ].map((path) =>
+      createRoute({ getParentRoute: () => root, path, component: () => <p>{path}</p> }),
+    ),
+  ];
+
+  const router = createRouter({
+    routeTree: root.addChildren(routes),
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
+
+  render(<RouterProvider router={router} />);
+  await act(async () => {
+    await router.load();
+  });
+}
+
+/**
+ * Answers the credential call, the admin allowlist check and the Supabase
+ * notification read. Anything else is a test bug, not a network to hit.
+ */
+function stubBackend(adminSession: { isStaff: boolean }) {
+  const spy = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes("/api/v1/")) {
+      if (url.includes("/auth/sign-in")) return jsonResponse(sessionPayload());
+      if (url.includes("/admin/session"))
+        return jsonResponse({ userId: testUserID, role: "user", ...adminSession });
+      throw new Error(`unexpected gateway call ${url}`);
+    }
+    if (url.startsWith(supabaseBase)) return jsonResponse([]);
+    throw new Error(`unexpected fetch ${url}`);
+  });
+  vi.stubGlobal("fetch", spy);
+}
+
+function desktopSidebar(): HTMLElement {
+  const aside = document.querySelector("aside");
+  if (!aside) throw new Error("expected the desktop sidebar to render");
+  return aside as HTMLElement;
+}
+
+function mobileNav(): HTMLElement {
+  const navs = screen.getAllByRole("navigation", { name: "Main" });
+  const mobile = navs.find((nav) => within(nav).queryByText("Home") !== null);
+  if (!mobile) throw new Error("expected the mobile navigation to render");
+  return mobile;
+}
+
+beforeEach(() => {
+  clearSession();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  // No clearSession() here: the shell is still mounted until the library's
+  // auto-cleanup runs, and publishing anonymous into it would warn. The next
+  // test's beforeEach resets the session while nothing is mounted.
+});
+
+describe("sidebar auth entry points", () => {
+  it("never shows the internal sign-in screens label", () => {
+    const source = readFileSync("src/components/layout/AppShell.tsx", "utf8");
+    expect(source).not.toContain("Sign-in screens");
+  });
+
+  it("shows Get started and Log in to visitors without a session", async () => {
+    await renderShell();
+
+    expect(screen.queryByText("Sign-in screens")).toBeNull();
+
+    const sidebar = desktopSidebar();
+    const started = within(sidebar).getByRole("link", { name: "Get started" });
+    expect(started).toHaveAttribute("href", "/welcome");
+    const login = within(sidebar).getByRole("link", { name: "Log in" });
+    expect(login).toHaveAttribute("href", "/login");
+
+    // Settings stays; the Admin link fails closed for anonymous visitors.
+    expect(within(sidebar).getByRole("link", { name: "Settings" })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    expect(within(sidebar).queryByRole("link", { name: "Admin" })).toBeNull();
+  });
+
+  it("shows no sign-in CTA once signed in", async () => {
+    stubBackend({ isStaff: false });
+    await signIn("player@example.com", "correct-horse");
+    await renderShell();
+
+    expect(screen.queryByText("Sign-in screens")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Get started" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Log in" })).toBeNull();
+
+    // The existing navigation is preserved for signed-in visitors.
+    const sidebar = desktopSidebar();
+    expect(within(sidebar).getByRole("link", { name: "Settings" })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    expect(within(sidebar).queryByRole("link", { name: "Admin" })).toBeNull();
+    expect(within(sidebar).getByRole("link", { name: "For You" })).toHaveAttribute("href", "/");
+  });
+
+  it("keeps the Admin link for staff and hides it for anyone else", async () => {
+    stubBackend({ isStaff: true });
+    await signIn("player@example.com", "correct-horse");
+    await renderShell();
+
+    await waitFor(() => {
+      expect(within(desktopSidebar()).getByRole("link", { name: "Admin" })).toHaveAttribute(
+        "href",
+        "/admin",
+      );
+    });
+    // Staff see the product navigation, not a sign-in CTA.
+    expect(screen.queryByRole("link", { name: "Get started" })).toBeNull();
+  });
+});
+
+describe("mobile navigation stays consistent", () => {
+  it("keeps the five tabs and carries no demo entry", async () => {
+    await renderShell();
+
+    const nav = mobileNav();
+    const links = within(nav).getAllByRole("link");
+    expect(links.map((link) => link.textContent)).toEqual([
+      "Home",
+      "Explore",
+      "Ranks",
+      "Inbox",
+      "Profile",
+    ]);
+    expect(within(nav).queryByText("Sign-in screens")).toBeNull();
+    expect(within(nav).queryByText("Get started")).toBeNull();
+  });
+
+  it("keeps the same five tabs once signed in", async () => {
+    stubBackend({ isStaff: false });
+    await signIn("player@example.com", "correct-horse");
+    await renderShell();
+
+    const nav = mobileNav();
+    expect(within(nav).getAllByRole("link")).toHaveLength(5);
+    expect(within(nav).queryByText("Sign-in screens")).toBeNull();
+  });
+});
+
+describe("auth routes stay reachable", () => {
+  it("still matches the welcome, login, signup and onboarding pages", () => {
+    const router = createRouter({ routeTree, context: { queryClient: new QueryClient() } });
+
+    for (const path of ["/welcome", "/login", "/signup", "/onboarding"]) {
+      expect(router.matchRoutes(path).at(-1)?.routeId).not.toBe(rootRouteId);
+    }
+  });
+});

@@ -46,13 +46,18 @@ const desktop = [
  * successful (`ready`) unread-count read with a positive count: anonymous,
  * loading and failed reads render no badge, and a genuine zero renders the
  * unread-free state (also no badge) — never a fixture number.
+ *
+ * Visitors without a session see product auth entry points below Settings
+ * ("Get started" opens the welcome chooser, "Log in" opens the login screen);
+ * signed-in visitors see no sign-in CTA at all. Both links reuse the existing
+ * routes, so no authentication logic lives here.
  */
 export function AppShell({ children }: { children: ReactNode }) {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const auth = useAuth();
   const unread = useUnreadCount();
   const showAdmin = useAdminVisibility();
-  void auth;
+  const isAnonymous = auth.status === "anonymous";
   // A badge only when the count is known-good and positive. Every other state
   // (anonymous, loading, genuine zero, failure) shows no badge; the failure
   // case is retryable via `unread.retry` without breaking navigation.
@@ -109,12 +114,22 @@ export function AppShell({ children }: { children: ReactNode }) {
               Admin
             </Link>
           )}
-          <Link
-            to="/welcome"
-            className="px-3 pt-2 text-xs text-muted-foreground hover:text-foreground"
-          >
-            Sign-in screens
-          </Link>
+          {isAnonymous && (
+            <div className="flex flex-col gap-2 px-3 pt-3">
+              <Link
+                to="/welcome"
+                className="flex h-10 items-center justify-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground hover:bg-primary/90"
+              >
+                Get started
+              </Link>
+              <Link
+                to="/login"
+                className="flex h-10 items-center justify-center rounded-lg text-sm font-medium text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+              >
+                Log in
+              </Link>
+            </div>
+          )}
         </div>
       </aside>
 
