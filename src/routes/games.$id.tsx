@@ -1,6 +1,7 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Bookmark, Clock, Heart, MessageCircle, Play, Share2 } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
 import { EmptyState, ErrorState, Page, PageHeader, Section } from "@/components/common";
 import { GameArt } from "@/components/game/GameArt";
 import { GameCard } from "@/components/game/GameCard";
@@ -8,7 +9,8 @@ import { LeaderboardList } from "@/components/game/Leaderboard";
 import { CommentsSheet, ShareSheet } from "@/components/social/Sheets";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { fmtDate } from "@/lib/format";
+import { ApiError } from "@/lib/api/client";
+import { fmt, fmtDate } from "@/lib/format";
 import {
   categoryName,
   catalogErrorMessage,
@@ -17,6 +19,7 @@ import {
   useGames,
   type Game,
 } from "@/lib/games/catalog";
+import { useGameEngagement } from "@/lib/social/engagement";
 import { breadcrumbJsonLd, seo, videoGameJsonLd } from "@/lib/seo";
 
 export const Route = createFileRoute("/games/$id")({
@@ -86,13 +89,28 @@ function GameDetails() {
 }
 
 function Detail({ game }: { game: Game }) {
-  const [liked, setLiked] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [comments, setComments] = useState(false);
   const [share, setShare] = useState(false);
+  const nav = useNavigate();
+  const engagement = useGameEngagement(game.slug);
 
   const category = categoryName(game);
   const published = fmtDate(game.publishedAt);
+
+  // Liking and saving need an account. Anonymous visitors are sent to sign in
+  // with a redirect back to this game, instead of watching a toggle that
+  // cannot persist.
+  async function guarded(action: () => Promise<void>) {
+    try {
+      await action();
+    } catch (error) {
+      if (error instanceof ApiError && error.code === "unauthorized") {
+        nav({ to: "/login", search: { redirect: `/games/${game.slug}` } });
+        return;
+      }
+      toast.error(error instanceof ApiError ? error.message : "Something went wrong.");
+    }
+  }
 
   return (
     <Page className="max-w-5xl pb-40 md:pb-12">
@@ -140,24 +158,32 @@ function Detail({ game }: { game: Game }) {
               <Button
                 variant="secondary"
                 className="flex-1"
-                aria-pressed={liked}
-                onClick={() => setLiked(!liked)}
+                aria-pressed={engagement.liked}
+                onClick={() => void guarded(() => engagement.toggleLike())}
               >
-                <Heart className={liked ? "fill-primary text-primary" : ""} />
+                <Heart className={engagement.liked ? "fill-primary text-primary" : ""} />
                 Like
+                {engagement.likeCount !== null && engagement.likeCount > 0 && (
+                  <span className="tabular text-muted-foreground">{fmt(engagement.likeCount)}</span>
+                )}
               </Button>
               <Button variant="secondary" className="flex-1" onClick={() => setComments(true)}>
                 <MessageCircle />
                 Comments
+                {engagement.commentCount !== null && engagement.commentCount > 0 && (
+                  <span className="tabular text-muted-foreground">
+                    {fmt(engagement.commentCount)}
+                  </span>
+                )}
               </Button>
               <Button
                 variant="secondary"
                 size="icon"
                 aria-label="Save"
-                aria-pressed={saved}
-                onClick={() => setSaved(!saved)}
+                aria-pressed={engagement.saved}
+                onClick={() => void guarded(() => engagement.toggleSave())}
               >
-                <Bookmark className={saved ? "fill-primary text-primary" : ""} />
+                <Bookmark className={engagement.saved ? "fill-primary text-primary" : ""} />
               </Button>
               <Button
                 variant="secondary"
@@ -232,8 +258,19 @@ function Detail({ game }: { game: Game }) {
         )}
       </div>
 
-      <CommentsSheet open={comments} onOpenChange={setComments} />
-      <ShareSheet open={share} onOpenChange={setShare} title={game.title} />
+      <CommentsSheet
+        open={comments}
+        onOpenChange={setComments}
+        gameId={engagement.gameId}
+        gameSlug={game.slug}
+        count={engagement.commentCount}
+      />
+      <ShareSheet
+        open={share}
+        onOpenChange={setShare}
+        title={game.title}
+        path={`/games/${game.slug}`}
+      />
     </Page>
   );
 }

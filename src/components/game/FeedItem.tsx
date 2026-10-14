@@ -1,11 +1,15 @@
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { Bookmark, Clock, Heart, Info, MessageCircle, Play, Share2, Trophy } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
 import { GameArt } from "./GameArt";
 import { Avatar } from "@/components/common";
 import { CommentsSheet, ShareSheet } from "@/components/social/Sheets";
 import { Button } from "@/components/ui/button";
+import { ApiError } from "@/lib/api/client";
+import { fmt } from "@/lib/format";
 import { categoryName, type Game } from "@/lib/games/catalog";
+import { useGameEngagement } from "@/lib/social/engagement";
 import { cn } from "@/lib/utils";
 
 /**
@@ -14,11 +18,10 @@ import { cn } from "@/lib/utils";
  * Two things changed when the catalogue became real, and both are about not
  * claiming more than is known:
  *
- *   - **Every engagement count is gone.** The old card showed likes, comments,
- *     saves and a personal best, all of which came from fixtures. No service
- *     records any of them, and a plausible number on screen cannot be told apart
- *     from a real one, so the icons stay (they are the existing affordances) and
- *     the numbers do not.
+ *   - **Every engagement count is measured.** Likes and comments are stored in
+ *     the database and read back with exact counts; a count the server did not
+ *     report is omitted rather than zeroed, because a zero is a measurement
+ *     and nothing was measured.
  *   - **Playability is stated.** No game has a runtime yet, so "Tap to play" would
  *     be a promise the product cannot keep. The board is a link to the game's
  *     page instead, and the button says what it does.
@@ -27,12 +30,13 @@ function Action({
   icon: Icon,
   label,
   active,
+  count,
   onClick,
   to,
 }: {
   icon: typeof Heart;
   label: string;
-  count?: number;
+  count?: number | null;
   active?: boolean;
   onClick?: () => void;
   to?: { id: string };
@@ -51,30 +55,51 @@ function Action({
     </span>
   );
   const cls = "press flex flex-col items-center gap-1";
+  const tally =
+    count === undefined || count === null ? null : (
+      <span className="text-xs tabular text-muted-foreground">{fmt(count)}</span>
+    );
   return to ? (
     <Link to="/leaderboards/$id" params={to} aria-label={label} className={cls}>
       {body}
+      {tally}
     </Link>
   ) : (
     <button
       type="button"
-      aria-label={label}
+      aria-label={count === null || count === undefined ? label : `${label}, ${fmt(count)}`}
       aria-pressed={active}
       onClick={onClick}
       className={cls}
     >
       {body}
+      {tally}
     </button>
   );
 }
 
 export function FeedItem({ game }: { game: Game }) {
-  const [liked, setLiked] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [comments, setComments] = useState(false);
   const [share, setShare] = useState(false);
+  const nav = useNavigate();
+  const engagement = useGameEngagement(game.slug);
 
   const category = categoryName(game);
+
+  // Liking and saving need an account. Anonymous visitors are sent to sign in
+  // with a redirect back to this game, instead of watching a toggle that
+  // cannot persist.
+  async function guarded(action: () => Promise<void>) {
+    try {
+      await action();
+    } catch (error) {
+      if (error instanceof ApiError && error.code === "unauthorized") {
+        nav({ to: "/login", search: { redirect: `/games/${game.slug}` } });
+        return;
+      }
+      toast.error(error instanceof ApiError ? error.message : "Something went wrong.");
+    }
+  }
 
   return (
     <article
@@ -165,18 +190,45 @@ export function FeedItem({ game }: { game: Game }) {
         </div>
       </div>
 
-      {/* Action rail. The affordances are the ones the app always had; the counts
-          they used to carry came from fixtures and are gone. */}
+      {/* Action rail. Counts are measured per game; a count the server has not
+          reported yet is omitted rather than zeroed. */}
       <div className="absolute right-3 bottom-44 flex flex-col gap-4 md:static md:ml-4 md:self-end md:pb-6">
-        <Action icon={Heart} label="Like" active={liked} onClick={() => setLiked(!liked)} />
-        <Action icon={MessageCircle} label="Comments" onClick={() => setComments(true)} />
-        <Action icon={Bookmark} label="Save" active={saved} onClick={() => setSaved(!saved)} />
+        <Action
+          icon={Heart}
+          label="Like"
+          count={engagement.likeCount}
+          active={engagement.liked}
+          onClick={() => void guarded(() => engagement.toggleLike())}
+        />
+        <Action
+          icon={MessageCircle}
+          label="Comments"
+          count={engagement.commentCount}
+          onClick={() => setComments(true)}
+        />
+        <Action
+          icon={Bookmark}
+          label="Save"
+          active={engagement.saved}
+          onClick={() => void guarded(() => engagement.toggleSave())}
+        />
         <Action icon={Trophy} label="Leaderboard" to={{ id: game.slug }} />
         <Action icon={Share2} label="Share" onClick={() => setShare(true)} />
       </div>
 
-      <CommentsSheet open={comments} onOpenChange={setComments} />
-      <ShareSheet open={share} onOpenChange={setShare} title={game.title} />
+      <CommentsSheet
+        open={comments}
+        onOpenChange={setComments}
+        gameId={engagement.gameId}
+        gameSlug={game.slug}
+        count={engagement.commentCount}
+      />
+      <ShareSheet
+        open={share}
+        onOpenChange={setShare}
+        title={game.title}
+        path={`/games/${game.slug}`}
+      />
     </article>
   );
 }

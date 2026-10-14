@@ -8,9 +8,11 @@
  * RLS tables (`public.follows`, `public.profiles`, `public.notifications`,
  * `public.user_preferences`, `public.blocked_users`) and read through
  * `@/lib/social/follows`, `@/lib/notifications/store` and
- * `@/lib/supabase/rest`. Comments, achievements, saves and activity feeds have
- * no backend and are rendered as honest empty/unavailable states instead of
- * these fixtures.
+ * `@/lib/supabase/rest`. Likes, comments and saves are real too, backed by
+ * `public.likes`, `public.comments` and `public.saves` and read through
+ * `@/lib/social/engagement`; the activity page reads those same rows plus the
+ * caller's own scores. Achievements have no backend and are rendered as honest
+ * empty/unavailable states instead of these fixtures.
  */
 
 export type User = {

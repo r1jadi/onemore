@@ -288,6 +288,12 @@ insert into public.notifications (user_id, kind, payload) values
 insert into public.reports (reporter_id, target_kind, target_id, reason)
 values (:'alice', 'comment', :'bob_comment', 'spam');
 
+insert into public.likes (user_id, target_kind, target_id)
+values (:'bob', 'game', :'published_game');
+
+insert into public.saves (user_id, game_id)
+values (:'bob', :'published_game');
+
 insert into public.game_sessions (game_id, user_id) values (:'published_game', :'alice');
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -350,6 +356,8 @@ select rls_test.denied($$select is_suspended from public.profiles$$,
   'the suspension flag is not readable through the Data API');
 select rls_test.denied($$update public.profiles set display_name = 'anon' where id = '11111111-1111-4111-8111-111111111111'$$,
   'anon cannot write profiles');
+select rls_test.denied($$select * from public.saves$$,
+  'saved games are not readable by anonymous callers at all');
 
 reset role;
 
@@ -450,6 +458,58 @@ select rls_test.allow(
 select rls_test.denied(
   $$insert into public.likes (user_id, target_kind, target_id) values ('22222222-2222-4222-8222-222222222222', 'game', 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa')$$,
   'a player cannot like as another user'
+);
+select rls_test.blocked(
+  $$delete from public.likes where user_id = '22222222-2222-4222-8222-222222222222'$$,
+  'a player cannot remove another player''s like'
+);
+select rls_test.allow(
+  $$delete from public.likes
+    where user_id = '11111111-1111-4111-8111-111111111111'
+      and target_kind = 'game'
+      and target_id = 'aaaaaaaa-3333-4333-8333-aaaaaaaaaaaa'$$,
+  'a player can remove their own like'
+);
+
+-- Saved games are private rows: only the owner reads, adds or removes them,
+-- only for published games, and a second save conflicts instead of duplicating.
+select rls_test.allow(
+  $$insert into public.saves (user_id, game_id)
+    values ('11111111-1111-4111-8111-111111111111', 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa')$$,
+  'a player can save a published game as themselves'
+);
+select rls_test.rejected(
+  $$insert into public.saves (user_id, game_id)
+    values ('11111111-1111-4111-8111-111111111111', 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa')$$,
+  'saving the same game twice is rejected, so concurrent saves cannot duplicate'
+);
+select rls_test.denied(
+  $$insert into public.saves (user_id, game_id)
+    values ('22222222-2222-4222-8222-222222222222', 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa')$$,
+  'a player cannot save as another user'
+);
+select rls_test.denied(
+  $$insert into public.saves (user_id, game_id)
+    values ('11111111-1111-4111-8111-111111111111', 'aaaaaaaa-2222-4222-8222-aaaaaaaaaaaa')$$,
+  'a draft game cannot be saved'
+);
+select rls_test.blocked(
+  $$delete from public.saves where user_id = '22222222-2222-4222-8222-222222222222'$$,
+  'a player cannot remove another player''s save'
+);
+select rls_test.allow(
+  $$delete from public.saves
+    where user_id = '11111111-1111-4111-8111-111111111111'
+      and game_id = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa'$$,
+  'a player can remove their own save'
+);
+select rls_test.visible($$select * from public.saves$$, 0,
+  'a player sees only their own saves');
+
+-- Comments follow the same attribution rule, with author-or-staff deletion.
+select rls_test.blocked(
+  $$delete from public.comments where id = 'bbbbbbbb-3333-4333-8333-bbbbbbbbbbbb'$$,
+  'a player cannot delete another author''s comment'
 );
 select rls_test.rejected(
   $$insert into public.follows (follower_id, followee_id) values ('11111111-1111-4111-8111-111111111111', '11111111-1111-4111-8111-111111111111')$$,

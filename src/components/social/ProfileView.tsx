@@ -237,12 +237,25 @@ export function ProfileView({
                 )}
                 {tab === "Activity" && (
                   <EmptyState
-                    title="No activity yet"
-                    body="Plays, likes, comments and saves are not recorded yet."
+                    title="No activity here"
+                    body="Recent plays, likes, comments and saves live on the Activity page."
+                    action={
+                      <Button asChild variant="secondary">
+                        <Link to="/activity">View activity</Link>
+                      </Button>
+                    }
                   />
                 )}
                 {tab === "Saved" && (
-                  <EmptyState title="Nothing saved yet" body="Saving a game is not recorded yet." />
+                  <EmptyState
+                    title="Nothing saved yet"
+                    body="Games you save live on the Saved page."
+                    action={
+                      <Button asChild variant="secondary">
+                        <Link to="/saved">View saved games</Link>
+                      </Button>
+                    }
+                  />
                 )}
                 {tab === "Recent" && (
                   <EmptyState
@@ -260,7 +273,12 @@ export function ProfileView({
               </>
             )}
           </div>
-          <ShareSheet open={share} onOpenChange={setShare} title={`@${user.username}`} />
+          <ShareSheet
+            open={share}
+            onOpenChange={setShare}
+            title={`@${user.username}`}
+            path={`/u/${user.username}`}
+          />
         </>
       )}
     </Page>

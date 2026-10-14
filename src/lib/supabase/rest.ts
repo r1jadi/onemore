@@ -63,6 +63,38 @@ export async function restGet<T>(path: string, token?: string, init?: RequestIni
   return (await response.json()) as T;
 }
 
+/**
+ * An exact row count for a filtered read, without fetching the rows.
+ *
+ * PostgREST answers `Prefer: count=exact` with a `Content-Range: first-last/total`
+ * header; the single row requested (`limit=1`) keeps the body trivial. A missing
+ * or unparsable header is an error rather than a zero — a zero is a measurement
+ * and must come from the database, never from a failed parse.
+ */
+export async function restCount(path: string, token?: string): Promise<number> {
+  const { base } = requireSupabaseRest();
+  const clean = path.replace(/^\/+/, "");
+  // A minimal body: the total comes from the header, not the rows. Callers pass
+  // their own `select=` for a column the table actually has.
+  const withSelect = clean.includes("select=")
+    ? clean
+    : `${clean}${clean.includes("?") ? "&" : "?"}select=*`;
+  const url = withSelect.includes("limit=") ? withSelect : `${withSelect}&limit=1`;
+  const response = await fetch(`${base}/rest/v1/${url}`, {
+    headers: { ...supabaseHeaders(token), Prefer: "count=exact" },
+  });
+  if (!response.ok) {
+    throw await toRestError(response);
+  }
+  const range = response.headers.get("Content-Range");
+  const total = range?.split("/")[1];
+  const count = total === undefined ? NaN : Number(total);
+  if (!Number.isInteger(count) || count < 0) {
+    throw new SupabaseRestError("The count could not be read.", response.status, "count_failed");
+  }
+  return count;
+}
+
 export async function restMutate(
   path: string,
   method: "POST" | "PATCH" | "DELETE",
