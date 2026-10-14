@@ -15,7 +15,7 @@ export function useAdminVisibility(): boolean {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
+    const cancelled = false;
 
     async function check() {
       const auth = getAuthState();

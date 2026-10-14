@@ -182,10 +182,7 @@ function FollowingGames() {
 
   return (
     <Page>
-      <PageHeader
-        title="Following"
-        subtitle={`${items.length} games from creators you follow`}
-      />
+      <PageHeader title="Following" subtitle={`${items.length} games from creators you follow`} />
       <div>
         {items.map((game) => (
           <GameRow key={game.slug} game={game} />

@@ -230,7 +230,8 @@ function Body({ section }: { section: string }) {
         </>
       );
     case "notifications":
-      if (!signedIn) return <RequireSignIn body="Notification preferences belong to your account." />;
+      if (!signedIn)
+        return <RequireSignIn body="Notification preferences belong to your account." />;
       if (loading) return <p className="px-4 text-sm text-muted-foreground">Loading…</p>;
       return (
         <>
@@ -397,11 +398,7 @@ function Body({ section }: { section: string }) {
               support channel for this deployment.
             </p>
             <Button asChild size="lg" className="mt-3 w-full md:w-auto">
-              <a
-                href="https://github.com/r1jadi/onemore/issues"
-                target="_blank"
-                rel="noreferrer"
-              >
+              <a href="https://github.com/r1jadi/onemore/issues" target="_blank" rel="noreferrer">
                 Open an issue
               </a>
             </Button>
@@ -428,11 +425,7 @@ function Body({ section }: { section: string }) {
             label="Source"
             action={
               <Button asChild size="sm" variant="ghost">
-                <a
-                  href="https://github.com/r1jadi/onemore"
-                  target="_blank"
-                  rel="noreferrer"
-                >
+                <a href="https://github.com/r1jadi/onemore" target="_blank" rel="noreferrer">
                   View
                 </a>
               </Button>

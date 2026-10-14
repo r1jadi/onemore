@@ -206,10 +206,7 @@ export function useUnreadCount(): UnreadBadgeState & { retry: () => void } {
           setState({
             status: "error",
             count: 0,
-            error:
-              error instanceof ApiError
-                ? error
-                : new ApiError("Couldn't load notifications."),
+            error: error instanceof ApiError ? error : new ApiError("Couldn't load notifications."),
           });
         }
       });

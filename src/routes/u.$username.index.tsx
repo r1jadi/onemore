@@ -84,9 +84,7 @@ function UserProfile() {
     return (
       <ProfileView
         user={{ username, name: username }}
-        fallback={
-          <EmptyState title="Account not found" body={`@${username} doesn't exist.`} />
-        }
+        fallback={<EmptyState title="Account not found" body={`@${username} doesn't exist.`} />}
       />
     );
   }
@@ -94,9 +92,7 @@ function UserProfile() {
     return (
       <ProfileView
         user={{ username, name: username }}
-        fallback={
-          <EmptyState title="Not available" body="This profile isn't available." />
-        }
+        fallback={<EmptyState title="Not available" body="This profile isn't available." />}
       />
     );
   }

@@ -93,9 +93,7 @@ export function useFollowingFeed(query: Omit<FollowingQuery, "cursor"> = {}) {
         setState({
           status: "error",
           error:
-            error instanceof ApiError
-              ? error
-              : new ApiError("Couldn't load the following feed."),
+            error instanceof ApiError ? error : new ApiError("Couldn't load the following feed."),
           items: [],
         });
       });
@@ -103,7 +101,6 @@ export function useFollowingFeed(query: Omit<FollowingQuery, "cursor"> = {}) {
       cancelled = true;
       controller.abort();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [limit, search, attempt]);
 
   const loadMore = useCallback(async () => {
@@ -121,8 +118,7 @@ export function useFollowingFeed(query: Omit<FollowingQuery, "cursor"> = {}) {
       // Keep the pages already shown; the error belongs to the next page.
       setState({
         status: "error",
-        error:
-          error instanceof ApiError ? error : new ApiError("Couldn't load more games."),
+        error: error instanceof ApiError ? error : new ApiError("Couldn't load more games."),
         items: state.items,
       });
     }

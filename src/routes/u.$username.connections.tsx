@@ -12,7 +12,12 @@ import {
   PageHeader,
   UserName,
 } from "@/components/common";
-import { fetchProfilesByIds, listFollowers, listFollowees, resolveUserId } from "@/lib/social/follows";
+import {
+  fetchProfilesByIds,
+  listFollowers,
+  listFollowees,
+  resolveUserId,
+} from "@/lib/social/follows";
 import type { PublicProfile } from "@/lib/social/follows";
 import { cn } from "@/lib/utils";
 
@@ -87,7 +92,11 @@ function Connections() {
       {list === undefined ? (
         <ListSkeleton />
       ) : error ? (
-        <ErrorState title="Couldn't load connections" body={error} onRetry={() => window.location.reload()} />
+        <ErrorState
+          title="Couldn't load connections"
+          body={error}
+          onRetry={() => window.location.reload()}
+        />
       ) : list.length === 0 ? (
         <EmptyState icon={Users} title="No one here yet" />
       ) : (

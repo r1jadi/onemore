@@ -2,16 +2,10 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/lib/api/client";
-import {
-  clearSession,
-  signIn,
-} from "@/lib/auth/session";
+import { clearSession, signIn } from "@/lib/auth/session";
 import { fetchFollowingFeed, useFollowingFeed } from "@/lib/games/following";
 import type { Game } from "@/lib/games/catalog";
-import {
-  fetchUnreadCount,
-  useUnreadCount,
-} from "@/lib/notifications/store";
+import { fetchUnreadCount, useUnreadCount } from "@/lib/notifications/store";
 
 const testUserID = "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f";
 // Matches src/test/setup.ts: publicConfig is computed at import time from the
@@ -109,9 +103,12 @@ describe("following feed is server-scoped, not a filtered catalogue", () => {
             return jsonResponse({ items: [game("a"), game("b")], nextCursor: "cursor-1" });
           }
           if (cursor === "cursor-1") {
-            return jsonResponse({
-              error: { code: "service_unavailable", message: "Feed is down." },
-            }, 503);
+            return jsonResponse(
+              {
+                error: { code: "service_unavailable", message: "Feed is down." },
+              },
+              503,
+            );
           }
           throw new Error(`unexpected cursor ${cursor}`);
         }
@@ -138,17 +135,13 @@ describe("following feed is server-scoped, not a filtered catalogue", () => {
     }
 
     render(<Probe />);
-    await waitFor(() =>
-      expect(screen.getByTestId("status").textContent).toBe("ready"),
-    );
+    await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("ready"));
     expect(screen.getByTestId("count").textContent).toBe("2");
 
     await act(async () => {
       screen.getByText("more").click();
     });
-    await waitFor(() =>
-      expect(screen.getByTestId("status").textContent).toBe("error"),
-    );
+    await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("error"));
     // The two loaded games stay on screen; the failure belongs to next page.
     expect(screen.getByTestId("count").textContent).toBe("2");
     expect(screen.getByTestId("err").textContent).toMatch(/down/i);
@@ -181,9 +174,7 @@ describe("unread badge distinguishes zero from failure", () => {
     await signIn("player@example.com", "correct-horse");
 
     render(<BadgeProbe />);
-    await waitFor(() =>
-      expect(screen.getByTestId("status").textContent).toBe("ready"),
-    );
+    await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("ready"));
     expect(screen.getByTestId("count").textContent).toBe("0");
   });
 
@@ -202,9 +193,7 @@ describe("unread badge distinguishes zero from failure", () => {
     await signIn("player@example.com", "correct-horse");
 
     render(<BadgeProbe />);
-    await waitFor(() =>
-      expect(screen.getByTestId("status").textContent).toBe("ready"),
-    );
+    await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("ready"));
     expect(screen.getByTestId("count").textContent).toBe("3");
 
     // Next tick fails: the badge must become error, not a silent zero.
@@ -212,9 +201,7 @@ describe("unread badge distinguishes zero from failure", () => {
     await act(async () => {
       screen.getByText("retry").click();
     });
-    await waitFor(() =>
-      expect(screen.getByTestId("status").textContent).toBe("error"),
-    );
+    await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("error"));
     expect(screen.getByTestId("count").textContent).toBe("0");
 
     // Recovery: success again restores the real count.
@@ -222,9 +209,7 @@ describe("unread badge distinguishes zero from failure", () => {
     await act(async () => {
       screen.getByText("retry").click();
     });
-    await waitFor(() =>
-      expect(screen.getByTestId("status").textContent).toBe("ready"),
-    );
+    await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("ready"));
     expect(screen.getByTestId("count").textContent).toBe("3");
   });
 
