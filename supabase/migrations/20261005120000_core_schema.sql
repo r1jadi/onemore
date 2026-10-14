@@ -21,12 +21,36 @@ create extension if not exists citext with schema extensions;
 -- Enumerations
 -- ─────────────────────────────────────────────────────────────────────────────
 
-create type public.app_role as enum ('user', 'moderator', 'admin');
-create type public.game_status as enum ('draft', 'review', 'published', 'rejected', 'archived');
-create type public.like_target as enum ('game', 'comment');
-create type public.report_target as enum ('game', 'comment', 'profile');
-create type public.report_status as enum ('open', 'reviewing', 'resolved', 'dismissed');
-create type public.notification_kind as enum ('follow', 'comment', 'like', 'score', 'moderation', 'system');
+do $$
+begin
+  create type public.app_role as enum ('user', 'moderator', 'admin');
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  create type public.game_status as enum ('draft', 'review', 'published', 'rejected', 'archived');
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  create type public.like_target as enum ('game', 'comment');
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  create type public.report_target as enum ('game', 'comment', 'profile');
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  create type public.report_status as enum ('open', 'reviewing', 'resolved', 'dismissed');
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  create type public.notification_kind as enum ('follow', 'comment', 'like', 'score', 'moderation', 'system');
+exception when duplicate_object then null;
+end $$;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Identity

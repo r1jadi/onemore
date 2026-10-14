@@ -138,20 +138,24 @@ drop policy if exists game_sessions_insert_own on public.game_sessions;
 -- Start a run
 -- ─────────────────────────────────────────────────────────────────────────────
 
-create type public.session_start as (
-  outcome       text,
-  id            uuid,
-  game_slug     text,
-  rules_version text,
-  seed          bigint,
-  tile_count    integer,
-  started_at    timestamptz,
-  expires_at    timestamptz,
-  -- Ranked is the database's own answer to "can this run ever hold a score?"
-  -- (it is answered by the caller's token at insert time), not something a
-  -- service re-derives from the request it received.
-  ranked        boolean
-);
+do $$
+begin
+  create type public.session_start as (
+    outcome       text,
+    id            uuid,
+    game_slug     text,
+    rules_version text,
+    seed          bigint,
+    tile_count    integer,
+    started_at    timestamptz,
+    expires_at    timestamptz,
+    -- Ranked is the database's own answer to "can this run ever hold a score?"
+    -- (it is answered by the caller's token at insert time), not something a
+    -- service re-derives from the request it received.
+    ranked        boolean
+  );
+exception when duplicate_object then null;
+end $$;
 
 comment on type public.session_start is
   'The result of asking for a session. `outcome` is `started`, `not_playable` or `unsupported_runtime`.';
@@ -243,19 +247,23 @@ grant execute on function public.start_game_session(text, text, text) to anon, a
 -- Complete a run: replay, verify, then record
 -- ─────────────────────────────────────────────────────────────────────────────
 
-create type public.play_result as (
-  outcome         text,
-  session_id      uuid,
-  game_slug       text,
-  score           bigint,
-  cleared_columns integer,
-  tiles_placed    integer,
-  duration_ms     integer,
-  ranked          boolean,
-  recorded_at     timestamptz,
-  personal_best   bigint,
-  board_rank      bigint
-);
+do $$
+begin
+  create type public.play_result as (
+    outcome         text,
+    session_id      uuid,
+    game_slug       text,
+    score           bigint,
+    cleared_columns integer,
+    tiles_placed    integer,
+    duration_ms     integer,
+    ranked          boolean,
+    recorded_at     timestamptz,
+    personal_best   bigint,
+    board_rank      bigint
+  );
+exception when duplicate_object then null;
+end $$;
 
 comment on type public.play_result is
   'The outcome of completing a run. `outcome` is `recorded`, `duplicate`, `expired`, `abandoned`, `closed`, '
