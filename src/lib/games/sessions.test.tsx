@@ -7,6 +7,7 @@ import {
   completeRun,
   fetchLeaderboard,
   startSession,
+  useChainRun,
   useLeaderboard,
   useStack10Run,
   type PlaySession,
@@ -169,6 +170,33 @@ describe("startSession", () => {
     await startSession("stack-10");
 
     expect(requestHeaders(spy).get("Authorization")).toBe("Bearer access-token-1");
+  });
+
+  it("starts a Chain run under Chain rules when asked to", async () => {
+    const spy = mockFetch(() =>
+      jsonResponse(
+        sessionPayload({ gameSlug: "dont-break-the-chain", rulesVersion: "chain@1" }),
+        201,
+      ),
+    );
+
+    const session = await startSession("dont-break-the-chain", { rulesVersion: "chain@1" });
+
+    const body = requestBody(spy);
+    expect(body).toEqual({
+      gameSlug: "dont-break-the-chain",
+      rulesVersion: "chain@1",
+      client: "web/1.0",
+    });
+    expect(session.rulesVersion).toBe("chain@1");
+  });
+
+  it("keeps Stack 10's rules when no version is passed", async () => {
+    const spy = mockFetch(() => jsonResponse(sessionPayload(), 201));
+
+    await startSession("stack-10");
+
+    expect(requestBody(spy).rulesVersion).toBe("stack-10@1");
   });
 });
 
@@ -507,6 +535,161 @@ describe("useStack10Run", () => {
     });
     const index = spy.mock.calls.findIndex((call) => String(call[0]).includes("/complete"));
     expect(requestBody(spy, index).score).toBe(55);
+  });
+});
+
+// ── The Chain run lifecycle ─────────────────────────────────────────────────
+// Seed 1 deals 0,0,2,3,…: round one is [0], round two [0,0].
+
+/** A Chain session payload, per the contract. */
+function chainSessionPayload(overrides: Partial<PlaySession> = {}): PlaySession {
+  return {
+    id: "dddddddd-1111-4111-8111-dddddddddddd",
+    gameSlug: "dont-break-the-chain",
+    rulesVersion: "chain@1",
+    seed: "1",
+    tileCount: 55,
+    startedAt: "2026-10-13T12:00:00.000Z",
+    expiresAt: "2026-10-13T14:00:00.000Z",
+    ranked: true,
+    ...overrides,
+  };
+}
+
+/** A Chain result payload, per the contract. */
+function chainResultPayload(overrides: Partial<RunResult> = {}): RunResult {
+  return {
+    sessionId: "dddddddd-1111-4111-8111-dddddddddddd",
+    gameSlug: "dont-break-the-chain",
+    score: 3,
+    clearedColumns: 2,
+    tilesPlaced: 4,
+    durationMs: 3800,
+    ranked: true,
+    recordedAt: "2026-10-13T12:01:00.000Z",
+    personalBest: 3,
+    rank: 1,
+    duplicate: false,
+    ...overrides,
+  };
+}
+
+describe("useChainRun", () => {
+  it("starts a real run from the server's session, under Chain rules", async () => {
+    const spy = mockFetch(() => jsonResponse(chainSessionPayload(), 201));
+
+    const hook = renderHook(() => useChainRun("dont-break-the-chain"));
+    expect(hook.result.status).toBe("starting");
+
+    await waitFor(() => expect(hook.result.status).toBe("playing"));
+    if (hook.result.status !== "playing") throw new Error("run did not start");
+
+    // The session asked for Chain rules, and the board is the seed's sequence.
+    const body = requestBody(spy);
+    expect(body.rulesVersion).toBe("chain@1");
+    expect(hook.result.session.seed).toBe("1");
+    expect(hook.result.run.round).toBe(1);
+    expect(hook.result.run.score).toBe(0);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("plays without asking the server anything until the run ends", async () => {
+    const spy = mockFetch((url) =>
+      url.includes("/complete")
+        ? jsonResponse(chainResultPayload())
+        : jsonResponse(chainSessionPayload(), 201),
+    );
+
+    const hook = renderHook(() => useChainRun("dont-break-the-chain"));
+    await waitFor(() => expect(hook.result.status).toBe("playing"));
+
+    act(() => {
+      [0, 0, 0].forEach((pad) => hook.result.tap(pad));
+    });
+
+    if (hook.result.status !== "playing") throw new Error("run ended early");
+    expect(hook.result.run.taps).toEqual([0, 0, 0]);
+    expect(hook.result.run.score).toBe(3);
+    expect(hook.result.run.round).toBe(3);
+    // One request so far: the session. Scoring is not a per-move conversation.
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("submits the finished run once and shows the score the server derived", async () => {
+    const spy = mockFetch((url) =>
+      url.includes("/complete")
+        ? // The server's number, deliberately different from the client's 3, to
+          // prove the screen shows the verified score rather than its own arithmetic.
+          jsonResponse(chainResultPayload({ score: 7 }))
+        : jsonResponse(chainSessionPayload(), 201),
+    );
+
+    const hook = renderHook(() => useChainRun("dont-break-the-chain"));
+    await waitFor(() => expect(hook.result.status).toBe("playing"));
+
+    act(() => {
+      // Rounds one and two reproduced, then the tap that breaks the chain.
+      [0, 0, 0, 1].forEach((pad) => hook.result.tap(pad));
+    });
+
+    await waitFor(() => expect(hook.result.status).toBe("finished"));
+    if (hook.result.status !== "finished") throw new Error("run was not verified");
+
+    expect(hook.result.result.score).toBe(7);
+    expect(hook.result.run.score).toBe(3);
+    expect(hook.result.run.outcome).toBe("over");
+
+    const completeCalls = spy.mock.calls.filter((call) => String(call[0]).includes("/complete"));
+    expect(completeCalls).toHaveLength(1);
+    // And the body is the run: the tap list including the losing tap, the
+    // claimed score, the duration — and the session's pinned rules version.
+    const body = requestBody(
+      spy,
+      spy.mock.calls.findIndex((c) => String(c[0]).includes("/complete")),
+    );
+    expect(body.progress.actions).toEqual([0, 0, 0, 1]);
+    expect(body.progress.rulesVersion).toBe("chain@1");
+    expect(body.score).toBe(3);
+    expect(body.durationMs).toBeGreaterThan(0);
+  });
+
+  it("reports a failed verification as a failure, keeps the run, and retries the identical body", async () => {
+    let completions = 0;
+    const spy = mockFetch((url) => {
+      if (!url.includes("/complete")) return jsonResponse(chainSessionPayload(), 201);
+      completions += 1;
+      return completions === 1
+        ? errorResponse(503, "service_unavailable", "Play sessions are not available right now.")
+        : jsonResponse(chainResultPayload());
+    });
+
+    const hook = renderHook(() => useChainRun("dont-break-the-chain"));
+    await waitFor(() => expect(hook.result.status).toBe("playing"));
+
+    act(() => {
+      [0, 0, 0, 1].forEach((pad) => hook.result.tap(pad));
+    });
+
+    await waitFor(() => expect(hook.result.status).toBe("error"));
+    if (hook.result.status !== "error") throw new Error("expected a failure");
+    expect(hook.result.stage).toBe("submit");
+    // The run is not thrown away: it is unverified, not lost.
+    expect(hook.result.run?.taps).toEqual([0, 0, 0, 1]);
+
+    act(() => hook.result.retry());
+    await waitFor(() => expect(hook.result.status).toBe("finished"));
+
+    const sends = spy.mock.calls
+      .map((call, index) => ({ call, index }))
+      .filter(({ call }) => String(call[0]).includes("/complete"));
+    expect(sends).toHaveLength(2);
+    // Same run, same body: a retry cannot become a second, different score.
+    expect(requestBody(spy, sends[0].index)).toEqual(requestBody(spy, sends[1].index));
+    // And no new session was started to do it.
+    const sessionCalls = spy.mock.calls.filter((call) =>
+      String(call[0]).endsWith("/api/v1/sessions"),
+    );
+    expect(sessionCalls).toHaveLength(1);
   });
 });
 

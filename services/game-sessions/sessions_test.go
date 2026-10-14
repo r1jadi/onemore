@@ -472,6 +472,46 @@ func TestCompleteSessionRejectsAMalformedRequest(t *testing.T) {
 	}
 }
 
+func TestCompleteSessionVerifiesAChainRun(t *testing.T) {
+	backend := testBackend()
+	started := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+	backend.result = supabaseplay.Result{
+		Outcome:        "recorded",
+		SessionID:      sessionID,
+		GameSlug:       "dont-break-the-chain",
+		Score:          ptr(int64(3)),
+		ClearedColumns: ptr(2),
+		TilesPlaced:    ptr(4),
+		DurationMS:     ptr(12000),
+		Ranked:         ptr(true),
+		RecordedAt:     &started,
+		PersonalBest:   ptr(int64(3)),
+		Rank:           ptr(int64(1)),
+	}
+	server := testServer(t, backend)
+
+	// Rounds one and two reproduced, then the tap that broke the chain: three
+	// correct taps, two cleared rounds, four taps placed.
+	status, body := post(t, server,
+		"/api/v1/sessions/"+sessionID+"/complete",
+		`{"score":3,"durationMs":12000,"progress":{"rulesVersion":"chain@1","actions":[0,0,0,1]}}`, "")
+
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%#v)", status, body)
+	}
+	if body["score"] != float64(3) || body["gameSlug"] != "dont-break-the-chain" {
+		t.Fatalf("body = %#v, want the verified Chain run", body)
+	}
+	// The pinned version travels through untouched: it is what selects the
+	// verifier behind the handler.
+	if backend.lastRun.RulesVersion != "chain@1" {
+		t.Fatalf("rules version = %q, want the run's pinned chain@1", backend.lastRun.RulesVersion)
+	}
+	if len(backend.lastRun.Actions) != 4 {
+		t.Fatalf("actions = %v, want the submitted taps", backend.lastRun.Actions)
+	}
+}
+
 func TestCompleteSessionAnswersServiceUnavailableWithoutAClient(t *testing.T) {
 	server := testServer(t, nil)
 

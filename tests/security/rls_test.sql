@@ -960,6 +960,9 @@ reset role;
 -- ─────────────────────────────────────────────────────────────────────────────
 
 \set greedy_run 'array[0,0,1,0,0,0,2,2,2,3,0,0,0,0]'
+-- Seed 1's Chain line: symbols 0,0,2,3,0,0,2,2,0,1 dealt into ten rounds, 55
+-- taps, ten clears, 55 points. See the Chain section of docs/games/README.md.
+\set chain_perfect 'array[0,0,0,0,0,2,0,0,2,3,0,0,2,3,0,0,0,2,3,0,0,0,0,2,3,0,0,2,0,0,2,3,0,0,2,2,0,0,2,3,0,0,2,2,0,0,0,2,3,0,0,2,2,0,1]'
 
 -- A published, playable game — the only kind a run can be started for — plus one
 -- that stays unpublished, so the refusal path has a subject. The sessions below
@@ -972,18 +975,25 @@ reset role;
 --   tiles) = 20 + 15 + 20 = 55, then the 14th tile overflows column 0.
 \set runnable_game 'aaaaaaaa-4444-4444-8444-aaaaaaaaaaaa'
 \set secret_game   'aaaaaaaa-5555-4555-8555-aaaaaaaaaaaa'
+\set chain_game    'aaaaaaaa-6666-4666-8666-aaaaaaaaaaaa'
 \set pending_session   'cccccccc-1111-4111-8111-cccccccccccc'
 \set expired_session   'cccccccc-2222-4222-8222-cccccccccccc'
 \set abandoned_session 'cccccccc-3333-4333-8333-cccccccccccc'
 \set guest_session     'cccccccc-4444-4444-8444-cccccccccccc'
 \set old_rules_session 'cccccccc-5555-4555-8555-cccccccccccc'
 \set bob_session       'cccccccc-6666-4666-8666-cccccccccccc'
+\set chain_session       'dddddddd-1111-4111-8111-dddddddddddd'
+\set chain_loss_session  'dddddddd-2222-4222-8222-dddddddddddd'
+\set chain_guest_session 'dddddddd-4444-4444-8444-dddddddddddd'
+\set chain_old_session   'dddddddd-5555-4555-8555-dddddddddddd'
 
 insert into public.games (id, owner_id, slug, title, status, published_at, runtime, playable, category_id) values
   (:'runnable_game', :'alice', 'fixture-runnable', 'Fixture Runnable', 'published', now(), 'stack-10', true,
    (select id from public.categories where slug = 'puzzle')),
   (:'secret_game',   :'alice', 'fixture-secret',   'Fixture Secret',   'draft',     null, 'stack-10', true,
-   (select id from public.categories where slug = 'puzzle'));
+   (select id from public.categories where slug = 'puzzle')),
+  (:'chain_game',    :'alice', 'fixture-chain',    'Fixture Chain',    'published', now(), 'chain', true,
+   (select id from public.categories where slug = 'reaction'));
 
 -- Runs that have been open for five minutes, which is what makes a claimed
 -- 45-second duration credible: a run cannot have taken longer than the session
@@ -994,7 +1004,13 @@ insert into public.game_sessions (id, game_id, user_id, seed, rules_version, sta
   (:'abandoned_session', :'runnable_game', :'alice', 1, 'stack-10@1', now() - interval '5 minutes', now() + interval '2 hours', now()),
   (:'guest_session',     :'runnable_game', null,     1, 'stack-10@1', now() - interval '5 minutes', now() + interval '2 hours', null),
   (:'old_rules_session', :'runnable_game', :'alice', 1, 'stack-10@0', now() - interval '5 minutes', now() + interval '2 hours', null),
-  (:'bob_session',       :'runnable_game', :'bob',   1, 'stack-10@1', now() - interval '5 minutes', now() + interval '2 hours', null);
+  (:'bob_session',       :'runnable_game', :'bob',   1, 'stack-10@1', now() - interval '5 minutes', now() + interval '2 hours', null),
+  -- Chain fixtures under the same rules. Seed 1 deals symbols 0,0,2,3,0,0,2,2,0,1:
+  -- round 1 is [0], round 2 [0,0], round 3 [0,0,2], and so on to ten rounds.
+  (:'chain_session',       :'chain_game', :'alice', 1, 'chain@1', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'chain_loss_session',  :'chain_game', :'alice', 1, 'chain@1', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'chain_guest_session', :'chain_game', null,     1, 'chain@1', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'chain_old_session',   :'chain_game', :'alice', 1, 'chain@0', now() - interval '5 minutes', now() + interval '2 hours', null);
 
 select set_config('request.jwt.claims', '{"role":"anon"}', true);
 set local role anon;
@@ -1058,17 +1074,31 @@ select rls_test.visible(
   $$select 1 from public.games where slug = 'stack-10' and playable and runtime = 'stack-10'$$,
   1, 'the shipped Stack 10 game is playable and names its runtime'
 );
--- `fixture-%` is this suite's own playable game (the one the refusal paths need),
--- so the claim is about the catalogue: of the games this repository ships, only
--- Stack 10 is playable.
+-- `fixture-%` are this suite's own playable games (the ones the refusal paths
+-- need), so the claim is about the catalogue: of the games this repository
+-- ships, only the two with runtimes are playable.
 select rls_test.visible(
   $$select 1 from public.games
-     where slug <> 'stack-10' and slug not like 'fixture-%' and (playable or runtime is not null)$$,
-  0, 'no other shipped game is marked playable'
+     where slug not in ('stack-10', 'dont-break-the-chain') and slug not like 'fixture-%' and (playable or runtime is not null)$$,
+  0, 'no shipped game besides the two runtimes is marked playable'
 );
 select rls_test.says_field(
   $$public.start_game_session('stack-10', 'stack-10@1', 'test/1.0')$$,
   'game_slug', 'stack-10', 'the shipped game issues a run like any other'
+);
+-- The shipped Chain game, same shape: playable, naming its runtime, issuing a
+-- run whose move count is taps rather than tiles.
+select rls_test.visible(
+  $$select 1 from public.games where slug = 'dont-break-the-chain' and playable and runtime = 'chain'$$,
+  1, 'the shipped Chain game is playable and names its runtime'
+);
+select rls_test.says_field(
+  $$public.start_game_session('dont-break-the-chain', 'chain@1', 'test/1.0')$$,
+  'game_slug', 'dont-break-the-chain', 'the shipped Chain game issues a run like any other'
+);
+select rls_test.says_field(
+  $$public.start_game_session('dont-break-the-chain', 'chain@1', 'test/1.0')$$,
+  'tile_count', '55', 'a Chain session counts the taps of a perfect run'
 );
 select rls_test.says(
   $$public.start_game_session('fixture-runnable', 'stack-10@1', 'test/1.0')$$,
@@ -1077,6 +1107,20 @@ select rls_test.says(
 select rls_test.says_field(
   $$public.start_game_session('fixture-runnable', 'stack-10@1', 'test/1.0')$$,
   'tile_count', '60', 'the server tells the client how long the run is'
+);
+-- The gate is a pair: a Stack 10 game with Chain rules, and a Chain game with
+-- Stack 10 rules, are both versions no verifier owns.
+select rls_test.says(
+  $$public.start_game_session('fixture-runnable', 'chain@1', 'test/1.0')$$,
+  'unsupported_runtime', 'a Stack 10 game cannot start a Chain run'
+);
+select rls_test.says(
+  $$public.start_game_session('fixture-chain', 'stack-10@1', 'test/1.0')$$,
+  'unsupported_runtime', 'a Chain game cannot start a Stack 10 run'
+);
+select rls_test.says(
+  $$public.start_game_session('fixture-chain', 'chain@1', 'test/1.0')$$,
+  'started', 'a guest can start a Chain run'
 );
 
 -- A guest run completes and is verified, and stays unranked: there is no score
@@ -1092,6 +1136,19 @@ select rls_test.says(
 select rls_test.says_field(
   format($$public.complete_stack10_run('cccccccc-4444-4444-8444-cccccccccccc'::uuid, %s, 55, 45000)$$, :'greedy_run'),
   'ranked', 'false', 'a guest run is never ranked'
+);
+-- A guest Chain run completes the same way: verified, recorded, unranked.
+select rls_test.says(
+  format($$public.complete_chain_run('dddddddd-4444-4444-8444-dddddddddddd'::uuid, %s, 55, 45000)$$, :'chain_perfect'),
+  'recorded', 'a guest Chain run is replayed and recorded'
+);
+select rls_test.says(
+  format($$public.complete_chain_run('dddddddd-4444-4444-8444-dddddddddddd'::uuid, %s, 55, 45000)$$, :'chain_perfect'),
+  'duplicate', 'a repeated guest Chain submission is recognised, not recorded again'
+);
+select rls_test.says_field(
+  format($$public.complete_chain_run('dddddddd-4444-4444-8444-dddddddddddd'::uuid, %s, 55, 45000)$$, :'chain_perfect'),
+  'ranked', 'false', 'a guest Chain run is never ranked'
 );
 
 reset role;
@@ -1185,6 +1242,77 @@ select rls_test.ok(
   'your standing on the board is your recorded best at its real rank'
 );
 
+-- ── Chain: the same properties, replayed against a growing sequence ──
+--
+-- Seed 1 deals 0,0,2,3,0,0,2,2,0,1: round 1 is [0], round 2 [0,0], round 3
+-- [0,0,2], and so on to ten rounds. The perfect line below is those 55 taps
+-- for 55 points and ten cleared rounds; the loss line reproduces rounds one
+-- and two and then breaks the chain for 3 points and two cleared rounds. The
+-- expected numbers are arithmetic from the seed, not values read back.
+select rls_test.says(
+  format($$public.complete_chain_run('dddddddd-1111-4111-8111-dddddddddddd'::uuid, %s, 55, 45000)$$, :'chain_perfect'),
+  'recorded', 'a perfect Chain run is recorded'
+);
+select rls_test.says_field(
+  format($$public.complete_chain_run('dddddddd-1111-4111-8111-dddddddddddd'::uuid, %s, 55, 45000)$$, :'chain_perfect'),
+  'score', '55', 'the replay counts every correct tap'
+);
+select rls_test.says(
+  format($$public.complete_chain_run('dddddddd-1111-4111-8111-dddddddddddd'::uuid, %s, 55, 45000)$$, :'chain_perfect'),
+  'duplicate', 'a retry of the same Chain run is safe to repeat'
+);
+select rls_test.says(
+  $$public.complete_chain_run('dddddddd-1111-4111-8111-dddddddddddd'::uuid, array[0], 55, 45000)$$,
+  'closed', 'a closed Chain session does not accept a different run'
+);
+-- Refusals, all leaving the loss fixture open for the run that follows.
+select rls_test.says(
+  format($$public.complete_chain_run('dddddddd-2222-4222-8222-dddddddddddd'::uuid, %s, 999, 45000)$$, :'chain_perfect'),
+  'score_mismatch', 'a Chain score the replay does not produce is refused'
+);
+select rls_test.says_field(
+  format($$public.complete_chain_run('dddddddd-2222-4222-8222-dddddddddddd'::uuid, %s, 999, 45000)$$, :'chain_perfect'),
+  'score', '55', 'the Chain replay is the score, and it is reported back'
+);
+select rls_test.says(
+  $$public.complete_chain_run('dddddddd-2222-4222-8222-dddddddddddd'::uuid, array[0,0,0], 3, 45000)$$,
+  'invalid_actions', 'a Chain run that stops before the tenth round is cleared is partial'
+);
+select rls_test.says(
+  $$public.complete_chain_run('dddddddd-2222-4222-8222-dddddddddddd'::uuid, array[0,0,0,1,0], 3, 45000)$$,
+  'invalid_actions', 'taps after the tap that broke the chain are impossible play'
+);
+select rls_test.says(
+  $$public.complete_chain_run('dddddddd-2222-4222-8222-dddddddddddd'::uuid, array[4], 0, 45000)$$,
+  'invalid_actions', 'a pad that does not exist is impossible play'
+);
+select rls_test.raises(
+  $$select public.complete_chain_run('dddddddd-2222-4222-8222-dddddddddddd'::uuid, array[null]::integer[], 0, 45000)$$,
+  '22023', 'a ragged Chain action list is a request error, not a scored run'
+);
+select rls_test.says(
+  $$public.complete_chain_run('dddddddd-5555-4555-8555-dddddddddddd'::uuid, array[0], 0, 45000)$$,
+  'wrong_rules', 'a Chain session pinned to other rules is refused by its own verifier'
+);
+-- The loss is a recorded run, not a discarded one: three correct taps, two
+-- cleared rounds, four taps placed including the tap that broke the chain.
+select rls_test.says(
+  $$public.complete_chain_run('dddddddd-2222-4222-8222-dddddddddddd'::uuid, array[0,0,0,1], 3, 45000)$$,
+  'recorded', 'a broken chain is recorded with the taps it earned'
+);
+select rls_test.says_field(
+  $$public.complete_chain_run('dddddddd-2222-4222-8222-dddddddddddd'::uuid, array[0,0,0,1], 3, 45000)$$,
+  'score', '3', 'a broken chain keeps only its correct taps'
+);
+select rls_test.ok(
+  (select verified_score = 3 from public.game_sessions where id = 'dddddddd-2222-4222-8222-dddddddddddd'),
+  'a player can read the verified score on their own Chain session'
+);
+select rls_test.ok(
+  (select rank = 1 and score = 55 from public.game_standing('fixture-chain', '11111111-1111-4111-8111-111111111111', null)),
+  'your Chain standing is your recorded best at its real rank'
+);
+
 -- Starting replaces your own open run, so a player cannot accumulate runs and
 -- pick one to submit later. This runs after the completion tests on purpose:
 -- replacing the open run is exactly what it does, and the fixtures above are
@@ -1228,6 +1356,15 @@ select rls_test.ok(
 select rls_test.visible($$select * from public.game_standing('fixture-runnable', '22222222-2222-4222-8222-222222222222', null)$$, 0,
   'a player with no recorded score has no standing'
 );
+-- The Chain board is the same shape: one ranked player, the verified 55 on
+-- top, two scored runs behind it (the perfect run and the broken chain).
+select rls_test.visible($$select * from public.game_leaderboard('fixture-chain', null, 10, 0)$$, 1,
+  'the Chain board lists exactly the players with a recorded score'
+);
+select rls_test.ok(
+  (select score = 55 and rank = 1 and plays = 2 from public.game_leaderboard('fixture-chain', null, 10, 0)),
+  'the top of the Chain board is the verified score, at rank one, with two scored runs'
+);
 
 reset role;
 
@@ -1246,6 +1383,19 @@ select rls_test.ok(
   rls_test.count_rows($$select 1 from public.scores where session_id = 'cccccccc-1111-4111-8111-cccccccccccc'$$) = 1,
   'a retried completion leaves exactly one score for the session'
 );
+select rls_test.ok(
+  (select verified_score = 55 and verified_digest is not null and completed_at is not null
+     from public.game_sessions where id = 'dddddddd-4444-4444-8444-dddddddddddd'),
+  'a guest Chain run closes with a verified score on the session'
+);
+select rls_test.ok(
+  rls_test.count_rows($$select 1 from public.scores where session_id = 'dddddddd-4444-4444-8444-dddddddddddd'$$) = 0,
+  'a guest Chain run records no ranked score'
+);
+select rls_test.ok(
+  rls_test.count_rows($$select 1 from public.scores where session_id = 'dddddddd-2222-4222-8222-dddddddddddd'$$) = 1,
+  'a broken chain leaves exactly one score for the session'
+);
 
 -- Plays are completed sessions, counted by the database: one ranked run plus one
 -- guest run, one distinct signed-in player, and the best recorded score.
@@ -1256,6 +1406,12 @@ select rls_test.ok(
 select rls_test.ok(
   rls_test.count_rows($$select 1 from public.game_stats where slug = 'fixture-secret'$$) = 0,
   'an unpublished game is not in the public aggregate at all'
+);
+-- Chain activity counts the same way: three completed runs (two ranked, one
+-- guest), one distinct signed-in player, and the best recorded score.
+select rls_test.ok(
+  (select plays = 3 and players = 1 and best_score = 55 from public.game_stats where slug = 'fixture-chain'),
+  'the public activity counts Chain runs, players and the best score'
 );
 
 -- ─────────────────────────────────────────────────────────────────────────────

@@ -816,9 +816,10 @@ paths:
                     actions:
                       type: array
                       description: |
-                        The run, as the ordered list of columns a tile was placed
-                        in. This is what is replayed; the rules for how a tile is
-                        generated and what a move does belong to the game (see
+                        The run, as the ordered list of board positions the run's
+                        moves addressed: a column for Stack 10, a pad for Chain.
+                        This is what is replayed; the rules for how a move is
+                        generated and what it does belong to the game (see
                         `docs/games`).
                       maxItems: 60
                       items: { type: integer, minimum: 0, maximum: 3 }
@@ -2025,11 +2026,11 @@ components:
         seed:
           type: string
           pattern: "^-?[0-9]{1,19}$"
-          description: The run's seed, as a decimal string. The game's tile sequence is a function of it.
+          description: The run's seed, as a decimal string. The game's move sequence is a function of it.
         tileCount:
           type: integer
           minimum: 1
-          description: How many tiles the run has. The client does not choose it.
+          description: How many moves a complete run holds: tiles for Stack 10, taps for Chain. The client does not choose it.
         startedAt: { type: string, format: date-time }
         expiresAt:
           type: string

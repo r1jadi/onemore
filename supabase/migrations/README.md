@@ -17,6 +17,8 @@ The schema's only history. Applied in filename order by the Supabase CLI and by
 | `20261013130300_blocked_users.sql`                 | `blocked_users` with owner-only RLS and a no-self-block constraint. Apply before the build that reads the block list; without it the list errors instead of inventing entries.                                                                  |
 | `20261013130400_follow_notifications.sql`          | `notify_follow()` trigger: one genuine `follow` notification per follow insert, recipient derived from the row. Apply with the social backend; retries that conflict create no duplicates.                                                      |
 | `20261013130500_following_feed.sql`                | `following_feed()` RPC plus `games_following_idx`: published creator games of followed accounts in catalogue order, official ownerless games excluded. Powers `GET /api/v1/games/following`; apply before the games deployment that serves it. |
+| `20261014120000_chain_sessions.sql`                | The Chain verifier (`complete_chain_run`), its rules constants, and the start gate learning Chain's (runtime, rules version) pair. Nothing user-visible changes yet. |
+| `20261014120100_chain_playable.sql`                | Flips Don't Break the Chain to `playable` and names its runtime. Apply **last**, after the play schema and the deployment carrying the runtime are live. |
 
 Two migrations exist for one feature — the play schema and the catalogue flip — because
 the flip is a claim about shipped code. Applying it before the service that answers

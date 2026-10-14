@@ -18,11 +18,13 @@ is the authority for the shapes; the rules themselves are in
 
 This is the least obvious thing about the service, so it is worth stating plainly.
 
-The rules live in the database, in
-`public.complete_stack10_run` ([migration](../../supabase/migrations/20261013120000_play_sessions.sql)).
-That function replays the submitted action list from the session's seed, derives the
-score, compares it with the claim, and only then closes the session and writes the
-score row. This service:
+The rules live in the database, in `public.complete_stack10_run` and
+`public.complete_chain_run` ([migration](../../supabase/migrations/20261013120000_play_sessions.sql)
+and [`20261014120000_chain_sessions.sql`](../../supabase/migrations/20261014120000_chain_sessions.sql)).
+The pinned rules version selects which one replays a submission. Each function
+replays the submitted action list from the session's seed, derives the
+score, compares it with the claim, and only then closes the session and writes
+the score row. This service:
 
 - validates the request's *shape* — a slug, a rules version, an action list within
   the board, a positive duration — so a malformed request is a `400` that names the

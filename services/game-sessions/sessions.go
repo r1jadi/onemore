@@ -4,9 +4,9 @@
 // Three decisions shape everything here.
 //
 //   - **The database is the authority, and this service holds no master key.**
-//     `public.start_game_session` picks the seed, and
-//     `public.complete_stack10_run` replays the submitted actions, derives the
-//     score and writes the ledger. This service validates the request shape,
+//     `public.start_game_session` picks the seed, and the verifier for the run's
+//     pinned rules (`complete_stack10_run`, `complete_chain_run`) replays the
+//     submitted actions, derives the score and writes the ledger. This service validates the request shape,
 //     maps the verifier's outcome onto an HTTP answer, and never sees a score it
 //     can change. That is why there is no service_role key anywhere in the
 //     configuration: a credential that bypasses every policy is a much larger
@@ -47,10 +47,13 @@ const Name = "game-sessions"
 const (
 	// maxBodyBytes bounds a request body: a run is at most a few hundred bytes.
 	maxBodyBytes = 8 * 1024
-	// maxActions mirrors the number of tiles in a run. The verifier enforces it
-	// too; this only keeps an absurd body from reaching the database at all.
+	// maxActions bounds the moves in a run: sixty tiles for Stack 10,
+	// fifty-five taps for a perfect Chain run. The verifier enforces its own
+	// game's count too; this only keeps an absurd body from reaching the
+	// database at all.
 	maxActions = 60
-	// columns is the board width a column index has to address.
+	// columns is the bound a move has to fit: a column for Stack 10, a pad for
+	// Chain. Both games address board positions 0 to 3.
 	columns = 4
 )
 
@@ -279,12 +282,12 @@ func (s *service) completeSession(w http.ResponseWriter, r *http.Request) {
 			apierr.Detail{Field: "progress.actions", Rule: "length"}))
 		return
 	}
-	// A column index outside the board is malformed input rather than a bad run;
+	// A move outside the board is malformed input rather than a bad run;
 	// whether the *sequence* is possible is the verifier's call, not this one's.
 	for _, action := range actions {
 		if action < 0 || action >= columns {
 			httpx.WriteError(w, r, httpx.NewError(httpx.CodeBadRequest,
-				"Every action must be a column index from 0 to 3.",
+				"Every action must be a board position from 0 to 3.",
 				apierr.Detail{Field: "progress.actions", Rule: "range"}))
 			return
 		}

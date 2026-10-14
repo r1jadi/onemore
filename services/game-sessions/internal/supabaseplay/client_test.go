@@ -196,6 +196,44 @@ func TestCompleteRunPostsTheRun(t *testing.T) {
 	}
 }
 
+func TestCompleteRunRoutesChainRulesToChainVerifier(t *testing.T) {
+	rec := newRecorder(t, http.StatusOK, resultRow)
+
+	if _, err := rec.client(t).CompleteRun(context.Background(), CompleteRequest{
+		SessionID:    "cccccccc-1111-4111-8111-cccccccccccc",
+		RulesVersion: "chain@1",
+		Actions:      []int32{0, 0, 0},
+		Score:        3,
+		DurationMS:   12000,
+	}); err != nil {
+		t.Fatalf("CompleteRun: %v", err)
+	}
+
+	// The pinned version selects the replay: a Chain run is verified by
+	// complete_chain_run, not by Stack 10's function.
+	if rec.path != "/rest/v1/rpc/complete_chain_run" {
+		t.Fatalf("path = %s, want the Chain verifier function", rec.path)
+	}
+}
+
+func TestCompleteRunKeepsStack10RulesOnStackVerifier(t *testing.T) {
+	rec := newRecorder(t, http.StatusOK, resultRow)
+
+	if _, err := rec.client(t).CompleteRun(context.Background(), CompleteRequest{
+		SessionID:    "cccccccc-1111-4111-8111-cccccccccccc",
+		RulesVersion: "stack-10@1",
+		Actions:      []int32{0, 0, 1, 0},
+		Score:        55,
+		DurationMS:   45000,
+	}); err != nil {
+		t.Fatalf("CompleteRun: %v", err)
+	}
+
+	if rec.path != "/rest/v1/rpc/complete_stack10_run" {
+		t.Fatalf("path = %s, want the Stack 10 verifier function", rec.path)
+	}
+}
+
 func TestCompleteRunSendsAnEmptyArrayRatherThanNull(t *testing.T) {
 	rec := newRecorder(t, http.StatusOK, `{"outcome":"invalid_actions"}`)
 

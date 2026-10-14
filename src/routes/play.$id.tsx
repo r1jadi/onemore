@@ -1,8 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Clock, X } from "lucide-react";
+import { ChainRuntime } from "@/components/game/ChainRuntime";
 import { Stack10Runtime } from "@/components/game/Stack10Runtime";
 import { Button } from "@/components/ui/button";
 import { titleFromSlug, useGame } from "@/lib/games/catalog";
+import { CHAIN_RUNTIME } from "@/lib/games/chain";
 import { STACK10_RUNTIME } from "@/lib/games/stack10";
 
 export const Route = createFileRoute("/play/$id")({
@@ -29,15 +31,21 @@ export const Route = createFileRoute("/play/$id")({
  * catalogue says the game has one.
  *
  * The runtime is chosen by the game's `runtime` identifier — `stack-10` plays Stack
- * 10, and anything else gets the honest "no runtime yet" screen rather than a board
- * that does not follow that game's rules. Six of the seven catalogue games are in
- * that position, which is why this branch is a feature and not a leftover.
+ * 10, `chain` plays Chain, and anything else gets the honest "no runtime yet"
+ * screen rather than a board that does not follow that game's rules. Five of the
+ * seven catalogue games are in that position, which is why this branch is a
+ * feature and not a leftover.
  */
 function PlayScreen() {
   const { id } = Route.useParams();
   const state = useGame(id);
   const title = state.status === "ready" ? state.game.title : titleFromSlug(id);
   const playable = state.status === "ready" && state.game.playable && !!state.game.runtime;
+  // A runtime this bundle ships: anything else renders the honest
+  // "no runtime yet" screen below rather than a board with foreign rules.
+  const hasShippedRuntime =
+    state.status === "ready" &&
+    (state.game.runtime === STACK10_RUNTIME || state.game.runtime === CHAIN_RUNTIME);
 
   return (
     <div className="fixed inset-0 flex flex-col bg-background">
@@ -62,7 +70,11 @@ function PlayScreen() {
         <Stack10Runtime key={state.game.slug} slug={state.game.slug} title={state.game.title} />
       )}
 
-      {state.status === "ready" && !(state.game.runtime === STACK10_RUNTIME && playable) && (
+      {state.status === "ready" && state.game.runtime === CHAIN_RUNTIME && playable && (
+        <ChainRuntime key={state.game.slug} slug={state.game.slug} title={state.game.title} />
+      )}
+
+      {state.status === "ready" && !(hasShippedRuntime && playable) && (
         <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
           <div className="flex size-12 items-center justify-center rounded-full bg-surface-2">
             <Clock className="size-5 text-muted-foreground" />
