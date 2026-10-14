@@ -27,7 +27,7 @@ export const settingsGroups = [
         desc: "Two-step verification, sessions",
         icon: Shield,
       },
-      { slug: "connected", title: "Connected accounts", desc: "Apple, Google", icon: Link2 },
+      { slug: "connected", title: "Connected accounts", desc: "Google", icon: Link2 },
     ],
   },
   {

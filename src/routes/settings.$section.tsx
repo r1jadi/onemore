@@ -636,13 +636,6 @@ function ConnectedSection({ signedIn }: { signedIn: boolean }) {
   return (
     <Group>
       <Row
-        label="Apple"
-        value="Not available"
-        action={
-          <span className="text-xs text-muted-foreground">Apple OAuth is not configured</span>
-        }
-      />
-      <Row
         label="Google"
         value={googleConnected ? "Connected" : "Not connected"}
         action={
@@ -653,8 +646,8 @@ function ConnectedSection({ signedIn }: { signedIn: boolean }) {
               size="sm"
               variant="secondary"
               onClick={() => {
-                import("@/lib/auth/session").then(({ googleAuthorizeUrl }) => {
-                  window.location.href = googleAuthorizeUrl("/settings/connected");
+                void import("@/lib/auth/session").then(async ({ googleAuthorizeUrl }) => {
+                  window.location.href = await googleAuthorizeUrl("/settings/connected");
                 });
               }}
             >

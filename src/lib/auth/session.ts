@@ -235,8 +235,16 @@ export async function adoptSupabaseTokens(input: {
   return { session: view, tokens: tokens as Tokens };
 }
 
-/** The Supabase OAuth entry point for Google sign-in/up (PKCE, no secrets). */
-export function googleAuthorizeUrl(next = "/"): string {
+/**
+ * The Supabase OAuth entry point for Google sign-in/up (PKCE, no secrets).
+ *
+ * Async because the S256 code challenge must be derived before the redirect:
+ * without `code_challenge` Supabase falls back to the implicit flow instead of
+ * returning the `?code=` the callback exchanges. The `apikey` query parameter
+ * is required too — a browser redirect carries no headers, and the gateway
+ * rejects authorize calls without it.
+ */
+export async function googleAuthorizeUrl(next = "/"): Promise<string> {
   const { url, publishableKey } = supabaseAuthBase();
   const redirectTo = new URL("/auth/callback", window.location.origin);
   redirectTo.searchParams.set("next", next);
@@ -249,18 +257,14 @@ export function googleAuthorizeUrl(next = "/"): string {
     // Storage may be unavailable (private mode); the callback then reports a
     // clear error instead of silently failing.
   }
-  void codeChallenge(verifier).then((challenge) => {
-    try {
-      sessionStorage.setItem("onemore-oauth-challenge", challenge);
-    } catch {
-      // Ignored: the verifier is what the exchange needs.
-    }
-  });
+  const challenge = await codeChallenge(verifier);
   const authorize = new URL(`${url}/auth/v1/authorize`);
   authorize.searchParams.set("provider", "google");
   authorize.searchParams.set("redirect_to", redirectTo.toString());
-  // `apikey` is required by the Supabase Auth gateway for authorize calls.
-  void publishableKey;
+  // The publishable key is public by design (it ships in the web bundle).
+  authorize.searchParams.set("apikey", publishableKey);
+  authorize.searchParams.set("code_challenge", challenge);
+  authorize.searchParams.set("code_challenge_method", "s256");
   return authorize.toString();
 }
 
@@ -328,7 +332,6 @@ export async function exchangeOAuthCode(code: string): Promise<AuthSession> {
   }
   try {
     sessionStorage.removeItem("onemore-oauth-verifier");
-    sessionStorage.removeItem("onemore-oauth-challenge");
   } catch {
     // Best effort cleanup only.
   }

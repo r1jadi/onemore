@@ -8,9 +8,11 @@ the frontend.
 
 - Entry: `Continue with Google` on login/signup and `Connect` in
   Settings → Connected accounts redirect to
-  `<SUPABASE>/auth/v1/authorize?provider=google&redirect_to=<SITE>/auth/callback?next=…`
+  `<SUPABASE>/auth/v1/authorize?provider=google&redirect_to=<SITE>/auth/callback?next=…&apikey=<PUBLISHABLE>&code_challenge=…&code_challenge_method=s256`
   with a fresh PKCE verifier in `sessionStorage` (`googleAuthorizeUrl` in
-  `src/lib/auth/session.ts`).
+  `src/lib/auth/session.ts`). The `apikey` is required because a redirect
+  carries no headers; the S256 challenge is what makes Supabase return a
+  `?code=` instead of an implicit fragment.
 - Callback: `/auth/callback` exchanges `?code` via
   `POST <SUPABASE>/auth/v1/token?grant_type=pkce` with the stored verifier,
   then verifies the tokens through `POST /api/v1/auth/session` before adopting
@@ -21,8 +23,7 @@ the frontend.
   address it does not own.
 - Connected state: Settings → Connected accounts reads live identities from
   `GET <SUPABASE>/auth/v1/user` (`fetchLinkedProviders`). Google shows
-  connected only when the provider is linked; Apple shows unavailable until a
-  genuine Apple flow is configured.
+  connected only when the provider is linked.
 
 ## Manual setup (owner)
 
@@ -55,9 +56,8 @@ the frontend.
 
 ## Not done
 
-- Apple OAuth is intentionally not configured; the UI says unavailable and the
-  login button explains it. Do not mark Apple connected until a real flow and
-  credentials exist.
+- Apple sign-in is removed; there is no Apple button, row, or flow left to
+  configure.
 - Production Google login must not be claimed as enabled until the steps above
   are completed and verified in production (local tests only prove the code
   paths).
