@@ -128,6 +128,11 @@ async function waitForTurn(round: number) {
       timeout: 8000,
     },
   );
+  // The board installs its keydown listener in an effect. The turn text is in
+  // the DOM one commit before that effect runs, so a finding query can resume
+  // in the gap and a key sent then is dropped. Flush the pending effects so
+  // the turn the test acts on is the turn the board is actually listening to.
+  await act(async () => {});
 }
 
 afterEach(() => {

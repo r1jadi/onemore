@@ -27,6 +27,12 @@ the frontend.
   `PATCH /api/v1/users/me`, the marker through a conditional Data API write
   with the caller's own token (`src/lib/users/registration.ts`) — so a
   resumed or repeated completion is a no-op, never a duplicate account.
+- Accounts that predate the completion flow (created before
+  `2026-10-17 17:11:09 UTC`) never read as unfinished even when the marker is
+  null: the auth service derives that from `auth.users.created_at`, which the
+  caller cannot influence, and repairs the marker on the first session read
+  with the caller's own token. An existing Google identity therefore signs in
+  directly, whether or not the grandfathering migration was applied.
 - Profiles: OAuth users get a row from the existing `handle_new_user` trigger;
   no email-based auto-linking is performed, so Google cannot take over an
   address it does not own.

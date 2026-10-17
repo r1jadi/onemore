@@ -69,6 +69,20 @@ const (
 	maxEmailBytes = 254
 )
 
+// signupCompletionCutoff is the instant the registration-completion flow
+// shipped (commit 5a3ef5e). Accounts created before it were made by the old
+// flow, which had no completion step: their profile has no `onboarded_at`
+// marker because nothing wrote one, and it must be read as registered rather
+// than as a new account that still has onboarding to finish. Accounts created
+// after it are the only ones that can legitimately be waiting for completion.
+//
+// This is the fallback for an account whose marker is null. A completed account
+// always answers from the marker itself. The value matches the grandfathering
+// migration, so applying that migration or reading the account's creation time
+// produces the same answer; the code path does not depend on the migration
+// having run.
+var signupCompletionCutoff = time.Date(2026, 10, 17, 17, 11, 9, 0, time.UTC)
+
 // Backend is the Supabase surface the service needs.
 //
 // It is an interface for two reasons: the handlers are tested without a network,
@@ -80,8 +94,13 @@ type Backend interface {
 	SignInWithPassword(ctx context.Context, email, password string) (supabaseauth.Result, error)
 	RefreshSession(ctx context.Context, refreshToken string) (supabaseauth.Result, error)
 	SignOut(ctx context.Context, accessToken string) error
-	// Onboarded reads the caller's own profile row with the caller's token.
-	Onboarded(ctx context.Context, accessToken, userID string) (bool, error)
+	// Onboarding reads the caller's own profile row with the caller's token.
+	Onboarding(ctx context.Context, accessToken, userID string) (supabaseauth.Onboarding, error)
+	// User reads the caller's Supabase Auth record with the caller's token. It is
+	// used only to learn when the account was created, never as authorization.
+	User(ctx context.Context, accessToken string) (supabaseauth.User, error)
+	// MarkOnboarded repairs a legacy account's missing marker. Best effort.
+	MarkOnboarded(ctx context.Context, accessToken, userID string, at time.Time) error
 }
 
 // sessionView is the application's view of a session. It carries no token: it is
@@ -345,7 +364,7 @@ func (s *service) viewFor(ctx context.Context, id identity.Identity, token strin
 		UserID:    id.UserID,
 		Role:      id.Role,
 		Email:     id.Email,
-		Onboarded: s.onboarded(ctx, token, id.UserID),
+		Onboarded: s.onboarded(ctx, token, id.UserID, nil),
 		ExpiresAt: timePointer(id.ExpiresAt),
 	}
 }
@@ -380,25 +399,65 @@ func (s *service) newAuthSession(ctx context.Context, result supabaseauth.Result
 		}
 		// Only readable with a token. With none — email confirmation pending — the
 		// answer is left out rather than guessed.
-		payload.Session.Onboarded = s.onboarded(ctx, result.Session.AccessToken, payload.Session.UserID)
+		payload.Session.Onboarded = s.onboarded(ctx, result.Session.AccessToken, payload.Session.UserID, result.User)
 	}
 
 	return payload
 }
 
-// onboarded reads the caller's onboarding state with their own token. A failure
-// yields no answer instead of a false one: the session is still valid, only this
-// single field is unknown, and "not onboarded" would be acted on.
-func (s *service) onboarded(ctx context.Context, token, userID string) *bool {
+// onboarded answers "did this account finish registering?" using the caller's
+// own data. A completed marker is enough. A null marker is not: before the
+// completion flow shipped nothing wrote one, so an existing account and a new
+// Google account both look null. The account's Supabase `created_at` separates
+// them — it cannot be supplied or altered by the caller — and a legacy account
+// is marked once so later reads use the marker.
+//
+// A failure yields no answer instead of a false one: the session is still valid,
+// only this single field is unknown, and "not onboarded" would be acted on by
+// sending the account back through sign-up.
+func (s *service) onboarded(ctx context.Context, token, userID string, known *supabaseauth.User) *bool {
 	if s.backend == nil || token == "" || userID == "" {
 		return nil
 	}
-	value, err := s.backend.Onboarded(ctx, token, userID)
+	state, err := s.backend.Onboarding(ctx, token, userID)
 	if err != nil {
 		s.logger.WarnContext(ctx, "could not read onboarding state", slog.Any("error", err))
 		return nil
 	}
-	return &value
+	if state.CompletedAt != nil {
+		onboarded := true
+		return &onboarded
+	}
+
+	createdAt := time.Time{}
+	if known != nil {
+		createdAt = known.CreatedAt
+	}
+	if createdAt.IsZero() {
+		user, err := s.backend.User(ctx, token)
+		if err != nil {
+			s.logger.WarnContext(ctx, "could not read the account creation time", slog.Any("error", err))
+			return nil
+		}
+		createdAt = user.CreatedAt
+	}
+	if createdAt.IsZero() {
+		return nil
+	}
+
+	// An account made before the completion flow existed is already registered:
+	// its null marker is the absence of a write, not an unfinished signup.
+	if createdAt.Before(signupCompletionCutoff) {
+		if err := s.backend.MarkOnboarded(ctx, token, userID, createdAt); err != nil {
+			// The answer is still correct without the repair; it is only the
+			// next read that will have to derive it again.
+			s.logger.DebugContext(ctx, "could not repair a legacy onboarding marker", slog.Any("error", err))
+		}
+		onboarded := true
+		return &onboarded
+	}
+	onboarded := false
+	return &onboarded
 }
 
 // roleFromUser reads the platform role from the app metadata Supabase issued.

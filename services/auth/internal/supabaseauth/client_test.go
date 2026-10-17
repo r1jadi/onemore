@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/r1jadi/onemore/packages/go/platform/config"
 )
@@ -377,22 +378,25 @@ func TestSignOutSendsTheCallersTokenAndReportsRealFailures(t *testing.T) {
 	}
 }
 
-func TestOnboardedReadsTheCallersOwnRow(t *testing.T) {
+func TestOnboardingReadsTheCallersOwnRow(t *testing.T) {
 	client, requests := stubServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(t, w, 200, `[{"onboarded_at":"2026-10-02T10:00:00Z"}]`)
 	})
 
-	onboarded, err := client.Onboarded(context.Background(), "the-callers-token", "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f")
+	state, err := client.Onboarding(context.Background(), "the-callers-token", "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f")
 	if err != nil {
 		t.Fatalf("profile read failed: %v", err)
 	}
-	if !onboarded {
-		t.Error("onboarded = false, want true")
+	if state.CompletedAt == nil {
+		t.Fatal("CompletedAt = nil, want the marker the row carries")
+	}
+	if want := time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC); !state.CompletedAt.Equal(want) {
+		t.Errorf("CompletedAt = %s, want %s", state.CompletedAt, want)
 	}
 
 	sent := (*requests)[0]
-	if sent.path != "/rest/v1/profiles" {
-		t.Errorf("path = %s, want /rest/v1/profiles", sent.path)
+	if sent.method != http.MethodGet || sent.path != "/rest/v1/profiles" {
+		t.Errorf("request was %s %s, want GET /rest/v1/profiles", sent.method, sent.path)
 	}
 	query := sent.query
 	for _, expected := range []string{"select=onboarded_at", "id=eq.3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f", "limit=1"} {
@@ -409,7 +413,7 @@ func TestOnboardedReadsTheCallersOwnRow(t *testing.T) {
 	}
 }
 
-func TestOnboardedTreatsNoRowAsUnknownNotAsNotOnboarded(t *testing.T) {
+func TestOnboardingTreatsNoRowAsUnknownNotAsNotOnboarded(t *testing.T) {
 	// The trigger creates the profile row at signup, so a missing row is a data
 	// gap — an answer nobody gave, not "not onboarded". Reporting false would
 	// send that account through sign-up again, where the completion write has
@@ -419,12 +423,12 @@ func TestOnboardedTreatsNoRowAsUnknownNotAsNotOnboarded(t *testing.T) {
 		writeJSON(t, w, 200, `[]`)
 	})
 
-	if _, err := client.Onboarded(context.Background(), "a-token", "a-user-id"); err == nil {
+	if _, err := client.Onboarding(context.Background(), "a-token", "a-user-id"); err == nil {
 		t.Fatal("a missing profile row was reported as a definite onboarding state")
 	}
 }
 
-func TestOnboardedTreatsNullAndBlankAsNotOnboarded(t *testing.T) {
+func TestOnboardingTreatsNullAndBlankAsAnUnsetMarker(t *testing.T) {
 	cases := map[string]string{
 		"a null onboarded_at":  `[{"onboarded_at":null}]`,
 		"a blank onboarded_at": `[{"onboarded_at":"  "}]`,
@@ -435,24 +439,116 @@ func TestOnboardedTreatsNullAndBlankAsNotOnboarded(t *testing.T) {
 				writeJSON(t, w, 200, body)
 			})
 
-			onboarded, err := client.Onboarded(context.Background(), "a-token", "a-user-id")
+			state, err := client.Onboarding(context.Background(), "a-token", "a-user-id")
 			if err != nil {
 				t.Fatalf("profile read failed: %v", err)
 			}
-			if onboarded {
-				t.Error("onboarded = true, want false")
+			if state.CompletedAt != nil {
+				t.Errorf("CompletedAt = %s, want an unset marker", state.CompletedAt)
 			}
 		})
 	}
 }
 
-func TestOnboardedRefusesWithoutAUserID(t *testing.T) {
+func TestOnboardingTreatsAnUnparseableMarkerAsUnknown(t *testing.T) {
+	// A value the service cannot read is not a completion. Treating it as one
+	// would claim an account finished onboarding on the strength of data no
+	// part of the service understands.
+	client, _ := stubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, 200, `[{"onboarded_at":"not-a-timestamp"}]`)
+	})
+
+	if _, err := client.Onboarding(context.Background(), "a-token", "a-user-id"); err == nil {
+		t.Fatal("an unreadable marker was reported as a definite onboarding state")
+	}
+}
+
+func TestOnboardingRefusesWithoutAUserID(t *testing.T) {
 	client, requests := stubServer(t, func(w http.ResponseWriter, r *http.Request) {
 		t.Error("the client made a request without a user id")
 	})
 
-	if _, err := client.Onboarded(context.Background(), "a-token", ""); err == nil {
+	if _, err := client.Onboarding(context.Background(), "a-token", ""); err == nil {
 		t.Fatal("an empty user id was accepted")
+	}
+	if len(*requests) != 0 {
+		t.Errorf("the client sent %d requests, want none", len(*requests))
+	}
+}
+
+func TestUserReadsTheCallersOwnAuthRecord(t *testing.T) {
+	client, requests := stubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, 200, `{"id":"3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f",
+			"email":"player@example.com","created_at":"2026-01-01T00:00:00Z"}`)
+	})
+
+	user, err := client.User(context.Background(), "the-callers-token")
+	if err != nil {
+		t.Fatalf("user read failed: %v", err)
+	}
+	if want := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC); !user.CreatedAt.Equal(want) {
+		t.Errorf("CreatedAt = %s, want %s", user.CreatedAt, want)
+	}
+
+	sent := (*requests)[0]
+	if sent.method != http.MethodGet || sent.path != "/auth/v1/user" {
+		t.Errorf("request was %s %s, want GET /auth/v1/user", sent.method, sent.path)
+	}
+	// The caller's token decides whose record this is; nothing else names a user.
+	if got := sent.header.Get("Authorization"); got != "Bearer the-callers-token" {
+		t.Errorf("Authorization = %q, want the caller's token", got)
+	}
+}
+
+func TestUserRefusesWithoutAToken(t *testing.T) {
+	client, requests := stubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("the client made a request without a token")
+	})
+
+	if _, err := client.User(context.Background(), ""); err == nil {
+		t.Fatal("an empty token was accepted")
+	}
+	if len(*requests) != 0 {
+		t.Errorf("the client sent %d requests, want none", len(*requests))
+	}
+}
+
+func TestMarkOnboardedUpdatesOnlyTheCallersUnsetRow(t *testing.T) {
+	client, requests := stubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := client.MarkOnboarded(context.Background(), "the-callers-token", "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f", at); err != nil {
+		t.Fatalf("marker write failed: %v", err)
+	}
+
+	sent := (*requests)[0]
+	if sent.method != http.MethodPatch || sent.path != "/rest/v1/profiles" {
+		t.Errorf("request was %s %s, want PATCH /rest/v1/profiles", sent.method, sent.path)
+	}
+	// The filter names the caller's row and only while the marker is unset, so
+	// a repair can never overwrite a completion time that already exists.
+	for _, expected := range []string{"id=eq.3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f", "onboarded_at=is.null"} {
+		if !strings.Contains(sent.query, expected) {
+			t.Errorf("query %q is missing %q", sent.query, expected)
+		}
+	}
+	if sent.body["onboarded_at"] != "2026-01-01T00:00:00Z" {
+		t.Errorf("body = %v, want the creation time", sent.body)
+	}
+	if got := sent.header.Get("Authorization"); got != "Bearer the-callers-token" {
+		t.Errorf("Authorization = %q, want the caller's token", got)
+	}
+}
+
+func TestMarkOnboardedRefusesWithoutAToken(t *testing.T) {
+	client, requests := stubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("the client made a write without a token")
+	})
+
+	if err := client.MarkOnboarded(context.Background(), "", "a-user-id", time.Now()); err == nil {
+		t.Fatal("an empty token was accepted")
 	}
 	if len(*requests) != 0 {
 		t.Errorf("the client sent %d requests, want none", len(*requests))

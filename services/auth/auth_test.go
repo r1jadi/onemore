@@ -36,20 +36,26 @@ const testUserID = "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f"
 type fakeBackend struct {
 	mu sync.Mutex
 
-	signUpResult   supabaseauth.Result
-	signUpErr      error
-	signInResult   supabaseauth.Result
-	signInErr      error
-	refreshResult  supabaseauth.Result
-	refreshErr     error
-	signOutErr     error
-	onboardedValue bool
-	onboardedErr   error
+	signUpResult     supabaseauth.Result
+	signUpErr        error
+	signInResult     supabaseauth.Result
+	signInErr        error
+	refreshResult    supabaseauth.Result
+	refreshErr       error
+	signOutErr       error
+	onboardedValue   bool
+	onboardedErr     error
+	userResult       supabaseauth.User
+	userErr          error
+	markOnboardedErr error
 
 	signInEmail   string
 	refreshTokens []string
 	signOutTokens []string
 	onboardedHits int
+	userHits      int
+	markHits      int
+	markedAt      []time.Time
 }
 
 func (f *fakeBackend) SignUp(_ context.Context, _, _ string) (supabaseauth.Result, error) {
@@ -79,11 +85,33 @@ func (f *fakeBackend) SignOut(_ context.Context, accessToken string) error {
 	return f.signOutErr
 }
 
-func (f *fakeBackend) Onboarded(_ context.Context, _, _ string) (bool, error) {
+func (f *fakeBackend) Onboarding(_ context.Context, _, _ string) (supabaseauth.Onboarding, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.onboardedHits++
-	return f.onboardedValue, f.onboardedErr
+	if f.onboardedErr != nil {
+		return supabaseauth.Onboarding{}, f.onboardedErr
+	}
+	if !f.onboardedValue {
+		return supabaseauth.Onboarding{}, nil
+	}
+	at := time.Now().UTC()
+	return supabaseauth.Onboarding{CompletedAt: &at}, nil
+}
+
+func (f *fakeBackend) User(_ context.Context, _ string) (supabaseauth.User, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.userHits++
+	return f.userResult, f.userErr
+}
+
+func (f *fakeBackend) MarkOnboarded(_ context.Context, _, _ string, at time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.markHits++
+	f.markedAt = append(f.markedAt, at)
+	return f.markOnboardedErr
 }
 
 func (f *fakeBackend) emailSeen() string {
@@ -108,6 +136,18 @@ func (f *fakeBackend) onboardedReads() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.onboardedHits
+}
+
+func (f *fakeBackend) userReads() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.userHits
+}
+
+func (f *fakeBackend) marked() (int, []time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.markHits, append([]time.Time(nil), f.markedAt...)
 }
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
@@ -648,6 +688,189 @@ func TestSessionReadReportsTheVerifiedIdentity(t *testing.T) {
 	}
 	if _, present := payload["tokens"]; present {
 		t.Error("the session view must never carry a token")
+	}
+}
+
+// legacyMarker is a profile the old sign-up flow created: the account predates
+// the completion step, so the marker is null because nothing wrote one.
+func legacyMarker(t *testing.T) *supabaseauth.User {
+	t.Helper()
+	return &supabaseauth.User{ID: testUserID, CreatedAt: signupCompletionCutoff.Add(-24 * time.Hour)}
+}
+
+func TestSessionReadTreatsALegacyNullMarkerAsRegistered(t *testing.T) {
+	backend := &fakeBackend{userResult: *legacyMarker(t)}
+	h := newHarness(t, harnessOptions{backend: backend, withAuth: true})
+
+	response := h.get(t, SessionPath, validToken(t, nil))
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.StatusCode)
+	}
+
+	payload := decode(t, response)
+	if payload["onboarded"] != true {
+		t.Errorf("onboarded = %v, want true for an account that predates the completion flow", payload["onboarded"])
+	}
+
+	// The repair is what makes later reads cheap; it must record the account's
+	// own creation time, and the conditional filter must leave a real marker
+	// alone.
+	marks, markedAt := backend.marked()
+	if marks != 1 {
+		t.Fatalf("marker repairs = %d, want 1", marks)
+	}
+	if !markedAt[0].Equal(legacyMarker(t).CreatedAt) {
+		t.Errorf("repaired marker = %s, want the account creation time", markedAt[0])
+	}
+}
+
+func TestSessionReadSeesANewNullMarkerAsNotOnboarded(t *testing.T) {
+	backend := &fakeBackend{
+		userResult: supabaseauth.User{ID: testUserID, CreatedAt: signupCompletionCutoff.Add(time.Hour)},
+	}
+	h := newHarness(t, harnessOptions{backend: backend, withAuth: true})
+
+	response := h.get(t, SessionPath, validToken(t, nil))
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.StatusCode)
+	}
+
+	payload := decode(t, response)
+	if payload["onboarded"] != false {
+		t.Errorf("onboarded = %v, want false for an account that still has onboarding to finish", payload["onboarded"])
+	}
+	if marks, _ := backend.marked(); marks != 0 {
+		t.Errorf("marker repairs = %d, want none for a new account", marks)
+	}
+}
+
+func TestCompletedMarkerNeedsNoFurtherReads(t *testing.T) {
+	backend := &fakeBackend{onboardedValue: true}
+	h := newHarness(t, harnessOptions{backend: backend, withAuth: true})
+
+	response := h.get(t, SessionPath, validToken(t, nil))
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.StatusCode)
+	}
+	if payload := decode(t, response); payload["onboarded"] != true {
+		t.Errorf("onboarded = %v, want true", payload["onboarded"])
+	}
+	if reads := backend.userReads(); reads != 0 {
+		t.Errorf("account creation reads = %d, want none when the marker answers", reads)
+	}
+	if marks, _ := backend.marked(); marks != 0 {
+		t.Errorf("marker repairs = %d, want none when the marker answers", marks)
+	}
+}
+
+func TestOnboardedStaysUnknownWhenTheAccountAgeCannotBeRead(t *testing.T) {
+	// The marker is null and the account's creation time is unavailable. The
+	// session is still valid; the one field nobody can answer is left out rather
+	// than guessed as false and acted on.
+	backend := &fakeBackend{userErr: &supabaseauth.Error{Op: "user", Status: http.StatusInternalServerError}}
+	h := newHarness(t, harnessOptions{backend: backend, withAuth: true})
+
+	response := h.get(t, SessionPath, validToken(t, nil))
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.StatusCode)
+	}
+	session := decode(t, response)
+	if _, present := session["onboarded"]; present {
+		t.Errorf("onboarded was guessed although the account age could not be read: %v", session)
+	}
+	if marks, _ := backend.marked(); marks != 0 {
+		t.Errorf("marker repairs = %d, want none without a creation time", marks)
+	}
+}
+
+func TestMissingProfileIsUnknownEvenWhenTheAccountIsOld(t *testing.T) {
+	// No profile row is a data gap, not "not onboarded": reading the age cannot
+	// repair a row that does not exist, and false would send the account back
+	// through sign-up only to dead-end at the completion write.
+	backend := &fakeBackend{
+		onboardedErr: &supabaseauth.Error{Op: "profile", Status: http.StatusOK},
+		userResult:   *legacyMarker(t),
+	}
+	h := newHarness(t, harnessOptions{backend: backend, withAuth: true})
+
+	response := h.get(t, SessionPath, validToken(t, nil))
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.StatusCode)
+	}
+	session := decode(t, response)
+	if _, present := session["onboarded"]; present {
+		t.Errorf("onboarded was reported for an account with no profile row: %v", session)
+	}
+	if reads := backend.userReads(); reads != 0 {
+		t.Errorf("account creation reads = %d, want none after the profile read failed", reads)
+	}
+	if marks, _ := backend.marked(); marks != 0 {
+		t.Errorf("marker repairs = %d, want none after the profile read failed", marks)
+	}
+}
+
+func TestALegacyMarkerRepairThatFailsStillAnswers(t *testing.T) {
+	// The repair is an optimisation. If it is refused, the account is still
+	// registered; the only cost is deriving the answer again on the next read.
+	backend := &fakeBackend{
+		userResult:       *legacyMarker(t),
+		markOnboardedErr: &supabaseauth.Error{Op: "onboarded", Status: http.StatusForbidden},
+	}
+	h := newHarness(t, harnessOptions{backend: backend, withAuth: true})
+
+	payload := decode(t, h.get(t, SessionPath, validToken(t, nil)))
+	if payload["onboarded"] != true {
+		t.Errorf("onboarded = %v, want true even when the marker could not be repaired", payload["onboarded"])
+	}
+}
+
+func TestSignInMarksALegacyAccountWithoutASecondAgeRead(t *testing.T) {
+	// Sign-in already returns the user record, so the age check must use it
+	// instead of spending another Supabase call.
+	createdAt := signupCompletionCutoff.Add(-time.Hour)
+	backend := &fakeBackend{
+		signInResult: supabaseauth.Result{
+			Session: sessionResult("access-1", "refresh-1").Session,
+			User:    &supabaseauth.User{ID: testUserID, CreatedAt: createdAt},
+		},
+	}
+	h := newHarness(t, harnessOptions{backend: backend, withAuth: true})
+
+	response := h.do(t, http.MethodPost, SignInPath,
+		`{"email":"player@example.com","password":"correct-horse-battery"}`, nil)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.StatusCode)
+	}
+	session := decode(t, response)["session"].(map[string]any)
+	if session["onboarded"] != true {
+		t.Errorf("session.onboarded = %v, want true for a legacy account", session["onboarded"])
+	}
+	if reads := backend.userReads(); reads != 0 {
+		t.Errorf("account creation reads = %d, want none when sign-in supplied the record", reads)
+	}
+	if marks, markedAt := backend.marked(); marks != 1 || !markedAt[0].Equal(createdAt) {
+		t.Errorf("marker repairs = %d at %v, want one at the sign-in's creation time", marks, markedAt)
+	}
+}
+
+func TestSignUpDoesNotMarkANewAccount(t *testing.T) {
+	backend := &fakeBackend{signUpResult: sessionResult("access-from-signup", "refresh-from-signup")}
+	h := newHarness(t, harnessOptions{backend: backend, withAuth: true})
+
+	response := h.do(t, http.MethodPost, SignUpPath,
+		`{"email":"player@example.com","password":"correct-horse-battery"}`, nil)
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", response.StatusCode)
+	}
+	session := decode(t, response)["session"].(map[string]any)
+	if session["onboarded"] != false {
+		t.Errorf("session.onboarded = %v, want false for a freshly created account", session["onboarded"])
+	}
+	if marks, _ := backend.marked(); marks != 0 {
+		t.Errorf("marker repairs = %d, want none for an account created now", marks)
+	}
+	if reads := backend.userReads(); reads != 0 {
+		t.Errorf("account creation reads = %d, want none when sign-up supplied the record", reads)
 	}
 }
 
