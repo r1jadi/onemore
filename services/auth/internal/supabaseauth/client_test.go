@@ -136,9 +136,14 @@ func TestSignInPostsToThePasswordGrantWithThePublishableKey(t *testing.T) {
 
 func TestSignUpDecodesAConfirmationPendingResponse(t *testing.T) {
 	// With email confirmation on, Supabase answers with a bare user and no
-	// session. That must not be mistaken for a failure.
+	// session. That must not be mistaken for a failure. A real signup always
+	// carries the email identity it created, which is what separates it from
+	// the sanitized stand-in for an address that already has an account.
 	client, requests := stubServer(t, func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(t, w, 200, `{"id":"u1","email":"player@example.com","created_at":"2026-10-01T00:00:00Z"}`)
+		writeJSON(t, w, 200, `{
+			"id":"u1","email":"player@example.com","created_at":"2026-10-01T00:00:00Z",
+			"identities":[{"id":"i1","provider":"email","user_id":"u1"}]
+		}`)
 	})
 
 	result, err := client.SignUp(context.Background(), "player@example.com", "correct-horse-battery")
@@ -153,6 +158,84 @@ func TestSignUpDecodesAConfirmationPendingResponse(t *testing.T) {
 	}
 	if (*requests)[0].path != "/auth/v1/signup" {
 		t.Errorf("path = %s, want /auth/v1/signup", (*requests)[0].path)
+	}
+}
+
+func TestSignUpDetectsAnAlreadyRegisteredAddress(t *testing.T) {
+	// The reported bug: signing up with an email that already belongs to a
+	// confirmed account. GoTrue refuses to confirm or deny that the address is
+	// registered — with email confirmation on it answers 200 with a *sanitized*
+	// stand-in user: a fresh random id, an empty `identities` array,
+	// `email_confirmed_at: null` and no session. Passed through as "awaiting
+	// confirmation", it sends the visitor to check an inbox nothing was sent to,
+	// and never tells them to sign in instead.
+	client, _ := stubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, 200, `{
+			"id": "d41d8cd9-8f00-4b20-a980-0998ecf8427e",
+			"email": "player@example.com",
+			"identities": [],
+			"email_confirmed_at": null,
+			"created_at": "2026-10-17T20:00:00Z",
+			"confirmation_sent_at": "2026-10-17T20:00:00Z",
+			"app_metadata": {"provider": "email", "providers": ["email"]},
+			"user_metadata": {}
+		}`)
+	})
+
+	result, err := client.SignUp(context.Background(), "player@example.com", "correct-horse-battery")
+
+	var apiErr *Error
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("err = %v, want a typed Supabase error", err)
+	}
+	if apiErr.Op != "sign-up" {
+		t.Errorf("op = %q, want sign-up", apiErr.Op)
+	}
+	if apiErr.Code != CodeEmailExists {
+		t.Errorf("code = %q, want %q", apiErr.Code, CodeEmailExists)
+	}
+	if result.Session != nil || result.User != nil {
+		t.Errorf("result = %+v, want nothing decoded from the refusal", result)
+	}
+}
+
+func TestSignUpDoesNotReadAMissingIdentityListAsARefusal(t *testing.T) {
+	// Only an explicitly empty `identities` array means "no account was made".
+	// A response that omits the field must stay a confirmation-pending success,
+	// so a shape change on Supabase's side cannot block a genuine signup.
+	client, _ := stubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, 200, `{"id":"u1","email":"player@example.com","created_at":"2026-10-01T00:00:00Z"}`)
+	})
+
+	result, err := client.SignUp(context.Background(), "player@example.com", "correct-horse-battery")
+	if err != nil {
+		t.Fatalf("sign-up failed: %v", err)
+	}
+	if result.User == nil || result.User.ID != "u1" {
+		t.Fatalf("user = %+v", result.User)
+	}
+}
+
+func TestSignUpKeepsAResentConfirmationAPendingSuccess(t *testing.T) {
+	// An existing *unconfirmed* account gets the real user back with its email
+	// identity and a re-sent confirmation link. That is not a refusal: the
+	// visitor's next step really is the mailbox, so it must stay a success.
+	client, _ := stubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, 200, `{
+			"id": "u2",
+			"email": "waiting@example.com",
+			"identities": [{"id": "i2", "provider": "email", "user_id": "u2"}],
+			"email_confirmed_at": null,
+			"confirmation_sent_at": "2026-10-17T20:00:00Z"
+		}`)
+	})
+
+	result, err := client.SignUp(context.Background(), "waiting@example.com", "correct-horse-battery")
+	if err != nil {
+		t.Fatalf("sign-up failed: %v", err)
+	}
+	if result.User == nil || result.User.ID != "u2" {
+		t.Fatalf("user = %+v", result.User)
 	}
 }
 
@@ -326,9 +409,23 @@ func TestOnboardedReadsTheCallersOwnRow(t *testing.T) {
 	}
 }
 
-func TestOnboardedTreatsNoRowAndNullAsNotOnboarded(t *testing.T) {
+func TestOnboardedTreatsNoRowAsUnknownNotAsNotOnboarded(t *testing.T) {
+	// The trigger creates the profile row at signup, so a missing row is a data
+	// gap — an answer nobody gave, not "not onboarded". Reporting false would
+	// send that account through sign-up again, where the completion write has
+	// no row to land on: a dead end that pushes a returning user toward
+	// registering a second time.
+	client, _ := stubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, 200, `[]`)
+	})
+
+	if _, err := client.Onboarded(context.Background(), "a-token", "a-user-id"); err == nil {
+		t.Fatal("a missing profile row was reported as a definite onboarding state")
+	}
+}
+
+func TestOnboardedTreatsNullAndBlankAsNotOnboarded(t *testing.T) {
 	cases := map[string]string{
-		"no profile row":       `[]`,
 		"a null onboarded_at":  `[{"onboarded_at":null}]`,
 		"a blank onboarded_at": `[{"onboarded_at":"  "}]`,
 	}

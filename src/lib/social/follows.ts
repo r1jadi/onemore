@@ -354,11 +354,17 @@ export function useFollowState(targetUserId: string | undefined, initial?: boole
       setLoading(true);
       isFollowing(targetUserId)
         .then((value) => {
-          if (!cancelled) setFollowing(value);
+          if (!cancelled) {
+            setFollowing(value);
+            setError(undefined);
+          }
         })
         .catch(() => {
-          // Keep what is on screen; a toggle (or the auth event below)
-          // re-reads the state before it reports anything.
+          // The relationship could not be read: unknown, not "not following".
+          // Keeping the button's default with no word about it would present a
+          // guess as an answer; the failure is surfaced instead. The reconcile
+          // path in `toggle` still means a retry re-reads the truth.
+          if (!cancelled) setError("Couldn't check your follow state. Try again.");
         })
         .finally(() => {
           if (!cancelled) setLoading(false);
@@ -367,9 +373,14 @@ export function useFollowState(targetUserId: string | undefined, initial?: boole
     const unsubscribe = subscribeToAuth(() => {
       void isFollowing(targetUserId)
         .then((value) => {
-          if (!cancelled) setFollowing(value);
+          if (!cancelled) {
+            setFollowing(value);
+            setError(undefined);
+          }
         })
-        .catch(() => undefined);
+        .catch(() => {
+          if (!cancelled) setError("Couldn't check your follow state. Try again.");
+        });
     });
     return () => {
       cancelled = true;

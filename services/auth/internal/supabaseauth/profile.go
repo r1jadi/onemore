@@ -27,8 +27,13 @@ type onboardedRow struct {
 // a verified token subject, which the verifier has already restricted to
 // hex-and-dash characters, so it cannot alter the query.
 //
-// A user with no profile row has not onboarded: the row is created by the
-// trigger at signup, so its absence means onboarding has not happened.
+// A user with no profile row is *unknown*, not "not onboarded": the row is
+// created by the `handle_new_user` trigger at signup, so an account that
+// predates a fixed trigger — or whose profile insert failed — has none even
+// though it may be as old as the project. Reporting false would route that
+// account back through sign-up, where the completion write has no row to land
+// on, so the absence is reported as an error and the service leaves the field
+// unset instead of acting on a guess.
 func (c *Client) Onboarded(ctx context.Context, accessToken, userID string) (bool, error) {
 	if userID == "" {
 		return false, errors.New("an onboarded lookup needs a user id")
@@ -50,7 +55,7 @@ func (c *Client) Onboarded(ctx context.Context, accessToken, userID string) (boo
 		return false, &Error{Op: "profile", Status: response.StatusCode, cause: err}
 	}
 	if len(rows) == 0 {
-		return false, nil
+		return false, errors.New("the caller has no profile row")
 	}
 	return rows[0].OnboardedAt != nil && strings.TrimSpace(*rows[0].OnboardedAt) != "", nil
 }

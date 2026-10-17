@@ -22,6 +22,7 @@ The schema's only history. Applied in filename order by the Supabase CLI and by
 | `20261014120200_saves.sql`                         | `public.saves` (one row per player per game) with owner-scoped RLS: saves are private, duplicates conflict on the primary key, and only published games can be saved. |
 | `20261014120300_profile_username.sql`               | Grants `UPDATE (username)` on `public.profiles` to authenticated. The existing owner-scoped update policy already covers the row, so renames need no new policy — only the column grant was missing. |
 | `20261017120000_profile_backfill.sql`              | Recreates `handle_new_user` with collision- and length-safe defaults, then backfills the profile and `user` role row for any existing `auth.users` row that lacks them. Apply once after 0017; safe to re-run. |
+| `20261017230000_legacy_accounts_onboarded.sql`     | Backfills `profiles.onboarded_at` for accounts created before the sign-up completion flow, using `auth.users.created_at`. Without it every pre-existing account reads as "not onboarded" and is sent through registration again. Apply once after 0018; safe to re-run. |
 
 Two migrations exist for one feature — the play schema and the catalogue flip — because
 the flip is a claim about shipped code. Applying it before the service that answers

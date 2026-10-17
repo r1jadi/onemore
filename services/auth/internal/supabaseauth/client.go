@@ -182,6 +182,11 @@ func (c *Client) sessionCall(ctx context.Context, op, method, path string, paylo
 	if err := decodeJSON(response.Body, &envelope); err != nil {
 		return Result{}, &Error{Op: op, Status: response.StatusCode, cause: err}
 	}
+	if op == "sign-up" {
+		if err := envelope.refusedRegistration(); err != nil {
+			return Result{}, err
+		}
+	}
 	return envelope.result(), nil
 }
 
@@ -196,11 +201,36 @@ type sessionEnvelope struct {
 	ExpiresAt    int64  `json:"expires_at"`
 	User         *User  `json:"user"`
 
-	ID               string     `json:"id"`
-	Email            string     `json:"email"`
-	Role             string     `json:"role"`
-	EmailConfirmedAt *time.Time `json:"email_confirmed_at"`
-	CreatedAt        time.Time  `json:"created_at"`
+	ID               string            `json:"id"`
+	Email            string            `json:"email"`
+	Role             string            `json:"role"`
+	EmailConfirmedAt *time.Time        `json:"email_confirmed_at"`
+	CreatedAt        time.Time         `json:"created_at"`
+	Identities       []json.RawMessage `json:"identities"`
+}
+
+// refusedRegistration recognises Supabase's answer when a sign-up used an email
+// that already belongs to a confirmed account.
+//
+// GoTrue refuses to confirm or deny that the address is registered. With email
+// confirmation on it answers 200 with a *sanitized* stand-in user — a fresh
+// random id, an explicitly empty `identities` array, `email_confirmed_at: null`
+// and no session — instead of an error. A real signup always carries the email
+// identity it created, and an existing-but-unconfirmed account gets the real
+// user back with its identity and a re-sent confirmation (which stays a
+// confirmation-pending success), so an empty array is the one reliable signal
+// that nothing was created. Passing the stand-in through as "awaiting
+// confirmation" would send the visitor to check an inbox nothing was sent to,
+// and never tell them to sign in instead — so it is turned into the refusal it
+// really is, which the handler maps onto 409.
+func (e sessionEnvelope) refusedRegistration() *Error {
+	if e.AccessToken != "" || e.ID == "" {
+		return nil
+	}
+	if e.Identities == nil || len(e.Identities) > 0 {
+		return nil
+	}
+	return &Error{Op: "sign-up", Status: http.StatusConflict, Code: CodeEmailExists}
 }
 
 func (e sessionEnvelope) result() Result {

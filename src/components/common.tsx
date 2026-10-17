@@ -188,6 +188,7 @@ export function FollowButton({
         size={size}
         variant={follow.following ? "secondary" : "default"}
         aria-pressed={follow.following}
+        aria-busy={follow.loading || undefined}
         onClick={() => void toggle()}
         disabled={busy}
         className="min-w-24"

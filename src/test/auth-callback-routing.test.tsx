@@ -24,7 +24,7 @@ function jsonResponse(body: unknown, status = 200) {
  * single field is what tells a brand-new Google account apart from a returning
  * one, so the callback routes on it instead of sending everyone to the feed.
  */
-function stubOAuth(onboarded: boolean) {
+function stubOAuth(onboarded: boolean | undefined) {
   return vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.includes("/auth/v1/token")) {
@@ -36,6 +36,8 @@ function stubOAuth(onboarded: boolean) {
       });
     }
     if (url.endsWith("/api/v1/auth/session")) {
+      // `undefined` serialises to the field being absent — the shape the
+      // backend answers with when the profile row could not be read.
       return jsonResponse({
         userId: testUserID,
         role: "user",
@@ -61,7 +63,7 @@ function stubOAuth(onboarded: boolean) {
   });
 }
 
-async function renderCallback(onboarded: boolean, next = "/login") {
+async function renderCallback(onboarded: boolean | undefined, next = "/login") {
   vi.stubGlobal("fetch", stubOAuth(onboarded));
   sessionStorage.setItem("onemore-oauth-verifier", "test-verifier");
   const router = createRouter({
@@ -114,6 +116,17 @@ describe("Google OAuth callback", () => {
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/profile"));
     expect(screen.queryByText("Create your account")).toBeNull();
+  });
+
+  it("does not send an account with an unreadable registration state through sign-up", async () => {
+    // The backend omits `onboarded` when the profile row could not be read — a
+    // data gap is not an answer. "Unknown" must not be treated as "new": the
+    // account signs in, and the completion screen is never shown.
+    const router = await renderCallback(undefined, "/login");
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
+    expect(screen.queryByText("Choose your name")).toBeNull();
+    expect(window.localStorage.getItem(SESSION_STORAGE_KEY)).not.toBeNull();
   });
 
   it("explains a Google identity that cannot attach to an existing account", async () => {

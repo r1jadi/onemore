@@ -14,13 +14,8 @@ import { GameRow } from "@/components/game/GameCard";
 import { Label } from "@/components/ui/label";
 import { catalogErrorMessage, useGames } from "@/lib/games/catalog";
 import { listBlockedIds } from "@/lib/settings/blocked";
-import {
-  fetchProfilesByIds,
-  listFollowees,
-  searchProfiles,
-  type PublicProfile,
-} from "@/lib/social/follows";
-import { getAuthState } from "@/lib/auth/session";
+import { listFollowees, searchProfiles, type PublicProfile } from "@/lib/social/follows";
+import { getAuthState, getSessionUserId } from "@/lib/auth/session";
 import { seo } from "@/lib/seo";
 import { cn } from "@/lib/utils";
 
@@ -224,11 +219,24 @@ function GameResults({ term }: { term: string }) {
 /**
  * People results from the public profile projection. Blocked accounts are
  * filtered out, and follow state comes from the real follow graph.
+ *
+ * The rows are published together with the viewer's followees, never before:
+ * a button seeded with a definite "not following" while the read was still in
+ * flight would keep that default forever (the hook reads a passed state once),
+ * so an account the viewer follows showed "Follow" on every search. When the
+ * followees cannot be read the answer is unknown, and each row then verifies
+ * its own target (`useFollowState` loads it) instead of everyone defaulting.
  */
 function PeopleResults({ query, only }: { query: string; only: boolean }) {
   const [people, setPeople] = useState<PublicProfile[] | undefined>(undefined);
-  const [followingIds, setFollowingIds] = useState<Set<string>>(new Set());
+  /**
+   * The viewer's own followees for this result set. `undefined` means the
+   * relationship is unknown — the read failed, or the session was still being
+   * restored — and is passed to the buttons as "not known", never as false.
+   */
+  const [followingIds, setFollowingIds] = useState<Set<string> | undefined>(undefined);
   const [error, setError] = useState<string>();
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     if (query.trim() === "") {
@@ -237,34 +245,44 @@ function PeopleResults({ query, only }: { query: string; only: boolean }) {
     }
     let cancelled = false;
     setError(undefined);
-    searchProfiles(query, 8)
-      .then(async (rows) => {
+    void (async () => {
+      try {
+        const rows = await searchProfiles(query, 8);
         if (cancelled) return;
         const blocked = await listBlockedIds();
         const visible = rows.filter((row) => !blocked.has(row.id));
-        if (!cancelled) setPeople(visible);
+        if (cancelled) return;
+        // Read the viewer's follow graph *before* the rows are published, so
+        // every button mounts with a state the database actually answered.
         const auth = getAuthState();
-        if (!cancelled && auth.status === "authenticated") {
-          try {
-            const followees = await listFollowees(auth.session.userId);
-            if (!cancelled) setFollowingIds(new Set(followees));
-          } catch {
-            // Follow state is best effort; the rows are still real.
+        let followees: Set<string> | undefined;
+        if (auth.status === "authenticated") {
+          const actor = getSessionUserId();
+          if (actor) {
+            try {
+              followees = new Set(await listFollowees(actor));
+            } catch {
+              // Unknown, not "not following": the rows verify their own targets.
+            }
           }
+        } else if (auth.status === "anonymous") {
+          // A signed-out visitor follows nobody; that answer needs no request.
+          followees = new Set();
         }
-        // Prefetch display names for followees is unnecessary: rows carry them.
-        void fetchProfilesByIds;
-      })
-      .catch((err: unknown) => {
+        if (cancelled) return;
+        setFollowingIds(followees);
+        setPeople(visible);
+      } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : "Couldn't search people.");
           setPeople([]);
         }
-      });
+      }
+    })();
     return () => {
       cancelled = true;
     };
-  }, [query]);
+  }, [query, attempt]);
 
   if (people === undefined) return <ListSkeleton rows={3} />;
   if (error) {
@@ -272,7 +290,7 @@ function PeopleResults({ query, only }: { query: string; only: boolean }) {
       <ErrorState
         title="Couldn't search people"
         body={error}
-        onRetry={() => setPeople(undefined)}
+        onRetry={() => setAttempt((n) => n + 1)}
       />
     );
   }
@@ -301,7 +319,7 @@ function PeopleResults({ query, only }: { query: string; only: boolean }) {
               <p className="truncate text-xs text-muted-foreground">{x.display_name}</p>
             </div>
           </Link>
-          <FollowButton userId={x.id} initial={followingIds.has(x.id)} />
+          <FollowButton userId={x.id} initial={followingIds?.has(x.id)} />
         </div>
       ))}
     </div>
