@@ -12,7 +12,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { getAuthState } from "@/lib/auth/session";
+import { useAuth } from "@/lib/auth/session";
 import { ApiError } from "@/lib/api/client";
 import { fmt, fmtDate } from "@/lib/format";
 import { absoluteUrl } from "@/lib/seo";
@@ -48,7 +48,7 @@ export function CommentsSheet({
    */
   count?: number | null;
 }) {
-  const auth = getAuthState();
+  const auth = useAuth();
   const profile = getProfileState();
   const avatar = profile.status === "ready" ? avatarUrl(profile.profile) : undefined;
   const name = profile.status === "ready" ? profile.profile.username : "";

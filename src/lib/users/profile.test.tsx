@@ -2,7 +2,14 @@ import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/lib/api/client";
-import { clearSession, getAccessToken, getAuthState, signIn, signOut } from "@/lib/auth/session";
+import {
+  SESSION_STORAGE_KEY,
+  clearSession,
+  getAccessToken,
+  getAuthState,
+  signIn,
+  signOut,
+} from "@/lib/auth/session";
 import {
   avatarUrl,
   changeAvatar,
@@ -204,8 +211,11 @@ describe("loadProfile", () => {
 
     await loadProfile();
 
-    expect(setItem).not.toHaveBeenCalled();
-    expect(window.localStorage.length).toBe(0);
+    // Signing in persists the session under auth's own key; the profile itself
+    // is never written anywhere, and no other key appears.
+    expect(setItem.mock.calls.every(([key]) => key === SESSION_STORAGE_KEY)).toBe(true);
+    expect(window.localStorage.length).toBe(1);
+    expect(window.localStorage.getItem(SESSION_STORAGE_KEY)).not.toContain("player_one");
     expect(window.sessionStorage.length).toBe(0);
   });
 });

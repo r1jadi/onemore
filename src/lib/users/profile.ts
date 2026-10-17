@@ -11,10 +11,12 @@
  *     it read, so a second writer gets a 409 instead of silently overwriting a
  *     change they never saw.
  *
- * Storage rule: the profile lives in memory, like the session it belongs to.
- * Nothing writes it to `localStorage` or `sessionStorage`, and it is dropped the
- * moment the session ends, so a signed-out or switched account can never be
- * shown the previous person's profile.
+ * Storage rule: the profile lives in memory. The session it belongs to is
+ * persisted by `lib/auth/session` so a reload can restore it, but the profile
+ * itself is re-read from the API rather than stored: nothing writes it to
+ * `localStorage` or `sessionStorage`, and it is dropped the moment the session
+ * ends, so a signed-out or switched account can never be shown the previous
+ * person's profile.
  *
  * Avatar images are the one thing that does not travel through the Go API: the
  * `avatars` bucket in Supabase Storage is built for direct owner uploads

@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { ApiError } from "@/lib/api/client";
-import { changePassword, fetchLinkedProviders, getAuthState } from "@/lib/auth/session";
+import { changePassword, fetchLinkedProviders, useAuth } from "@/lib/auth/session";
 import { offeredLanguages, useLanguage } from "@/lib/settings/language";
 import { useTheme, type Appearance } from "@/lib/settings/theme";
 import { useAccessibility } from "@/lib/settings/accessibility";
@@ -163,7 +163,7 @@ const faq = [
 ];
 
 function Body({ section }: { section: string }) {
-  const auth = getAuthState();
+  const auth = useAuth();
   const signedIn = auth.status === "authenticated";
   const { prefs, loading, error, update } = usePrefs();
   const { language, setLanguage } = useLanguage();
@@ -450,7 +450,7 @@ function Body({ section }: { section: string }) {
 
 function AccountSection({ signedIn }: { signedIn: boolean }) {
   const profile = useProfile();
-  const auth = getAuthState();
+  const auth = useAuth();
   const email = auth.status === "authenticated" ? (auth.session.email ?? "") : "";
 
   if (!signedIn) return <RequireSignIn body="Your account details belong to your account." />;

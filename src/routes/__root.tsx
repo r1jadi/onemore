@@ -10,6 +10,7 @@ import {
   type ErrorComponentProps,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
+import { Loader2 } from "lucide-react";
 import { Analytics } from "@vercel/analytics/react";
 
 import appCss from "../styles.css?url";
@@ -18,6 +19,7 @@ import { rootSeo } from "../lib/seo";
 import { AppShell } from "@/components/layout/AppShell";
 import { SafeAreaDiagnostics } from "@/components/dev/SafeAreaDiagnostics";
 import { Toaster } from "@/components/ui/sonner";
+import { initializeSession, useAuth } from "@/lib/auth/session";
 import { LanguageProvider } from "@/lib/settings/language";
 import { ThemeProvider } from "@/lib/settings/theme";
 
@@ -160,11 +162,30 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const path = useRouterState({ select: (st) => st.location.pathname });
   const bare = BARE.some((p) => path.startsWith(p));
+  const auth = useAuth();
+
+  // Restore a persisted session after hydration, never during SSR: the server
+  // render and the first client render must agree (both anonymous), and the
+  // restored token is re-validated against the API before it is trusted.
+  useEffect(() => {
+    void initializeSession();
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>
-      {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-      {bare ? (
+      {/* Required somewhere below: nested routes render through <Outlet />.
+          Removing it breaks all child routes. */}
+      {auth.status === "restoring" ? (
+        // A stored session is being checked with the server: show neither the
+        // signed-in nor the signed-out screens until that answer arrives.
+        <div
+          className="flex min-h-dvh items-center justify-center bg-background"
+          role="status"
+          aria-label="Restoring your session"
+        >
+          <Loader2 className="size-6 animate-spin text-muted-foreground" />
+        </div>
+      ) : bare ? (
         <Outlet />
       ) : (
         <AppShell>

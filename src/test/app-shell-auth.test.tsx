@@ -13,7 +13,7 @@ import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AppShell } from "@/components/layout/AppShell";
-import { clearSession, signIn } from "@/lib/auth/session";
+import { SESSION_STORAGE_KEY, clearSession, initializeSession, signIn } from "@/lib/auth/session";
 import { routeTree } from "@/routeTree.gen";
 
 const testUserID = "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f";
@@ -95,14 +95,16 @@ async function renderShell() {
 }
 
 /**
- * Answers the credential call, the admin allowlist check and the Supabase
- * notification read. Anything else is a test bug, not a network to hit.
+ * Answers the credential call, the session restore/validation call and the
+ * admin allowlist check. Anything else is a test bug, not a network to hit.
  */
 function stubBackend(adminSession: { isStaff: boolean }) {
   const spy = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     const url = String(input);
     if (url.includes("/api/v1/")) {
       if (url.includes("/auth/sign-in")) return jsonResponse(sessionPayload());
+      if (url.includes("/auth/session")) return jsonResponse({ userId: testUserID, role: "user" });
+      if (url.includes("/auth/refresh")) return jsonResponse(sessionPayload());
       if (url.includes("/admin/session"))
         return jsonResponse({ userId: testUserID, role: "user", ...adminSession });
       throw new Error(`unexpected gateway call ${url}`);
@@ -111,6 +113,7 @@ function stubBackend(adminSession: { isStaff: boolean }) {
     throw new Error(`unexpected fetch ${url}`);
   });
   vi.stubGlobal("fetch", spy);
+  return spy;
 }
 
 function desktopSidebar(): HTMLElement {
@@ -195,6 +198,39 @@ describe("sidebar auth entry points", () => {
     });
     // Staff see the product navigation, not a sign-in CTA.
     expect(screen.queryByRole("link", { name: "Get started" })).toBeNull();
+  });
+});
+
+describe("session restoration on boot", () => {
+  it("restores a stored session instead of showing the sign-in CTA", async () => {
+    const spy = stubBackend({ isStaff: false });
+    // A previous page load persisted this session; booting from storage is the
+    // reload the old memory-only session could not survive.
+    window.localStorage.setItem(
+      SESSION_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        tokens: {
+          accessToken: "access-token-1",
+          refreshToken: "refresh-token-1",
+          tokenType: "bearer",
+          expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+        },
+        session: { userId: testUserID, role: "user", email: "player@example.com" },
+      }),
+    );
+
+    await act(async () => {
+      await initializeSession();
+    });
+    await renderShell();
+
+    expect(screen.queryByRole("link", { name: "Get started" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Log in" })).toBeNull();
+    // The stored token was checked with the server rather than trusted blindly.
+    expect(spy.mock.calls.some(([input]) => String(input).includes("/api/v1/auth/session"))).toBe(
+      true,
+    );
   });
 });
 

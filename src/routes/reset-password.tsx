@@ -3,7 +3,7 @@ import { Check } from "lucide-react";
 import { useState } from "react";
 import { AuthLayout, Field } from "@/components/auth/AuthLayout";
 import { Button } from "@/components/ui/button";
-import { changePassword, getAuthState } from "@/lib/auth/session";
+import { changePassword, useAuth } from "@/lib/auth/session";
 import { seo } from "@/lib/seo";
 
 export const Route = createFileRoute("/reset-password")({
@@ -23,7 +23,8 @@ function Reset() {
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const mismatch = b.length > 0 && a !== b;
-  const signedIn = getAuthState().status === "authenticated";
+  const auth = useAuth();
+  const signedIn = auth.status === "authenticated";
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();

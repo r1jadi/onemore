@@ -4,7 +4,7 @@ import { EmptyState, ErrorState, ListSkeleton, Page, PageHeader } from "@/compon
 import { GameRow } from "@/components/game/GameCard";
 import { Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { getAuthState, subscribe as subscribeToAuth } from "@/lib/auth/session";
+import { subscribe as subscribeToAuth, useAuth } from "@/lib/auth/session";
 import { catalogErrorMessage } from "@/lib/games/catalog";
 import { useFollowingFeed } from "@/lib/games/following";
 import { listFollowees } from "@/lib/social/follows";
@@ -30,7 +30,7 @@ function Following() {
 
   useEffect(() => subscribeToAuth(() => setAuthTick((n) => n + 1)), []);
 
-  const auth = getAuthState();
+  const auth = useAuth();
 
   useEffect(() => {
     if (auth.status !== "authenticated") {

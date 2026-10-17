@@ -3,7 +3,7 @@
 // here: where operator details are required, the document says exactly what the
 // owner must supply (see OPERATOR_DETAILS_REQUIRED below).
 //
-// Effective date: 2026-10-13. Review with counsel before public launch; this
+// Effective date: 2026-10-17. Review with counsel before public launch; this
 // is product-accurate copy, not legal advice.
 
 export const OPERATOR_DETAILS_REQUIRED = [
@@ -62,7 +62,7 @@ export const terms = [
 export const privacy = [
   [
     "What we collect",
-    "Account and authentication: email, password verifier (stored by Supabase Auth, never by onemore), email-verification state, OAuth provider identities you link (Google), and session tokens held in memory only. Profile: username (generated), display name, bio, avatar object path, onboarding state. Gameplay: play sessions (game, seed, start/end times) and scores (session, game, value, duration). Social, when you use it: follows, blocked-user relationships, notification rows (kind, payload, read time) and your privacy/notification preferences. Operational: rate-limit counters, request ids and error logs needed to run and protect the API.",
+    "Account and authentication: email, password verifier (stored by Supabase Auth, never by onemore), email-verification state, OAuth provider identities you link (Google), and session tokens stored in this browser only (see Storage, cookies and local data below). Profile: username (generated), display name, bio, avatar object path, onboarding state. Gameplay: play sessions (game, seed, start/end times) and scores (session, game, value, duration). Social, when you use it: follows, blocked-user relationships, notification rows (kind, payload, read time) and your privacy/notification preferences. Operational: rate-limit counters, request ids and error logs needed to run and protect the API.",
   ],
   [
     "What we do not collect",
@@ -78,7 +78,7 @@ export const privacy = [
   ],
   [
     "Storage, cookies and local data",
-    "Session tokens live in memory only and are dropped on sign-out or reload; nothing writes access or refresh tokens to localStorage, sessionStorage or cookies. Appearance, language and accessibility choices persist in this browser's localStorage. Recent searches persist in this browser's localStorage. OAuth PKCE verifiers live in sessionStorage for the duration of one sign-in attempt. Avatar images live in the public `avatars` Supabase Storage bucket under your account folder.",
+    "Your session tokens (access and refresh) are saved in this browser's localStorage under one namespaced onemore key so a reload keeps you signed in; the app re-checks them with the server on load and removes them on sign-out or when the server refuses the session. Appearance, language and accessibility choices persist in this browser's localStorage. Recent searches persist in this browser's localStorage. OAuth PKCE verifiers live in sessionStorage for the duration of one sign-in attempt. Avatar images live in the public `avatars` Supabase Storage bucket under your account folder.",
   ],
   [
     "Infrastructure",
@@ -101,7 +101,7 @@ export const privacy = [
 export function LegalBody({ sections }: { sections: string[][] }) {
   return (
     <div className="space-y-5 text-sm leading-relaxed">
-      <p className="text-xs text-muted-foreground">Last updated October 13, 2026</p>
+      <p className="text-xs text-muted-foreground">Last updated October 17, 2026</p>
       {sections.map(([h, b]) => (
         <section key={h}>
           <h2 className="font-semibold">{h}</h2>

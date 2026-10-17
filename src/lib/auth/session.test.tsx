@@ -3,9 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/lib/api/client";
 import {
+  SESSION_STORAGE_KEY,
   clearSession,
   getAccessToken,
   getAuthState,
+  initializeSession,
   loadSession,
   refreshSession,
   signIn,
@@ -72,6 +74,34 @@ function requestOf(spy: ReturnType<typeof mockFetch>, index = 0) {
     headers: new Headers(init?.headers),
     body: init?.body === undefined ? undefined : JSON.parse(String(init.body)),
   };
+}
+
+/** A stored entry in the shape `initializeSession` reads back. */
+function storedPayload(
+  tokens: Record<string, unknown> = {},
+  session: Record<string, unknown> = {},
+) {
+  return {
+    version: 1,
+    tokens: {
+      accessToken: "access-token-1",
+      refreshToken: "refresh-token-1",
+      tokenType: "bearer",
+      expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+      ...tokens,
+    },
+    session: {
+      userId: testUserID,
+      role: "user",
+      email: "player@example.com",
+      onboarded: false,
+      ...session,
+    },
+  };
+}
+
+function storeSession(payload: Record<string, unknown>): void {
+  window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(payload));
 }
 
 beforeEach(() => {
@@ -154,6 +184,8 @@ describe("signUp", () => {
 
     expect(requestOf(spy).path).toBe("/api/v1/auth/sign-up");
     expect(getAuthState().status).toBe("authenticated");
+    // A fresh signup is stored like any other session, so it survives a reload.
+    expect(window.localStorage.getItem(SESSION_STORAGE_KEY)).not.toBeNull();
   });
 
   it("surfaces an existing account as a conflict", async () => {
@@ -245,6 +277,8 @@ describe("signOut", () => {
     expect(request.headers.get("Authorization")).toBe("Bearer access-token-1");
     expect(getAuthState()).toEqual({ status: "anonymous" });
     expect(getAccessToken()).toBeUndefined();
+    // Signing out must not leave a restorable session behind.
+    expect(window.localStorage.getItem(SESSION_STORAGE_KEY)).toBeNull();
   });
 
   it("forgets the session even when the revoke fails", async () => {
@@ -272,14 +306,28 @@ describe("signOut", () => {
 });
 
 describe("credential handling", () => {
-  it("never writes a token to web storage or a cookie", async () => {
+  it("persists the session under one namespaced key and nowhere else", async () => {
     const setItem = vi.spyOn(Storage.prototype, "setItem");
     mockFetch(() => jsonResponse(sessionPayload()));
 
     await signIn("player@example.com", "correct-horse");
 
-    expect(setItem).not.toHaveBeenCalled();
-    expect(window.localStorage.length).toBe(0);
+    // Exactly one write, to the one key this module owns.
+    expect(setItem).toHaveBeenCalledTimes(1);
+    expect(setItem.mock.calls[0]?.[0]).toBe(SESSION_STORAGE_KEY);
+    const raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
+    expect(raw).not.toBeNull();
+    const stored = JSON.parse(raw ?? "null") as {
+      version: number;
+      tokens: { accessToken: string };
+      session: { userId: string };
+    };
+    expect(stored.version).toBe(1);
+    expect(stored.tokens.accessToken).toBe("access-token-1");
+    expect(stored.session.userId).toBe(testUserID);
+    // Nothing else is written: no other localStorage entry, no sessionStorage
+    // and no cookie carries a credential.
+    expect(window.localStorage.length).toBe(1);
     expect(window.sessionStorage.length).toBe(0);
     expect(document.cookie).not.toContain("access-token-1");
   });
@@ -290,6 +338,204 @@ describe("credential handling", () => {
     const failure = await signIn("player@example.com", "correct-horse").catch((e) => e);
 
     expect(String(failure)).not.toContain("correct-horse");
+  });
+});
+
+describe("session restoration", () => {
+  it("publishes the stored session immediately and re-validates it with the server", async () => {
+    storeSession(storedPayload());
+    const spy = mockFetch(() =>
+      jsonResponse({ userId: testUserID, role: "admin", onboarded: true }),
+    );
+
+    const restoring = initializeSession();
+
+    // Synchronous: a valid stored session is usable before the server answers.
+    expect(getAuthState()).toEqual({
+      status: "authenticated",
+      session: expect.objectContaining({ userId: testUserID }),
+    });
+    expect(getAccessToken()).toBe("access-token-1");
+
+    await restoring;
+
+    const request = requestOf(spy);
+    expect(request.method).toBe("GET");
+    expect(request.path).toBe("/api/v1/auth/session");
+    expect(request.headers.get("Authorization")).toBe("Bearer access-token-1");
+    // The verified view replaces the cached one.
+    expect(getAuthState()).toEqual({
+      status: "authenticated",
+      session: { userId: testUserID, role: "admin", onboarded: true },
+    });
+  });
+
+  it("rotates an expired stored pair before restoring the session", async () => {
+    storeSession(storedPayload({ expiresAt: new Date(Date.now() - 60_000).toISOString() }));
+    const spy = mockFetch(() =>
+      jsonResponse(
+        sessionPayload({
+          tokens: {
+            accessToken: "access-token-2",
+            refreshToken: "refresh-token-2",
+            tokenType: "bearer",
+            expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+          },
+        }),
+      ),
+    );
+
+    const restoring = initializeSession();
+    // Nothing is claimed while the refresh token's answer is outstanding.
+    expect(getAuthState()).toEqual({ status: "restoring" });
+
+    await restoring;
+
+    const request = requestOf(spy);
+    expect(request.method).toBe("POST");
+    expect(request.path).toBe("/api/v1/auth/refresh");
+    expect(request.body).toEqual({ refreshToken: "refresh-token-1" });
+    expect(getAccessToken()).toBe("access-token-2");
+    expect(getAuthState().status).toBe("authenticated");
+    // The rotated pair is what the next reload will read.
+    const stored = JSON.parse(window.localStorage.getItem(SESSION_STORAGE_KEY) ?? "null") as {
+      tokens: { accessToken: string };
+    };
+    expect(stored.tokens.accessToken).toBe("access-token-2");
+  });
+
+  it("clears a stored session the server definitively refuses", async () => {
+    storeSession(storedPayload());
+    const spy = mockFetch(() =>
+      errorResponse(401, "unauthorized", "Your session is no longer valid."),
+    );
+
+    await initializeSession();
+
+    expect(requestOf(spy).path).toBe("/api/v1/auth/session");
+    // The refused access token is retried through the refresh token; a refused
+    // refresh token is a definitive end of the session.
+    expect(requestOf(spy, 1).path).toBe("/api/v1/auth/refresh");
+    expect(getAuthState()).toEqual({ status: "anonymous" });
+    expect(getAccessToken()).toBeUndefined();
+    expect(window.localStorage.getItem(SESSION_STORAGE_KEY)).toBeNull();
+  });
+
+  it("keeps the stored pair but stays anonymous when the server cannot answer", async () => {
+    storeSession(storedPayload());
+    mockFetch(() =>
+      errorResponse(503, "service_unavailable", "Authentication is not available right now."),
+    );
+
+    await initializeSession();
+
+    // The server could not confirm; claiming a session would be a lie, but the
+    // pair may still be valid, so a later boot can try again.
+    expect(getAuthState()).toEqual({ status: "anonymous" });
+    expect(getAccessToken()).toBeUndefined();
+    expect(window.localStorage.getItem(SESSION_STORAGE_KEY)).not.toBeNull();
+  });
+
+  it("drops a malformed entry without asking the server", async () => {
+    const spy = mockFetch(() => jsonResponse({}));
+
+    window.localStorage.setItem(SESSION_STORAGE_KEY, "{not json");
+    await initializeSession();
+    expect(window.localStorage.getItem(SESSION_STORAGE_KEY)).toBeNull();
+
+    // The right shape with the wrong version is still not this app's session.
+    storeSession({ ...storedPayload(), version: 99 });
+    await initializeSession();
+
+    expect(spy).not.toHaveBeenCalled();
+    expect(getAuthState()).toEqual({ status: "anonymous" });
+    expect(window.localStorage.getItem(SESSION_STORAGE_KEY)).toBeNull();
+  });
+
+  it("stays anonymous without a request when nothing is stored", async () => {
+    const spy = mockFetch(() => jsonResponse({}));
+
+    await initializeSession();
+
+    expect(spy).not.toHaveBeenCalled();
+    expect(getAuthState()).toEqual({ status: "anonymous" });
+  });
+
+  it("does not let a refused restore overwrite a sign-in that landed while it was in flight", async () => {
+    storeSession(storedPayload({ expiresAt: new Date(Date.now() - 60_000).toISOString() }));
+    let refuseRefresh: ((response: Response) => void) | undefined;
+    const spy = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/auth/refresh")) {
+        return new Promise<Response>((resolve) => {
+          refuseRefresh = resolve;
+        });
+      }
+      return jsonResponse(sessionPayload());
+    });
+    vi.stubGlobal("fetch", spy);
+
+    const restoring = initializeSession();
+    await signIn("player@example.com", "correct-horse");
+    expect(getAuthState().status).toBe("authenticated");
+
+    // The stale restore's refresh comes back refused *after* the fresh sign-in.
+    refuseRefresh?.(errorResponse(401, "unauthorized", "Session expired."));
+    await restoring;
+
+    expect(getAccessToken()).toBe("access-token-1");
+    expect(getAuthState()).toEqual({
+      status: "authenticated",
+      session: expect.objectContaining({ userId: testUserID }),
+    });
+    expect(window.localStorage.getItem(SESSION_STORAGE_KEY)).not.toBeNull();
+  });
+});
+
+describe("proactive refresh", () => {
+  it("rotates the pair before the access token expires", async () => {
+    vi.useFakeTimers();
+    try {
+      const spy = mockFetch((url) =>
+        url.endsWith("/auth/refresh")
+          ? jsonResponse(
+              sessionPayload({
+                tokens: {
+                  accessToken: "access-token-2",
+                  refreshToken: "refresh-token-2",
+                  tokenType: "bearer",
+                  expiresIn: 3600,
+                },
+              }),
+            )
+          : jsonResponse(
+              sessionPayload({
+                tokens: {
+                  accessToken: "access-token-1",
+                  refreshToken: "refresh-token-1",
+                  tokenType: "bearer",
+                  expiresIn: 120,
+                },
+              }),
+            ),
+      );
+
+      await signIn("player@example.com", "correct-horse");
+      expect(getAccessToken()).toBe("access-token-1");
+
+      // Nothing happens before the refresh point: 120s lifetime minus the 60s
+      // skew leaves a 60s delay.
+      await vi.advanceTimersByTimeAsync(59_000);
+      expect(spy).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(requestOf(spy, 1).path).toBe("/api/v1/auth/refresh");
+      expect(requestOf(spy, 1).body).toEqual({ refreshToken: "refresh-token-1" });
+      expect(getAccessToken()).toBe("access-token-2");
+    } finally {
+      clearSession();
+      vi.useRealTimers();
+    }
   });
 });
 
