@@ -11,7 +11,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { authErrorMessage, loadSession, signUp, useAuth } from "@/lib/auth/session";
+import { ApiError } from "@/lib/api/client";
+import { authErrorMessage, loadSession, signOut, signUp, useAuth } from "@/lib/auth/session";
 import { completeRegistration } from "@/lib/users/registration";
 import { seo } from "@/lib/seo";
 import { cn } from "@/lib/utils";
@@ -69,6 +70,7 @@ function Signup() {
   const [creds, setCreds] = useState<{ email: string; password: string }>();
   const [credError, setCredError] = useState<string>();
   const [err, setErr] = useState<string>();
+  const [errCode, setErrCode] = useState<string>();
   const [busy, setBusy] = useState(false);
 
   // A signed-in account that has not finished signing up — a Google sign-in, or
@@ -77,6 +79,13 @@ function Signup() {
   // The database decides (`onboarded_at` through the session), never a local
   // guess, so a reload mid-way lands back on the same step.
   const completing = auth.status === "authenticated" && auth.session.onboarded === false;
+  // Signing in to an account that already exists must never lead back into the
+  // registration form: there is nothing to create, and asking for a password
+  // for an email that already has an account is exactly how a duplicate
+  // registration gets attempted. `onboarded === undefined` is not "new" — it
+  // means the server could not read the marker — so it is treated as existing
+  // too and offered the idempotent completion instead.
+  const alreadyRegistered = auth.status === "authenticated" && !completing;
 
   useEffect(() => {
     if (!completing) return;
@@ -114,7 +123,18 @@ function Signup() {
         nav({ to: "/verify-email", search: { email: creds.email } });
       }
     } catch (error) {
-      setErr(authErrorMessage(error));
+      // The API answers a duplicate registration with 409 `conflict`. Its
+      // message is the one the screen shows, and the link below turns it into
+      // the next step rather than a dead end. The check is on the status and
+      // code, not the wording, so a translated or re-worded message still maps.
+      const duplicate =
+        error instanceof ApiError && (error.status === 409 || error.code === "conflict");
+      setErr(
+        duplicate
+          ? "An account with this email already exists. Please sign in instead."
+          : authErrorMessage(error),
+      );
+      setErrCode(duplicate ? "conflict" : error instanceof ApiError ? error.code : "unknown_error");
     } finally {
       setBusy(false);
     }
@@ -136,9 +156,66 @@ function Signup() {
       nav({ to: "/account-created" });
     } catch (error) {
       setErr(authErrorMessage(error));
+      setErrCode(error instanceof ApiError ? error.code : "unknown_error");
     } finally {
       setBusy(false);
     }
+  }
+
+  // A completed account is not sent back through registration. The signed-in
+  // identity is the answer to "does this account exist?", and offering a form
+  // that would create a second one is the bug this screen used to have.
+  if (alreadyRegistered) {
+    return (
+      <AuthLayout
+        title="You're already signed in"
+        subtitle={
+          auth.status === "authenticated" && auth.session.email
+            ? `Signed in as ${auth.session.email}.`
+            : "This browser already has a session."
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            This account already exists, so there is nothing to register again. Continue to your
+            profile, or log out first if you meant to create a different account.
+          </p>
+          {err && (
+            <p className="text-sm text-destructive" role="alert">
+              {err}
+            </p>
+          )}
+          <div className="grid gap-2">
+            <Button asChild variant="play" size="xl" className="w-full">
+              <Link to="/profile">Go to your profile</Link>
+            </Button>
+            {auth.status === "authenticated" && auth.session.onboarded === undefined && (
+              <Button
+                variant="secondary"
+                size="lg"
+                className="w-full"
+                disabled={busy}
+                onClick={() => void finishRegistration()}
+              >
+                Finish setting up my account
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="lg"
+              className="w-full"
+              disabled={busy}
+              onClick={() => {
+                // The local session is cleared even if revoking it fails.
+                void signOut().catch(() => undefined);
+              }}
+            >
+              Log out and create a different account
+            </Button>
+          </div>
+        </div>
+      </AuthLayout>
+    );
   }
 
   return (
@@ -328,9 +405,27 @@ function Signup() {
             })}
           </div>
           {err && (
-            <p className="mt-4 text-sm text-destructive" role="alert">
-              {err}
-            </p>
+            <div className="mt-4 text-sm text-destructive" role="alert">
+              <p>{err}</p>
+              {errCode === "conflict" && creds && (
+                <Link
+                  to="/login"
+                  search={{ email: creds.email }}
+                  className="mt-1 inline-block font-medium underline underline-offset-4"
+                >
+                  Sign in instead
+                </Link>
+              )}
+              {errCode === "email_not_confirmed" && creds && (
+                <Link
+                  to="/verify-email"
+                  search={{ email: creds.email }}
+                  className="mt-1 inline-block font-medium underline underline-offset-4"
+                >
+                  Resend the confirmation email
+                </Link>
+              )}
+            </div>
           )}
           <p className="mt-4 text-xs text-muted-foreground">
             You must be 13 or older to use onemore.

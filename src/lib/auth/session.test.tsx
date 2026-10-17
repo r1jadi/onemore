@@ -352,6 +352,71 @@ describe("rotateRefusedSession", () => {
     await expect(rotateRefusedSession()).resolves.toBe("signed-out");
     expect(spy).not.toHaveBeenCalled();
   });
+
+  it("shares one rotation between concurrent callers", async () => {
+    // Two requests refused at the same moment used to spend the same refresh
+    // token twice. Supabase treats a second use as reuse and can revoke the
+    // whole token family, which signed the visitor out. The rotation is now
+    // single-flight: one request, one new pair, both callers succeed.
+    let releaseRefresh: ((response: Response) => void) | undefined;
+    const spy = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/auth/sign-in")) return jsonResponse(sessionPayload());
+      return new Promise<Response>((resolve) => {
+        releaseRefresh = resolve;
+      });
+    });
+    vi.stubGlobal("fetch", spy);
+    await signIn("player@example.com", "correct-horse");
+
+    const first = rotateRefusedSession();
+    const second = rotateRefusedSession();
+    // Let both callers reach the shared request before it answers.
+    await Promise.resolve();
+    releaseRefresh?.(
+      jsonResponse(
+        sessionPayload({
+          tokens: {
+            accessToken: "access-token-2",
+            refreshToken: "refresh-token-2",
+            tokenType: "bearer",
+            expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+          },
+        }),
+      ),
+    );
+
+    await expect(Promise.all([first, second])).resolves.toEqual(["rotated", "rotated"]);
+    const refreshCalls = spy.mock.calls.filter(([input]) =>
+      String(input).endsWith("/auth/refresh"),
+    );
+    expect(refreshCalls).toHaveLength(1);
+    expect(getAccessToken()).toBe("access-token-2");
+    expect(getAuthState().status).toBe("authenticated");
+  });
+
+  it("adopts a pair another tab rotated instead of ending the session", async () => {
+    // This tab's refresh token was already spent by another tab, so the server
+    // refuses it as reuse. The other tab stored the surviving pair; adopting it
+    // keeps the visitor signed in rather than clearing a valid session.
+    mockFetch((url) =>
+      url.endsWith("/auth/sign-in")
+        ? jsonResponse(sessionPayload())
+        : errorResponse(400, "invalid_grant", "Invalid Refresh Token: Already Used"),
+    );
+    await signIn("player@example.com", "correct-horse");
+
+    storeSession(
+      storedPayload({
+        accessToken: "access-token-2",
+        refreshToken: "refresh-token-2",
+      }),
+    );
+
+    await expect(rotateRefusedSession()).resolves.toBe("rotated");
+    expect(getAccessToken()).toBe("access-token-2");
+    expect(getAuthState().status).toBe("authenticated");
+    expect(window.localStorage.getItem(SESSION_STORAGE_KEY)).not.toBeNull();
+  });
 });
 
 describe("signOut", () => {

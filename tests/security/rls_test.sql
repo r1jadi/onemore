@@ -1805,6 +1805,48 @@ select rls_test.blocked(
   'following an already-followed account touches no row (idempotent retry, no duplicate notification)'
 );
 
+-- The two profile statistics are measured from the graph, in both directions,
+-- and a second follow attempt must not inflate them.
+select rls_test.ok(
+  (select count(*) from public.follows where followee_id = '22222222-2222-4222-8222-222222222222') = 1,
+  'a profile''s followers count is the number of rows pointing at it'
+);
+select rls_test.ok(
+  (select count(*) from public.follows where follower_id = '11111111-1111-4111-8111-111111111111') = 1,
+  'a profile''s following count is the number of rows it owns'
+);
+select set_config('request.jwt.claims',
+  json_build_object('sub', :'bob', 'role', 'authenticated')::text, true);
+select rls_test.allow(
+  $$insert into public.follows (follower_id, followee_id) values ('22222222-2222-4222-8222-222222222222', '33333333-3333-4333-8333-333333333333')
+    on conflict do nothing$$,
+  'a second account can follow a third'
+);
+select set_config('request.jwt.claims',
+  json_build_object('sub', :'alice', 'role', 'authenticated')::text, true);
+select rls_test.ok(
+  (select count(*) from public.follows where followee_id = '33333333-3333-4333-8333-333333333333') = 1,
+  'followers are counted per profile, not globally'
+);
+select rls_test.ok(
+  (select count(*) from public.follows where follower_id = '11111111-1111-4111-8111-111111111111') = 1,
+  'another account''s follow does not change this profile''s following count'
+);
+
+-- The counts are public, like the graph itself: an anonymous visitor sees the
+-- same numbers a signed-in reader does.
+reset role;
+select set_config('request.jwt.claims', '{"role":"anon"}', true);
+set local role anon;
+select rls_test.ok(
+  (select count(*) from public.follows where followee_id = '33333333-3333-4333-8333-333333333333') = 1,
+  'an anonymous visitor can read the follower count'
+);
+reset role;
+select set_config('request.jwt.claims',
+  json_build_object('sub', :'alice', 'role', 'authenticated')::text, true);
+set local role authenticated;
+
 -- The Following feed: bob's published game appears for alice, drafts and
 -- official ownerless games do not, and strangers' games do not.
 select rls_test.ok(

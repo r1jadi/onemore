@@ -28,9 +28,25 @@ export const Route = createFileRoute("/auth/callback")({
 
 type Outcome =
   | { status: "working" }
-  | { status: "done"; next: string }
+  | { status: "done"; next: string; onboarded?: boolean }
   | { status: "confirmed-no-session"; next: string }
   | { status: "failed"; message: string };
+
+/**
+ * Where a completed sign-in lands.
+ *
+ * An account whose registration is unfinished finishes it at `/signup` — that
+ * is the one screen that can record the marker. An account that already
+ * finished goes wherever it was headed. The two cases are decided here, from
+ * the server's session view, so a returning Google user never has to walk back
+ * through registration to get in, and a new one is not dropped into the app
+ * half-registered.
+ */
+function destinationFor(next: string, onboarded: boolean | undefined): string {
+  if (onboarded === false) return "/signup";
+  if (next === "/signup" || next.startsWith("/signup?")) return "/profile";
+  return next;
+}
 
 /**
  * Email-verification and OAuth callback.
@@ -68,11 +84,15 @@ function Callback() {
       const fragment = parseFragment(window.location.hash);
       if (fragment["access_token"] && fragment["refresh_token"]) {
         try {
-          await adoptSupabaseTokens({
+          const adopted = await adoptSupabaseTokens({
             accessToken: fragment["access_token"],
             refreshToken: fragment["refresh_token"],
           });
-          return { status: "done", next };
+          return {
+            status: "done",
+            next: destinationFor(next, adopted.session.onboarded),
+            onboarded: adopted.session.onboarded,
+          };
         } catch (error) {
           return { status: "failed", message: authErrorMessage(error) };
         }
@@ -80,16 +100,24 @@ function Callback() {
       if (search.token_hash && search.type) {
         try {
           const pair = await verifyEmailLink(search.token_hash, search.type);
-          await adoptSupabaseTokens(pair);
-          return { status: "done", next };
+          const adopted = await adoptSupabaseTokens(pair);
+          return {
+            status: "done",
+            next: destinationFor(next, adopted.session.onboarded),
+            onboarded: adopted.session.onboarded,
+          };
         } catch (error) {
           return { status: "failed", message: authErrorMessage(error) };
         }
       }
       if (search.code) {
         try {
-          await exchangeOAuthCode(search.code);
-          return { status: "done", next };
+          const adopted = await exchangeOAuthCode(search.code);
+          return {
+            status: "done",
+            next: destinationFor(next, adopted.session.onboarded),
+            onboarded: adopted.session.onboarded,
+          };
         } catch (error) {
           return { status: "failed", message: authErrorMessage(error) };
         }
@@ -131,9 +159,18 @@ function Callback() {
 
   if (outcome.status === "done") {
     return (
-      <AuthLayout title="Confirmed" subtitle="Taking you back to onemore…">
+      <AuthLayout
+        title="Signed in"
+        subtitle={
+          outcome.onboarded === false
+            ? "One more step to finish your account."
+            : "Taking you back to onemore…"
+        }
+      >
         <p className="text-sm text-muted-foreground" role="status">
-          Email confirmed. Redirecting…
+          {outcome.onboarded === false
+            ? "Finishing your registration…"
+            : "Your account is ready. Redirecting…"}
         </p>
       </AuthLayout>
     );
@@ -190,6 +227,17 @@ function parseFragment(hash: string): Record<string, string> {
 function describeOAuthError(code: string, description?: string): string {
   if (code === "access_denied") {
     return "Google sign-in was cancelled. Try again when you're ready.";
+  }
+  // Supabase refuses to attach a Google identity to an address that already
+  // belongs to an account it cannot safely link. Nothing was created, and the
+  // way in is the existing sign-in method — the same answer the registration
+  // flow gives for a duplicate email.
+  if (
+    code === "email_exists" ||
+    code === "user_already_exists" ||
+    code === "identity_already_exists"
+  ) {
+    return "An account with this email already exists. Please sign in instead.";
   }
   return description && description !== ""
     ? description

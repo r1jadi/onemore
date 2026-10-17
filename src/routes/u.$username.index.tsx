@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { EmptyState, ErrorState, ListSkeleton } from "@/components/common";
 import { ProfileView } from "@/components/social/ProfileView";
 import { listBlockedIds } from "@/lib/settings/blocked";
-import { fetchProfileByUsername, getFollowCounts } from "@/lib/social/follows";
+import { fetchProfileByUsername, useFollowCounts } from "@/lib/social/follows";
 import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/u/$username/")({
@@ -27,17 +27,16 @@ function UserProfile() {
   const { username } = Route.useParams();
   const [state, setState] = useState<
     | { status: "loading" }
-    | {
-        status: "ready";
-        userId: string;
-        name: string;
-        bio?: string;
-        counts: { followers: number; following: number };
-      }
+    | { status: "ready"; userId: string; name: string; bio?: string }
     | { status: "not-found" }
     | { status: "blocked" }
     | { status: "error"; message: string }
   >({ status: "loading" });
+
+  // Followers/following are read from the graph for the profile that resolved,
+  // and re-read after every follow or unfollow (see `useFollowCounts`), so the
+  // numbers on screen always describe the same account as the header.
+  const counts = useFollowCounts(state.status === "ready" ? state.userId : undefined);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,14 +53,12 @@ function UserProfile() {
         setState({ status: "blocked" });
         return;
       }
-      const counts = await getFollowCounts(profile.id);
       if (!cancelled) {
         setState({
           status: "ready",
           userId: profile.id,
           name: profile.display_name,
           bio: profile.bio ?? undefined,
-          counts,
         });
       }
     })().catch((error: unknown) => {
@@ -78,7 +75,7 @@ function UserProfile() {
   }, [username]);
 
   if (state.status === "loading") {
-    return <ProfileView user={{ username, name: username }} loading />;
+    return <ProfileView user={{ username, name: username, statsLoading: true }} loading />;
   }
   if (state.status === "not-found") {
     return (
@@ -118,7 +115,10 @@ function UserProfile() {
         name: state.name,
         bio: state.bio,
         userId: state.userId,
-        stats: { followers: state.counts.followers, following: state.counts.following, played: 0 },
+        stats: counts.counts,
+        statsLoading: counts.status === "loading" || counts.status === "idle",
+        statsError: counts.error,
+        onRetryStats: counts.reload,
         hidePlayed: true,
       }}
     />

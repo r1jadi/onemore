@@ -3,6 +3,7 @@ import { EmptyState, ErrorState } from "@/components/common";
 import { ProfileView, type ProfileHeader } from "@/components/social/ProfileView";
 import { Button } from "@/components/ui/button";
 import { seo } from "@/lib/seo";
+import { useFollowCounts, type FollowCountsState } from "@/lib/social/follows";
 import {
   avatarUrl,
   refreshProfile,
@@ -24,24 +25,31 @@ export const Route = createFileRoute("/profile")({
 function OwnProfile() {
   const state = useProfile();
   const profile = state.status === "ready" ? state.profile : undefined;
+  // Counts are keyed by the profile the API resolved from the token, never by
+  // a client-supplied id; they refresh after every follow or unfollow.
+  const counts = useFollowCounts(profile?.id);
 
   return (
     <ProfileView
       self
       loading={!profile && (state.status === "idle" || state.status === "loading")}
-      user={profile ? header(profile) : { username: "", name: "" }}
+      user={profile ? header(profile, counts) : { username: "", name: "" }}
       fallback={profile ? undefined : absent(state)}
     />
   );
 }
 
 /** The API's profile, mapped onto the fields the view draws. */
-function header(profile: Profile): ProfileHeader {
+function header(profile: Profile, counts: FollowCountsState): ProfileHeader {
   return {
     username: profile.username,
     name: profile.displayName,
     bio: profile.bio,
     avatarSrc: avatarUrl(profile),
+    stats: counts.counts,
+    statsLoading: counts.status === "loading" || counts.status === "idle",
+    statsError: counts.error,
+    onRetryStats: counts.reload,
   };
 }
 

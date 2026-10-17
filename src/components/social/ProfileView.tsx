@@ -41,7 +41,17 @@ export type ProfileHeader = {
   isFollowing?: boolean;
   /** Public URL of the profile picture. Absent renders the account's initials. */
   avatarSrc?: string;
-  stats?: { followers: number; following: number; played: number };
+  /**
+   * Real counts from the follow graph. A member that is `undefined` renders an
+   * em dash, never a zero: an unread value and a measured zero are different
+   * answers, and only one of them belongs on screen before the read lands.
+   */
+  stats?: { followers?: number; following?: number; played?: number };
+  /** True while the counts are still being read. */
+  statsLoading?: boolean;
+  /** A failed count read, shown as text with an optional retry. */
+  statsError?: string;
+  onRetryStats?: () => void;
   /** When the played count is unknown, hide it rather than showing zero. */
   hidePlayed?: boolean;
 };
@@ -152,20 +162,36 @@ export function ProfileView({
                     <UserName username={user.username} verified={user.verified} />
                   </p>
                   {user.bio && <p className="mt-2 max-w-sm text-sm">{user.bio}</p>}
-                  {user.stats && (
+                  {(user.stats !== undefined || user.statsLoading) && (
                     <div className="mt-4 flex justify-center gap-8 md:justify-start">
                       <Stat
-                        value={user.stats.followers}
+                        value={user.stats?.followers ?? "—"}
                         label="Followers"
                         conn={{ username: user.username, tab: "followers" }}
                       />
                       <Stat
-                        value={user.stats.following}
+                        value={user.stats?.following ?? "—"}
                         label="Following"
                         conn={{ username: user.username, tab: "following" }}
                       />
-                      {!user.hidePlayed && <Stat value={user.stats.played} label="Games played" />}
+                      {!user.hidePlayed && user.stats?.played !== undefined && (
+                        <Stat value={user.stats.played} label="Games played" />
+                      )}
                     </div>
+                  )}
+                  {user.statsError && (
+                    <p className="mt-2 text-xs text-muted-foreground" role="status">
+                      Couldn't load follower counts.{" "}
+                      {user.onRetryStats && (
+                        <button
+                          type="button"
+                          className="font-medium text-foreground underline underline-offset-4"
+                          onClick={user.onRetryStats}
+                        >
+                          Retry
+                        </button>
+                      )}
+                    </p>
                   )}
                   <div className="mt-4 flex justify-center gap-2 md:justify-start">
                     {self ? (

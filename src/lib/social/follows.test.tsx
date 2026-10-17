@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { clearSession, signIn } from "@/lib/auth/session";
+import { clearSession, getAuthState, signIn } from "@/lib/auth/session";
 import { followUser, useFollowState } from "@/lib/social/follows";
 
 const testUserID = "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f";
@@ -73,6 +73,13 @@ async function signInAs() {
   await signIn("player@example.com", "correct-horse");
 }
 
+/** A syntactically valid Supabase access token; the signature is never used here. */
+function jwt(subject: string): string {
+  const part = (value: unknown) =>
+    btoa(JSON.stringify(value)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return `${part({ alg: "HS256", typ: "JWT" })}.${part({ sub: subject })}.signature`;
+}
+
 beforeEach(() => {
   clearSession();
 });
@@ -135,6 +142,63 @@ describe("followUser", () => {
     // from, and a browser-supplied id is not a credential.
     expect(spy).not.toHaveBeenCalled();
   });
+
+  it("takes the follower from the access token, not from the cached session view", async () => {
+    // The cached view can be older than the token (a restore publishes it
+    // before the server confirms it). A follow must be filed under the account
+    // the token is for, which is also the id RLS checks against `auth.uid()`.
+    const tokenSubject = "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a";
+    const payload = sessionPayload();
+    payload.tokens.accessToken = jwt(tokenSubject);
+    const spy = mockFetch((url) =>
+      url.includes("/auth/sign-in") ? jsonResponse(payload) : jsonResponse([], 201),
+    );
+    await signInAs();
+
+    await followUser(otherUserID);
+
+    expect(requestOf(spy, 1).body).toEqual({
+      follower_id: tokenSubject,
+      followee_id: otherUserID,
+    });
+  });
+
+  it("rotates a lapsed access token once and persists the follow", async () => {
+    // A follow tapped just after the access token expires used to fail with 401
+    // and leave nothing behind. It now rotates the pair (single-flight) and
+    // retries the same write with the fresh token.
+    let inserts = 0;
+    const spy = mockFetch((url, init) => {
+      if (url.includes("/auth/sign-in")) return jsonResponse(sessionPayload());
+      if (url.includes("/auth/refresh")) {
+        return jsonResponse({
+          ...sessionPayload(),
+          tokens: {
+            accessToken: "access-token-2",
+            refreshToken: "refresh-token-2",
+            tokenType: "bearer",
+            expiresIn: 3600,
+          },
+        });
+      }
+      inserts += 1;
+      const token = new Headers(init?.headers).get("Authorization");
+      return token === "Bearer access-token-2" ? jsonResponse([], 201) : jsonResponse({}, 401);
+    });
+    await signInAs();
+
+    await expect(followUser(otherUserID)).resolves.toBeUndefined();
+
+    expect(inserts).toBe(2);
+    const requests = spy.mock.calls.map(([input, init]) => ({
+      path: new URL(String(input)).pathname,
+      auth: new Headers(init?.headers).get("Authorization"),
+    }));
+    expect(requests.map((r) => r.path)).toContain("/api/v1/auth/refresh");
+    expect(
+      requests.filter((r) => r.path === "/rest/v1/follows" && r.auth === "Bearer access-token-2"),
+    ).toHaveLength(1);
+  });
 });
 
 describe("useFollowState", () => {
@@ -155,6 +219,33 @@ describe("useFollowState", () => {
     expect(parsed.searchParams.get("follower_id")).toBe(`eq.${testUserID}`);
     expect(parsed.searchParams.get("followee_id")).toBe(`eq.${otherUserID}`);
     expect(read.headers.get("Authorization")).toBe("Bearer access-token-1");
+  });
+
+  it("restores the stored relationship after signing out and back in", async () => {
+    // The row lives in the database, so the state has to be read back from the
+    // graph — not remembered from the session that just ended.
+    let following = true;
+    mockFetch((url, init) => {
+      if (url.includes("/auth/sign-in")) return jsonResponse(sessionPayload());
+      if ((init?.method ?? "GET") === "DELETE") {
+        following = false;
+        return new Response(null, { status: 204 });
+      }
+      return jsonResponse(following ? [followRow()] : []);
+    });
+    await signInAs();
+
+    const before = renderHook(() => useFollowState(otherUserID));
+    await waitFor(() => expect(before.result.current.following).toBe(true));
+    before.unmount();
+
+    clearSession();
+    expect(getAuthState()).toEqual({ status: "anonymous" });
+    await signInAs();
+
+    const after = renderHook(() => useFollowState(otherUserID));
+    await waitFor(() => expect(after.result.current.loading).toBe(false));
+    expect(after.result.current.following).toBe(true);
   });
 
   it("trusts a state the caller just read without a second query", async () => {

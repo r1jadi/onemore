@@ -166,16 +166,25 @@ describe("unfinished sign-up", () => {
     expect(new Headers(writes[0][1]?.headers).get("Authorization")).toBe("Bearer access-token-1");
   });
 
-  it("leaves an account that finished registration alone", async () => {
-    stubBackend(true);
+  it("recognises an account that finished registration instead of registering it again", async () => {
+    const backend = stubBackend(true);
     await signIn("player@example.com", "correct-horse");
 
     const router = await renderApp("/signup");
 
-    // The ordinary sign-up screen, not the completion step: an existing
-    // account is not treated as new.
-    expect(await screen.findByText("Create your account")).toBeInTheDocument();
+    // A completed account is not offered a second registration: the screen says
+    // so and points at the profile. It never shows the credential step, so a
+    // duplicate sign-up cannot be attempted from here.
+    expect(await screen.findByText("You're already signed in")).toBeInTheDocument();
+    expect(screen.getByText(/Signed in as player@example.com/)).toBeInTheDocument();
+    expect(screen.queryByText("Create your account")).toBeNull();
     expect(screen.queryByText("Choose your name")).toBeNull();
+    expect(screen.getByRole("link", { name: "Go to your profile" })).toBeInTheDocument();
+
+    // Nothing was registered and nothing was marked: one sign-in, no writes.
+    expect(
+      backend.spy.mock.calls.filter(([input]) => String(input).includes("/auth/sign-up")),
+    ).toHaveLength(0);
     await waitFor(() => expect(router.state.location.pathname).toBe("/signup"));
   });
 });

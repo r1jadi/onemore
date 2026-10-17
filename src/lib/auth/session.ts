@@ -16,6 +16,13 @@
  * definitively refuses is cleared locally. A transient failure (network, rate
  * limit, 5xx) keeps the stored pair for a later attempt but reports anonymous
  * rather than claiming an unverified session.
+ *
+ * Rotation is single-flight: one refresh request per refresh token at a time,
+ * shared by every caller. Supabase treats a second use of a rotated token as
+ * reuse and can revoke the whole token family, so a burst of concurrent 401s
+ * must not each spend the same token — that race is what used to sign people
+ * out mid-session. A pair another tab rotated is adopted from storage instead
+ * of being spent again.
  */
 
 import { useSyncExternalStore } from "react";
@@ -127,6 +134,42 @@ export function getAuthState(): AuthState {
  */
 export function getAccessToken(): string | undefined {
   return tokens?.accessToken;
+}
+
+/**
+ * The subject (`sub`) of an access token, or `undefined` when the value is not
+ * a JWT this app can read.
+ *
+ * The payload is decoded without checking the signature: the server verifies
+ * it on every request, so this value is only ever used to *build* a request (the
+ * actor a row has to belong to), never to authorize one. Reading it from the
+ * token rather than the cached session view means a stale view can never aim a
+ * write at — or read a follow state for — the wrong account: the database still
+ * checks it against `auth.uid()` and refuses a mismatch instead of hiding it.
+ */
+export function accessTokenSubject(token: string | undefined): string | undefined {
+  if (!token) return undefined;
+  const parts = token.split(".");
+  if (parts.length !== 3) return undefined;
+  try {
+    const payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = payload.padEnd(payload.length + ((4 - (payload.length % 4)) % 4), "=");
+    const decoded = JSON.parse(atob(padded)) as { sub?: unknown };
+    return typeof decoded.sub === "string" && decoded.sub !== "" ? decoded.sub : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The account a request must act as: the token's own subject when it can be
+ * read, otherwise the cached session view. Never a value from the caller.
+ */
+export function getSessionUserId(): string | undefined {
+  return (
+    accessTokenSubject(tokens?.accessToken) ??
+    (state.status === "authenticated" ? state.session.userId : undefined)
+  );
 }
 
 /**
@@ -406,6 +449,47 @@ function requestRefresh(refreshToken: string): Promise<AuthSession> {
 }
 
 /**
+ * The token rotation currently in flight, keyed by the refresh token it uses.
+ *
+ * Supabase rotates refresh tokens: one refresh token is single-use, and a
+ * second use of it is treated as reuse, which can revoke the whole token
+ * family. So every rotation goes through here. A page that fires several calls
+ * at once — a profile read, the feed, the notification badge — makes one
+ * request and every caller shares the answer. Without this, two concurrent
+ * 401s rotated the same token twice and the loser cleared the session, which is
+ * the intermittent "it logged me out" report.
+ */
+let rotation: { refreshToken: string; promise: Promise<AuthSession> } | undefined;
+
+/**
+ * Adopts a pair another tab stored while this one was failing, so a rotation
+ * that lost a cross-tab race does not sign the visitor out. Returns true when a
+ * newer, still-valid pair was adopted.
+ */
+function adoptNewerStoredPair(rejectedRefreshToken: string): boolean {
+  const stored = readStoredSession();
+  if (!stored) return false;
+  if (stored.tokens.refreshToken === rejectedRefreshToken) return false;
+  if (isExpired(stored.tokens)) return false;
+  adoptTokens(stored.tokens, stored.session);
+  return true;
+}
+
+/**
+ * Rotates a pair, joining a rotation already in flight for the same token.
+ * The caller keeps its own failure policy; this only removes the duplicate
+ * request that made reuse detection possible.
+ */
+function rotate(refreshToken: string): Promise<AuthSession> {
+  if (rotation?.refreshToken === refreshToken) return rotation.promise;
+  const promise = requestRefresh(refreshToken).finally(() => {
+    if (rotation?.promise === promise) rotation = undefined;
+  });
+  rotation = { refreshToken, promise };
+  return promise;
+}
+
+/**
  * Rotates a pair before expiring, while the page stays open. The access token
  * is still valid, so a transient failure only reschedules the attempt; a
  * definitive refusal ends the session.
@@ -415,7 +499,7 @@ async function refreshAheadOfExpiry(): Promise<void> {
   if (!pair) return;
   const startedAt = generation;
   try {
-    const payload = await requestRefresh(pair.refreshToken);
+    const payload = await rotate(pair.refreshToken);
     if (generation !== startedAt) return;
     if (!payload.tokens) {
       clearSession();
@@ -425,6 +509,10 @@ async function refreshAheadOfExpiry(): Promise<void> {
   } catch (error) {
     if (generation !== startedAt) return;
     if (isDefinitiveAuthFailure(error)) {
+      // Another tab may have rotated this token a moment before us; its pair is
+      // in storage and is the session that survived. Adopt it rather than
+      // ending a session that is still valid.
+      if (adoptNewerStoredPair(pair.refreshToken)) return;
       clearSession();
       return;
     }
@@ -439,7 +527,7 @@ async function refreshAheadOfExpiry(): Promise<void> {
  */
 async function rotateRestoredSession(stored: Tokens, startedAt: number): Promise<void> {
   try {
-    const payload = await requestRefresh(stored.refreshToken);
+    const payload = await rotate(stored.refreshToken);
     if (generation !== startedAt) return;
     if (!payload.tokens) {
       clearSession();
@@ -449,6 +537,7 @@ async function rotateRestoredSession(stored: Tokens, startedAt: number): Promise
   } catch (error) {
     if (generation !== startedAt) return;
     if (isDefinitiveAuthFailure(error)) {
+      if (adoptNewerStoredPair(stored.refreshToken)) return;
       clearSession();
       return;
     }
@@ -823,7 +912,7 @@ export function refreshSession(): Promise<AuthSession> {
     return Promise.reject(new Error("There is no session to refresh."));
   }
   const startedAt = generation;
-  return requestRefresh(refreshToken).then((payload) => {
+  return rotate(refreshToken).then((payload) => {
     // A sign-in or sign-out that landed while this was in flight wins.
     if (generation !== startedAt) return payload;
     return adopt(payload);
@@ -849,9 +938,12 @@ export async function rotateRefusedSession(): Promise<RefusedSessionOutcome> {
   if (!pair) return "signed-out";
   const startedAt = generation;
   try {
-    const payload = await requestRefresh(pair.refreshToken);
+    const payload = await rotate(pair.refreshToken);
     if (generation !== startedAt) {
-      return state.status === "authenticated" ? "transient" : "signed-out";
+      // The session moved on while this was in flight — usually because a
+      // concurrent rotation adopted the new pair. That is a usable credential,
+      // not a transient failure: the caller retries with it.
+      return state.status === "authenticated" ? "rotated" : "signed-out";
     }
     if (!payload.tokens) {
       clearSession();
@@ -861,9 +953,10 @@ export async function rotateRefusedSession(): Promise<RefusedSessionOutcome> {
     return "rotated";
   } catch (error) {
     if (generation !== startedAt) {
-      return state.status === "authenticated" ? "transient" : "signed-out";
+      return state.status === "authenticated" ? "rotated" : "signed-out";
     }
     if (isDefinitiveAuthFailure(error)) {
+      if (adoptNewerStoredPair(pair.refreshToken)) return "rotated";
       clearSession();
       return "signed-out";
     }

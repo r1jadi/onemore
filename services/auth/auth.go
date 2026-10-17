@@ -525,7 +525,13 @@ func (s *service) supabaseFailure(w http.ResponseWriter, r *http.Request, operat
 			httpx.WriteError(w, r, httpx.NewError(httpx.CodeForbidden, "Confirm your email address, then sign in."))
 			return
 		case apiErr.Code == supabaseauth.CodeEmailExists || apiErr.Code == supabaseauth.CodeUserAlreadyExists:
-			httpx.WriteError(w, r, httpx.NewError(httpx.CodeConflict, "An account with that email already exists."))
+			// Supabase refuses a second account for one email; the message says what
+			// the caller can do next, because the account they are trying to create
+			// already exists and the sign-in screen can get them into it. The wording
+			// is identical for every provider: which provider an address uses is not
+			// the caller's business, and saying so would be an enumeration oracle.
+			httpx.WriteError(w, r, httpx.NewError(httpx.CodeConflict,
+				"An account with this email already exists. Please sign in instead."))
 			return
 		case apiErr.Code == supabaseauth.CodeWeakPassword:
 			httpx.WriteError(w, r, httpx.NewError(httpx.CodeUnprocessable, "Choose a stronger password."))

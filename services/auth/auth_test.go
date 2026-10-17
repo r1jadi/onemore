@@ -530,16 +530,29 @@ func TestSupabaseFailuresMapOntoPlatformCodes(t *testing.T) {
 }
 
 func TestSignUpMapsAnExistingAccountToConflict(t *testing.T) {
-	backend := &fakeBackend{signUpErr: &supabaseauth.Error{Op: "sign-up", Status: 422, Code: supabaseauth.CodeUserAlreadyExists}}
-	h := newHarness(t, harnessOptions{backend: backend, withAuth: true})
+	// Both shapes Supabase uses for an address that already has an account. The
+	// answer must be the same: nothing was created, and signing in is the next
+	// step — never a silent second registration.
+	for _, supabaseCode := range []string{supabaseauth.CodeUserAlreadyExists, supabaseauth.CodeEmailExists} {
+		backend := &fakeBackend{signUpErr: &supabaseauth.Error{Op: "sign-up", Status: 422, Code: supabaseCode}}
+		h := newHarness(t, harnessOptions{backend: backend, withAuth: true})
 
-	response := h.do(t, http.MethodPost, SignUpPath,
-		`{"email":"player@example.com","password":"correct-horse-battery"}`, nil)
-	if response.StatusCode != http.StatusConflict {
-		t.Fatalf("status = %d, want 409", response.StatusCode)
-	}
-	if code := errorCode(t, response); code != "conflict" {
-		t.Errorf("error code = %q, want conflict", code)
+		response := h.do(t, http.MethodPost, SignUpPath,
+			`{"email":"player@example.com","password":"correct-horse-battery"}`, nil)
+		if response.StatusCode != http.StatusConflict {
+			t.Fatalf("%s: status = %d, want 409", supabaseCode, response.StatusCode)
+		}
+		payload := decode(t, response)
+		envelope, ok := payload["error"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s: response has no error envelope: %v", supabaseCode, payload)
+		}
+		if code, _ := envelope["code"].(string); code != "conflict" {
+			t.Errorf("%s: error code = %q, want conflict", supabaseCode, code)
+		}
+		if message, _ := envelope["message"].(string); message != "An account with this email already exists. Please sign in instead." {
+			t.Errorf("%s: message = %q", supabaseCode, message)
+		}
 	}
 }
 
