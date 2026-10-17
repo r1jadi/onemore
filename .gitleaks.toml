@@ -1,9 +1,9 @@
 # gitleaks configuration for onemore.
 #
-# The stock ruleset is kept and only extended, never replaced. The single
-# allowlist entry below covers a unit-test fixture that is shaped like a
-# credential but is not one; it is in git history, so it cannot be silenced in
-# the source file itself.
+# The stock ruleset is kept and only extended, never replaced. The allowlist
+# entries below cover unit-test fixtures that are shaped like credentials but
+# are not; they are in git history, so they cannot be silenced in the source
+# files themselves.
 #
 # Real credentials must never be committed — see docs/development/environments.md.
 # Anything added here must be a placeholder, never an actual key: this file is
@@ -18,3 +18,14 @@ description = "Fake caller token in the Supabase auth client test, not a credent
 # secret committed to that test still fails the scan.
 regexTarget = "match"
 regexes = ['''the-callers-token''']
+
+[[allowlists]]
+description = "Fake JWT subject in the follows test, not a credential"
+# generic-api-key fires on the `tokenSubject` fixture in
+# src/lib/social/follows.test.tsx because the variable is named for what it
+# carries and the value is a high-entropy uuid. Nothing is signed, stored or
+# transmitted: the test assembles the token with btoa() and hands it to a
+# mocked fetch. Scoped to this literal as it appears in the finding — never to
+# the file — so a real key committed to the same test still fails the scan.
+regexTarget = "match"
+regexes = ['''5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a''']
