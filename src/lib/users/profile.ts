@@ -33,6 +33,7 @@ import {
   clearSession,
   getAccessToken,
   getAuthState,
+  rotateRefusedSession,
   subscribe as subscribeToAuth,
   type SessionRole,
 } from "@/lib/auth/session";
@@ -170,13 +171,67 @@ export function loadProfile(): Promise<ProfileState> {
   // show, and the screens draw their skeleton for it.
   if (state.status !== "ready") adopt({ status: "loading" });
 
-  inFlight = apiFetch<Profile>(Routes.me, { token })
-    .then((profile) => adopt({ status: "ready", profile }))
-    .catch((error: unknown) => adopt(failure(error)))
-    .finally(() => {
-      inFlight = undefined;
-    });
+  inFlight = readProfile(token).finally(() => {
+    inFlight = undefined;
+  });
   return inFlight;
+}
+
+/** One read, with the refused-token policy below applied to a 401. */
+async function readProfile(token: string): Promise<ProfileState> {
+  try {
+    return adopt({ status: "ready", profile: await apiFetch<Profile>(Routes.me, { token }) });
+  } catch (error) {
+    const apiError = asApiError(error);
+    if (!apiError.isUnauthorized) return adopt(failure(apiError));
+    return adopt(await recoverRefusedToken(apiError));
+  }
+}
+
+/**
+ * A refused access token is not automatically a dead session: it may only have
+ * lapsed, and the session module's rotation decides which of the two it is.
+ * Retry the read once with the rotated credential; a session the server
+ * definitively refuses is dropped, and a server that could not answer leaves
+ * the session in place with a retryable error rather than signing the visitor
+ * out — the logout this path used to perform on any 401.
+ */
+async function recoverRefusedToken(apiError: ApiError): Promise<ProfileState> {
+  const outcome = await rotateRefusedSession();
+  if (outcome === "signed-out") return { status: "anonymous" };
+  if (outcome === "transient") return { status: "error", error: apiError };
+  const token = getAccessToken();
+  if (!token) return { status: "anonymous" };
+  try {
+    return { status: "ready", profile: await apiFetch<Profile>(Routes.me, { token }) };
+  } catch (error) {
+    const retryError = asApiError(error);
+    // The freshly rotated token was refused too: that is definitive.
+    if (retryError.isUnauthorized) {
+      clearSession();
+      return { status: "anonymous" };
+    }
+    return failure(retryError);
+  }
+}
+
+function asApiError(error: unknown): ApiError {
+  return error instanceof ApiError
+    ? error
+    : new ApiError("Something went wrong. Please try again.");
+}
+
+/**
+ * Maps a failed read onto a state.
+ *
+ * A 404 is `missing`, and everything else stays an error so the screen can
+ * offer a retry instead of inventing a profile. A refused token never reaches
+ * this point (see `recoverRefusedToken`), which is also the only place a dead
+ * session is dropped.
+ */
+function failure(apiError: ApiError): ProfileState {
+  if (apiError.status === 404) return { status: "missing" };
+  return { status: "error", error: apiError };
 }
 
 /**
@@ -188,26 +243,6 @@ export function loadProfile(): Promise<ProfileState> {
  */
 export function refreshProfile(): Promise<ProfileState> {
   return loadProfile();
-}
-
-/**
- * Maps a failed read onto a state.
- *
- * A refused token is reported as anonymous *and* the dead session is dropped:
- * the credential is what the server rejected, so the app must not keep claiming
- * to be signed in while every call it makes is refused. A 404 is `missing`, and
- * everything else stays an error so the screen can offer a retry instead of
- * inventing a profile.
- */
-function failure(error: unknown): ProfileState {
-  const apiError =
-    error instanceof ApiError ? error : new ApiError("Something went wrong. Please try again.");
-  if (apiError.isUnauthorized) {
-    clearSession();
-    return { status: "anonymous" };
-  }
-  if (apiError.status === 404) return { status: "missing" };
-  return { status: "error", error: apiError };
 }
 
 /**

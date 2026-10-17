@@ -3,6 +3,7 @@ import { AlertTriangle, ArrowLeft, BadgeCheck, Inbox, RotateCw } from "lucide-re
 import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { followUser, resolveUserId, useFollowState } from "@/lib/social/follows";
 import { cn } from "@/lib/utils";
 import { fmt } from "@/lib/format";
 
@@ -115,11 +116,16 @@ export function UserName({ username, verified }: { username: string; verified?: 
 }
 
 export function FollowButton({
-  initial = false,
+  initial,
   size = "sm",
   username,
   userId,
 }: {
+  /**
+   * A state the caller just read from the follow graph. Omitted means the
+   * button loads the truth itself — a stale assumption of "not following"
+   * while a row exists is exactly the contradiction this avoids.
+   */
   initial?: boolean;
   size?: "sm" | "default";
   /** Preferred: the target account id. Falls back to resolving `username`. */
@@ -127,9 +133,11 @@ export function FollowButton({
   username?: string;
 }) {
   const [resolvedId, setResolvedId] = useState<string | undefined>(userId);
-  const [localInitial, setLocalInitial] = useState(initial);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
+  const [resolving, setResolving] = useState(false);
+  const [resolveError, setResolveError] = useState<string>();
+  const follow = useFollowState(resolvedId, initial);
+  const busy = follow.busy || resolving;
+  const error = resolveError ?? follow.error;
 
   useEffect(() => {
     if (userId) {
@@ -138,57 +146,39 @@ export function FollowButton({
     }
     if (!username) return;
     let cancelled = false;
-    import("@/lib/social/follows").then(({ resolveUserId }) =>
-      resolveUserId(username)
-        .then((id) => {
-          if (!cancelled && id) setResolvedId(id);
-        })
-        .catch(() => undefined),
-    );
+    resolveUserId(username)
+      .then((id) => {
+        if (!cancelled && id) setResolvedId(id);
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
   }, [userId, username]);
 
   async function toggle() {
-    if (!resolvedId) {
-      // No target to follow yet (still resolving, or unknown user): resolving
-      // the username is the only honest action; a visual toggle would lie.
-      if (username) {
-        setBusy(true);
-        try {
-          const { resolveUserId, followUser } = await import("@/lib/social/follows");
-          const id = await resolveUserId(username);
-          if (!id) {
-            setError("That account could not be found.");
-            return;
-          }
-          setResolvedId(id);
-          await followUser(id);
-          setLocalInitial(true);
-        } catch (err) {
-          setError(err instanceof Error ? err.message : "Couldn't update the follow.");
-        } finally {
-          setBusy(false);
-        }
-      }
+    if (resolvedId) {
+      await follow.toggle();
       return;
     }
-    setBusy(true);
-    setError(undefined);
+    // No target to follow yet (still resolving, or unknown user): resolving
+    // the username is the only honest action; a visual toggle would lie.
+    if (!username) return;
+    setResolving(true);
+    setResolveError(undefined);
     try {
-      const { followUser, unfollowUser } = await import("@/lib/social/follows");
-      if (localInitial) {
-        await unfollowUser(resolvedId);
-        setLocalInitial(false);
-      } else {
-        await followUser(resolvedId);
-        setLocalInitial(true);
+      const id = await resolveUserId(username);
+      if (!id) {
+        setResolveError("That account could not be found.");
+        return;
       }
+      await followUser(id);
+      // The hook reads the confirmed state once this target becomes its own.
+      setResolvedId(id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't update the follow.");
+      setResolveError(err instanceof Error ? err.message : "Couldn't update the follow.");
     } finally {
-      setBusy(false);
+      setResolving(false);
     }
   }
 
@@ -196,13 +186,13 @@ export function FollowButton({
     <span className="inline-flex flex-col items-end gap-1">
       <Button
         size={size}
-        variant={localInitial ? "secondary" : "default"}
-        aria-pressed={localInitial}
+        variant={follow.following ? "secondary" : "default"}
+        aria-pressed={follow.following}
         onClick={() => void toggle()}
         disabled={busy}
         className="min-w-24"
       >
-        {localInitial ? "Following" : "Follow"}
+        {follow.following ? "Following" : "Follow"}
       </Button>
       {error && (
         <span className="text-xs text-destructive" role="alert">

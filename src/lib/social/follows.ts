@@ -3,6 +3,15 @@
  * Data API. RLS is the boundary: inserts require `follower_id = auth.uid()`
  * and deletes require ownership, so the acting user always comes from the
  * verified token and never from a browser-supplied id.
+ *
+ * Two rules keep the button and the database from ever disagreeing:
+ *
+ *   - the database is the source of truth for the displayed state. A screen
+ *     that did not just read the follow graph loads it here (`useFollowState`)
+ *     rather than assuming "not following" because nobody said otherwise;
+ *   - the insert is idempotent (`on conflict do nothing`). A follow that
+ *     already exists is the same end state the caller asked for, not the
+ *     unique-violation error it used to be reported as.
  */
 
 import { useEffect, useState } from "react";
@@ -28,6 +37,10 @@ function toApiError(error: unknown): ApiError {
       return new ApiError("Sign in to follow creators.", { code: "unauthorized", status: 401 });
     }
     if (error.status === 409 || error.code === "23505") {
+      // The insert is idempotent, so a duplicate should never produce this; a
+      // caller that does see it reconciles against the follow graph (see
+      // `useFollowState`) rather than repeating a message the button it was
+      // clicked from may already contradict.
       return new ApiError("You're already following this account.", {
         code: "conflict",
         status: 409,
@@ -98,10 +111,19 @@ export async function followUser(followeeId: string): Promise<void> {
     throw new ApiError("You can't follow yourself.", { code: "bad_request", status: 400 });
   }
   try {
-    await restMutate("follows", "POST", token, {
-      follower_id: auth.session.userId,
-      followee_id: followeeId,
-    });
+    // `on conflict do nothing` on the follow's own primary key: repeating a
+    // follow — a double tap, a retry after a lost response, a second tab —
+    // converges on the same single row instead of failing with 23505.
+    await restMutate(
+      "follows?on_conflict=follower_id,followee_id",
+      "POST",
+      token,
+      {
+        follower_id: auth.session.userId,
+        followee_id: followeeId,
+      },
+      "resolution=ignore-duplicates",
+    );
   } catch (error) {
     throw toApiError(error);
   }
@@ -149,10 +171,20 @@ export async function fetchProfilesByIds(ids: string[]): Promise<PublicProfile[]
   );
 }
 
-/** Reactive follow state for one target account. */
-export function useFollowState(targetUserId: string | undefined) {
-  const [following, setFollowing] = useState(false);
-  const [loading, setLoading] = useState(true);
+/**
+ * Reactive follow state for one target account.
+ *
+ * `initial` is a state the caller just read (the search list loads the
+ * viewer's followees in one query). When it is omitted the state is loaded
+ * from the database, so a screen that never fetched it — a profile page, a
+ * connections list — still shows the truth instead of assuming "not
+ * following". A sign-in or sign-out re-reads the answer for either kind of
+ * caller.
+ */
+export function useFollowState(targetUserId: string | undefined, initial?: boolean) {
+  const seeded = initial !== undefined;
+  const [following, setFollowing] = useState(initial ?? false);
+  const [loading, setLoading] = useState(!seeded && targetUserId !== undefined);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
 
@@ -162,17 +194,20 @@ export function useFollowState(targetUserId: string | undefined) {
       return;
     }
     let cancelled = false;
-    setLoading(true);
-    isFollowing(targetUserId)
-      .then((value) => {
-        if (!cancelled) setFollowing(value);
-      })
-      .catch(() => {
-        if (!cancelled) setFollowing(false);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    if (!seeded) {
+      setLoading(true);
+      isFollowing(targetUserId)
+        .then((value) => {
+          if (!cancelled) setFollowing(value);
+        })
+        .catch(() => {
+          // Keep what is on screen; a toggle (or the auth event below)
+          // re-reads the state before it reports anything.
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    }
     const unsubscribe = subscribeToAuth(() => {
       void isFollowing(targetUserId)
         .then((value) => {
@@ -184,23 +219,36 @@ export function useFollowState(targetUserId: string | undefined) {
       cancelled = true;
       unsubscribe();
     };
-  }, [targetUserId]);
+  }, [targetUserId, seeded]);
 
   async function toggle(): Promise<void> {
     if (!targetUserId || busy) return;
     setBusy(true);
     setError(undefined);
+    const desired = !following;
     try {
-      if (following) {
-        await unfollowUser(targetUserId);
-        setFollowing(false);
-      } else {
+      if (desired) {
         await followUser(targetUserId);
-        setFollowing(true);
+      } else {
+        await unfollowUser(targetUserId);
       }
+      setFollowing(desired);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Couldn't update the follow. Try again.");
-      throw err;
+      // The write failed, but it may still have landed (a lost response); the
+      // follow graph is the authority on that. Re-read it, adopt its answer and
+      // only report the failure when the database still disagrees with what
+      // was asked for — never a state the row itself contradicts.
+      let reconciled = false;
+      try {
+        const truth = await isFollowing(targetUserId);
+        setFollowing(truth);
+        reconciled = truth === desired;
+      } catch {
+        // The re-read failed too; fall through to the message below.
+      }
+      if (!reconciled) {
+        setError(err instanceof ApiError ? err.message : "Couldn't update the follow. Try again.");
+      }
     } finally {
       setBusy(false);
     }

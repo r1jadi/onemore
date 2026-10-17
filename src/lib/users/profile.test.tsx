@@ -47,6 +47,19 @@ function sessionPayload(userId = testUserID) {
   };
 }
 
+/** The shape `POST /auth/refresh` answers with: the same view, a new pair. */
+function refreshedSessionPayload() {
+  return {
+    ...sessionPayload(),
+    tokens: {
+      accessToken: "access-token-2",
+      refreshToken: "refresh-token-2",
+      tokenType: "bearer",
+      expiresIn: 3600,
+    },
+  };
+}
+
 /** The shape `GET /users/me` answers with, per the contract. */
 function profilePayload(overrides: Record<string, unknown> = {}) {
   return {
@@ -150,7 +163,7 @@ describe("loadProfile", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it("treats a refused token as signed out and forgets the dead session", async () => {
+  it("treats a refused token with a refused refresh as signed out and forgets the dead session", async () => {
     mockFetch((url) =>
       url.endsWith("/auth/sign-in")
         ? jsonResponse(sessionPayload())
@@ -161,10 +174,59 @@ describe("loadProfile", () => {
     const state = await loadProfile();
 
     expect(state).toEqual({ status: "anonymous" });
-    // A credential the API refuses must not be kept: every later call with it
-    // would fail the same way.
+    // The read was refused and the rotation that followed was refused too: the
+    // credential is dead, and keeping it would only fail every later call the
+    // same way.
     expect(getAuthState()).toEqual({ status: "anonymous" });
     expect(getAccessToken()).toBeUndefined();
+  });
+
+  it("rotates a lapsed access token instead of signing the visitor out", async () => {
+    // The profile read is refused because the access token lapsed; the refresh
+    // token is still valid, so the read is retried with the rotated credential
+    // and the session survives — the logout this path used to perform on any
+    // 401.
+    let reads = 0;
+    const spy = mockFetch((url) => {
+      if (url.endsWith("/auth/sign-in")) return jsonResponse(sessionPayload());
+      if (url.endsWith("/auth/refresh")) return jsonResponse(refreshedSessionPayload());
+      reads += 1;
+      return reads === 1
+        ? errorResponse(401, "unauthorized", "Your session is no longer valid. Sign in again.")
+        : jsonResponse(profilePayload());
+    });
+    await signInAs();
+
+    const state = await loadProfile();
+
+    expect(state.status).toBe("ready");
+    expect(getAuthState().status).toBe("authenticated");
+    expect(getAccessToken()).toBe("access-token-2");
+    // The retry carried the rotated token, not the one that was refused.
+    expect(requestOf(spy, 3).headers.get("Authorization")).toBe("Bearer access-token-2");
+  });
+
+  it("keeps the session and reports a retryable error when the refresh cannot be answered", async () => {
+    mockFetch((url) => {
+      if (url.endsWith("/auth/sign-in")) return jsonResponse(sessionPayload());
+      if (url.endsWith("/auth/refresh")) {
+        return errorResponse(
+          503,
+          "service_unavailable",
+          "Authentication is not available right now.",
+        );
+      }
+      return errorResponse(401, "unauthorized", "Your session is no longer valid. Sign in again.");
+    });
+    await signInAs();
+
+    const state = await loadProfile();
+
+    // A server that could not answer decided nothing: the session stays and
+    // the screen offers a retry instead of claiming the visitor is signed out.
+    expect(state.status).toBe("error");
+    expect(getAuthState().status).toBe("authenticated");
+    expect(getAccessToken()).toBe("access-token-1");
   });
 
   it("reports an account with no profile row separately from a failure", async () => {

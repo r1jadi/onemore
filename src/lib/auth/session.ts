@@ -830,17 +830,66 @@ export function refreshSession(): Promise<AuthSession> {
   });
 }
 
+/** What rotating a refused access token produced. */
+export type RefusedSessionOutcome = "rotated" | "signed-out" | "transient";
+
 /**
- * Confirms the stored token against the server and returns the session it
- * belongs to. The body of `GET /auth/session` comes from the verified token, so
- * this is the authoritative answer to "is this session still valid".
+ * Reacts to a call refused with 401 while a session is held: rotates the pair
+ * if the refresh token can still do it. A refused *access* token may merely
+ * have lapsed, so the session is forgotten only when the credential itself is
+ * definitively refused — clearing it on any 401 would sign out a visitor whose
+ * refresh token is still valid.
+ *
+ * `transient` means the server could not answer (network, 429, 5xx): the
+ * session is kept for a later attempt and nothing new was adopted, so the
+ * caller must not retry with the token that was refused.
+ */
+export async function rotateRefusedSession(): Promise<RefusedSessionOutcome> {
+  const pair = tokens;
+  if (!pair) return "signed-out";
+  const startedAt = generation;
+  try {
+    const payload = await requestRefresh(pair.refreshToken);
+    if (generation !== startedAt) {
+      return state.status === "authenticated" ? "transient" : "signed-out";
+    }
+    if (!payload.tokens) {
+      clearSession();
+      return "signed-out";
+    }
+    adoptTokens(payload.tokens, payload.session);
+    return "rotated";
+  } catch (error) {
+    if (generation !== startedAt) {
+      return state.status === "authenticated" ? "transient" : "signed-out";
+    }
+    if (isDefinitiveAuthFailure(error)) {
+      clearSession();
+      return "signed-out";
+    }
+    return "transient";
+  }
+}
+
+/**
+ * Confirms the stored token against the server, adopts the answer and returns
+ * it. The body of `GET /auth/session` comes from the verified token, so this is
+ * the authoritative answer to "is this session still valid" — and to "is this
+ * account registered": a registration recorded a moment ago shows up in the
+ * reactive state and in the stored copy without a full sign-in.
  */
 export async function loadSession(): Promise<Session> {
   const token = getAccessToken();
   if (!token) {
     throw new Error("There is no session to read.");
   }
-  return apiFetch<Session>(Routes.session, { token });
+  const startedAt = generation;
+  const view = await apiFetch<Session>(Routes.session, { token });
+  // A sign-in or sign-out that landed while this was in flight wins.
+  if (generation !== startedAt) return view;
+  if (tokens) persistSession(tokens, view);
+  publish({ status: "authenticated", session: view });
+  return view;
 }
 
 /**

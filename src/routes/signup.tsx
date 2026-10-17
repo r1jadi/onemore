@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Check, FileText, Shield, Mail } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AuthLayout, Field, SocialButtons } from "@/components/auth/AuthLayout";
 import { LegalBody, privacy, terms } from "@/components/legal";
 import { Button } from "@/components/ui/button";
@@ -11,8 +11,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { authErrorMessage, signUp } from "@/lib/auth/session";
-import { updateProfile } from "@/lib/users/profile";
+import { authErrorMessage, loadSession, signUp, useAuth } from "@/lib/auth/session";
+import { completeRegistration } from "@/lib/users/registration";
 import { seo } from "@/lib/seo";
 import { cn } from "@/lib/utils";
 
@@ -31,8 +31,36 @@ function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
+/** Where a display name is kept while email confirmation is pending. */
+const PENDING_DISPLAY_NAME_KEY = "onemore-pending-display-name";
+
+function storedPendingDisplayName(): string {
+  try {
+    return sessionStorage.getItem(PENDING_DISPLAY_NAME_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function rememberPendingDisplayName(name: string): void {
+  try {
+    sessionStorage.setItem(PENDING_DISPLAY_NAME_KEY, name);
+  } catch {
+    // Best effort only; the profile screen lets the user set it later.
+  }
+}
+
+function forgetPendingDisplayName(): void {
+  try {
+    sessionStorage.removeItem(PENDING_DISPLAY_NAME_KEY);
+  } catch {
+    // Best effort only.
+  }
+}
+
 function Signup() {
   const nav = useNavigate();
+  const auth = useAuth();
   const [step, setStep] = useState(0);
   const [accept, setAccept] = useState({ terms: false, privacy: false, marketing: false });
   const [doc, setDoc] = useState<"terms" | "privacy" | null>(null);
@@ -43,6 +71,19 @@ function Signup() {
   const [err, setErr] = useState<string>();
   const [busy, setBusy] = useState(false);
 
+  // A signed-in account that has not finished signing up — a Google sign-in, or
+  // an email whose confirmation link was just opened — completes here: the
+  // credential step is already done, so what remains is the name and the terms.
+  // The database decides (`onboarded_at` through the session), never a local
+  // guess, so a reload mid-way lands back on the same step.
+  const completing = auth.status === "authenticated" && auth.session.onboarded === false;
+
+  useEffect(() => {
+    if (!completing) return;
+    setStep((current) => (current === 0 ? 1 : current));
+    setDisplayName((current) => (current === "" ? storedPendingDisplayName() : current));
+  }, [completing]);
+
   // The credential is collected in step 1 and held until the account is created
   // in step 3, because the account itself is only made once the terms are
   // accepted. It is forwarded to Supabase by the auth service and never stored.
@@ -51,39 +92,48 @@ function Signup() {
   // promise this screen cannot keep. The account gets a generated username;
   // the display name below is applied to the profile when a session exists.
   async function createAccount() {
+    if (completing) {
+      // The Supabase account (and its profile row, created by the database
+      // trigger) already exists; only the registration marker is missing.
+      await finishRegistration();
+      return;
+    }
     if (!creds) return setErr("Enter your email and password to start again.");
     setErr(undefined);
     setBusy(true);
     try {
       const result = await signUp(creds.email, creds.password);
       const name = displayName.trim();
-      // When Supabase issued a session immediately, apply the display name to
-      // the real profile row. While confirmation is pending there is no token,
-      // so the name is kept for the onboarding step after verification.
-      if (result.tokens && name !== "") {
-        try {
-          await updateProfile({ displayName: name });
-        } catch {
-          try {
-            sessionStorage.setItem("onemore-pending-display-name", name);
-          } catch {
-            // Best effort only; the profile screen lets the user set it later.
-          }
-        }
-      } else if (name !== "") {
-        try {
-          sessionStorage.setItem("onemore-pending-display-name", name);
-        } catch {
-          // Best effort only.
-        }
-      }
-      // Tokens mean the account is ready to use. Without them Supabase requires
-      // email confirmation, which is the step the app already asks the user for.
+      // When Supabase issued a session immediately, the registration is
+      // finished below. While confirmation is pending there is no token, so the
+      // name is kept for the sign-up completion after verification.
+      if (name !== "") rememberPendingDisplayName(name);
       if (result.tokens) {
-        nav({ to: "/" });
+        await finishRegistration();
       } else {
         nav({ to: "/verify-email", search: { email: creds.email } });
       }
+    } catch (error) {
+      setErr(authErrorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Records the registration exactly once: the display name goes through the
+   * users API and the marker through the database (see
+   * `lib/users/registration`). The session view is re-read afterwards so the
+   * screen the app shows next reflects the server's answer, not a local one.
+   */
+  async function finishRegistration() {
+    setErr(undefined);
+    setBusy(true);
+    try {
+      await completeRegistration(displayName.trim());
+      forgetPendingDisplayName();
+      await loadSession();
+      nav({ to: "/account-created" });
     } catch (error) {
       setErr(authErrorMessage(error));
     } finally {

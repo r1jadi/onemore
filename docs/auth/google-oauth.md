@@ -18,6 +18,15 @@ the frontend.
   then verifies the tokens through `POST /api/v1/auth/session` before adopting
   them. Cancellation (`?error=access_denied`) and missing verifiers show
   specific messages. Parameters are stripped from the URL.
+- Completion: the callback only proves *who* the visitor is. A Google account
+  that has never finished a OneMore sign-up lands with
+  `session.onboarded === false`; the root gate in `src/routes/__root.tsx`
+  routes it to `/signup`, which runs the remaining steps (name + terms)
+  without asking for a credential again. Finishing writes
+  `profiles.onboarded_at` exactly once — the display name through
+  `PATCH /api/v1/users/me`, the marker through a conditional Data API write
+  with the caller's own token (`src/lib/users/registration.ts`) — so a
+  resumed or repeated completion is a no-op, never a duplicate account.
 - Profiles: OAuth users get a row from the existing `handle_new_user` trigger;
   no email-based auto-linking is performed, so Google cannot take over an
   address it does not own.
@@ -50,7 +59,11 @@ the frontend.
 
 ### 3. Verify
 
-- Click Continue with Google, complete consent, expect `/auth/callback` → `/`.
+- Click Continue with Google, complete consent:
+  - an account with no finished sign-up: `/auth/callback` → `/signup`
+    (name + terms) → `/account-created`, with exactly one
+    `profiles.onboarded_at` write;
+  - an account that already finished: `/auth/callback` → `/`.
 - Cancel at Google, expect the cancelled message, no session.
 - Settings → Connected accounts must show Google connected afterwards.
 

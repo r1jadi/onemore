@@ -10,6 +10,7 @@ import {
   initializeSession,
   loadSession,
   refreshSession,
+  rotateRefusedSession,
   signIn,
   signOut,
   signUp,
@@ -256,6 +257,99 @@ describe("loadSession", () => {
     const spy = mockFetch(() => jsonResponse({}));
 
     await expect(loadSession()).rejects.toThrow(/no session to read/i);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("adopts the server's view, so a completed registration is reflected", async () => {
+    const spy = mockFetch((url) =>
+      url.endsWith("/auth/sign-in")
+        ? jsonResponse(sessionPayload())
+        : jsonResponse({ userId: testUserID, role: "user", onboarded: true }),
+    );
+
+    await signIn("player@example.com", "correct-horse");
+    expect(getAuthState()).toEqual({
+      status: "authenticated",
+      session: expect.objectContaining({ onboarded: false }),
+    });
+
+    await loadSession();
+
+    expect(getAuthState()).toEqual({
+      status: "authenticated",
+      session: { userId: testUserID, role: "user", onboarded: true },
+    });
+    // The stored copy carries the fresh view too, so a reload agrees with the
+    // server instead of the stale view.
+    const stored = JSON.parse(window.localStorage.getItem(SESSION_STORAGE_KEY) ?? "{}");
+    expect(stored.session.onboarded).toBe(true);
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("rotateRefusedSession", () => {
+  it("rotates the pair and keeps the session", async () => {
+    const spy = mockFetch((url) =>
+      url.endsWith("/auth/sign-in")
+        ? jsonResponse(sessionPayload())
+        : jsonResponse(
+            sessionPayload({
+              tokens: {
+                accessToken: "access-token-2",
+                refreshToken: "refresh-token-2",
+                tokenType: "bearer",
+                expiresIn: 3600,
+              },
+            }),
+          ),
+    );
+    await signIn("player@example.com", "correct-horse");
+
+    await expect(rotateRefusedSession()).resolves.toBe("rotated");
+
+    const request = requestOf(spy, 1);
+    expect(request.path).toBe("/api/v1/auth/refresh");
+    expect(request.body).toEqual({ refreshToken: "refresh-token-1" });
+    expect(getAccessToken()).toBe("access-token-2");
+    expect(getAuthState().status).toBe("authenticated");
+    const stored = JSON.parse(window.localStorage.getItem(SESSION_STORAGE_KEY) ?? "{}");
+    expect(stored.tokens.accessToken).toBe("access-token-2");
+  });
+
+  it("forgets the session only when the credential is definitively refused", async () => {
+    mockFetch((url) =>
+      url.endsWith("/auth/sign-in")
+        ? jsonResponse(sessionPayload())
+        : errorResponse(401, "unauthorized", "That refresh token is not valid."),
+    );
+    await signIn("player@example.com", "correct-horse");
+
+    await expect(rotateRefusedSession()).resolves.toBe("signed-out");
+    expect(getAuthState()).toEqual({ status: "anonymous" });
+    expect(getAccessToken()).toBeUndefined();
+    expect(window.localStorage.getItem(SESSION_STORAGE_KEY)).toBeNull();
+  });
+
+  it("keeps the session when the server cannot answer", async () => {
+    mockFetch((url) =>
+      url.endsWith("/auth/sign-in")
+        ? jsonResponse(sessionPayload())
+        : errorResponse(503, "service_unavailable", "Authentication is not available right now."),
+    );
+    await signIn("player@example.com", "correct-horse");
+
+    await expect(rotateRefusedSession()).resolves.toBe("transient");
+
+    // A server that could not answer decided nothing; the stored session stays
+    // for a later attempt and the caller falls back to a retryable error.
+    expect(getAccessToken()).toBe("access-token-1");
+    expect(getAuthState().status).toBe("authenticated");
+  });
+
+  it("reports signed out with nothing to rotate", async () => {
+    const spy = mockFetch(() => jsonResponse({}));
+
+    await expect(rotateRefusedSession()).resolves.toBe("signed-out");
     expect(spy).not.toHaveBeenCalled();
   });
 });

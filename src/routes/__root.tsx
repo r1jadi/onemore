@@ -3,6 +3,7 @@ import {
   Outlet,
   Link,
   createRootRouteWithContext,
+  useNavigate,
   useRouter,
   useRouterState,
   HeadContent,
@@ -37,6 +38,22 @@ const BARE = [
   "/verify-email",
   "/account-created",
   "/auth/callback",
+];
+
+// Paths a signed-in visitor may reach while registration is unfinished: the
+// screen that completes it, the auth screens that can end or switch the
+// session, and the legal documents the sign-up steps reference.
+const UNFINISHED_SIGNUP_PATHS = [
+  "/signup",
+  "/login",
+  "/welcome",
+  "/onboarding",
+  "/verify-email",
+  "/forgot-password",
+  "/reset-password",
+  "/auth",
+  "/terms",
+  "/privacy",
 ];
 
 function NotFoundComponent() {
@@ -161,6 +178,7 @@ function RootShell({ children }: { children: ReactNode }) {
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const path = useRouterState({ select: (st) => st.location.pathname });
+  const navigate = useNavigate();
   const bare = BARE.some((p) => path.startsWith(p));
   const auth = useAuth();
 
@@ -170,6 +188,18 @@ function RootComponent() {
   useEffect(() => {
     void initializeSession();
   }, []);
+
+  // A session without a finished registration (see `lib/users/registration`)
+  // means the account is not fully created yet, so the app routes to the screen
+  // that completes it. The server's answer drives this: `onboarded` is omitted
+  // when it could not be read, which must never restart onboarding for anyone.
+  const unfinishedSignup = auth.status === "authenticated" && auth.session.onboarded === false;
+  const finishingSignup =
+    unfinishedSignup && !UNFINISHED_SIGNUP_PATHS.some((p) => path.startsWith(p));
+
+  useEffect(() => {
+    if (finishingSignup) void navigate({ to: "/signup", replace: true });
+  }, [finishingSignup, navigate]);
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -182,6 +212,17 @@ function RootComponent() {
           className="flex min-h-dvh items-center justify-center bg-background"
           role="status"
           aria-label="Restoring your session"
+        >
+          <Loader2 className="size-6 animate-spin text-muted-foreground" />
+        </div>
+      ) : finishingSignup ? (
+        // Registration is incomplete: neither the app nor the signed-out
+        // screens are the right thing to show for the one tick before the
+        // redirect above lands.
+        <div
+          className="flex min-h-dvh items-center justify-center bg-background"
+          role="status"
+          aria-label="Finishing your sign-up"
         >
           <Loader2 className="size-6 animate-spin text-muted-foreground" />
         </div>
