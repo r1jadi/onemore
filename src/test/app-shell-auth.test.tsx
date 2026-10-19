@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AppShell } from "@/components/layout/AppShell";
 import { SESSION_STORAGE_KEY, clearSession, initializeSession, signIn } from "@/lib/auth/session";
+import { LanguageProvider } from "@/lib/settings/language";
 import { routeTree } from "@/routeTree.gen";
 
 const testUserID = "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f";
@@ -54,9 +55,11 @@ function jsonResponse(body: unknown, status = 200) {
 async function renderShell() {
   function Host(): ReactElement {
     return (
-      <AppShell>
-        <p>page content</p>
-      </AppShell>
+      <LanguageProvider>
+        <AppShell>
+          <p>page content</p>
+        </AppShell>
+      </LanguageProvider>
     );
   }
 
@@ -134,6 +137,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  window.localStorage.removeItem("onemore-language");
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   // No clearSession() here: the shell is still mounted until the library's
@@ -156,7 +160,8 @@ describe("sidebar auth entry points", () => {
     const started = within(sidebar).getByRole("link", { name: "Get started" });
     expect(started).toHaveAttribute("href", "/welcome");
     const login = within(sidebar).getByRole("link", { name: "Log in" });
-    expect(login).toHaveAttribute("href", "/login");
+    // The sidebar keeps the visitor on the page they were reading after sign-in.
+    expect(login).toHaveAttribute("href", "/login?redirect=%2F");
 
     // Settings stays; the Admin link fails closed for anonymous visitors.
     expect(within(sidebar).getByRole("link", { name: "Settings" })).toHaveAttribute(
@@ -231,6 +236,22 @@ describe("session restoration on boot", () => {
     expect(spy.mock.calls.some(([input]) => String(input).includes("/api/v1/auth/session"))).toBe(
       true,
     );
+  });
+});
+
+describe("language selection changes the interface", () => {
+  it("renders the stored language's navigation labels without a reload", async () => {
+    window.localStorage.setItem("onemore-language", "pl");
+    await renderShell();
+
+    const sidebar = desktopSidebar();
+    expect(within(sidebar).getByRole("link", { name: "Dla Ciebie" })).toHaveAttribute("href", "/");
+    expect(within(sidebar).getByRole("link", { name: "Rankingi" })).toHaveAttribute(
+      "href",
+      "/leaderboards",
+    );
+    expect(within(sidebar).queryByRole("link", { name: "For You" })).toBeNull();
+    expect(document.documentElement.lang).toBe("pl");
   });
 });
 

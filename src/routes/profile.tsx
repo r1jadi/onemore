@@ -3,6 +3,7 @@ import { EmptyState, ErrorState } from "@/components/common";
 import { ProfileView, type ProfileHeader } from "@/components/social/ProfileView";
 import { Button } from "@/components/ui/button";
 import { seo } from "@/lib/seo";
+import { useBestScores, useRecentlyPlayed } from "@/lib/social/engagement";
 import { useFollowCounts, type FollowCountsState } from "@/lib/social/follows";
 import {
   avatarUrl,
@@ -28,6 +29,11 @@ function OwnProfile() {
   // Counts are keyed by the profile the API resolved from the token, never by
   // a client-supplied id; they refresh after every follow or unfollow.
   const counts = useFollowCounts(profile?.id);
+  // The profile's score and recent tabs read the same saved rows as Activity.
+  // They are fetched here, where the identity is known, rather than rendered
+  // from a hard-coded empty state that would contradict the leaderboard.
+  const best = useBestScores();
+  const recent = useRecentlyPlayed();
 
   return (
     <ProfileView
@@ -35,6 +41,8 @@ function OwnProfile() {
       loading={!profile && (state.status === "idle" || state.status === "loading")}
       user={profile ? header(profile, counts) : { username: "", name: "" }}
       fallback={profile ? undefined : absent(state)}
+      bestScores={best}
+      recentlyPlayed={recent}
     />
   );
 }
@@ -66,7 +74,9 @@ function absent(state: ProfileState) {
           body="Your profile, scores and saves belong to your account."
           action={
             <Button asChild>
-              <Link to="/login">Log in</Link>
+              <Link to="/login" search={{ redirect: "/profile" }}>
+                Log in
+              </Link>
             </Button>
           }
         />

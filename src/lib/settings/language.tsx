@@ -15,6 +15,9 @@ const STORAGE_KEY = "onemore-language";
 
 const dictionaries = {
   en: {
+    "nav.home": "Home",
+    "nav.ranks": "Ranks",
+    "nav.inbox": "Inbox",
     "nav.forYou": "For You",
     "nav.following": "Following",
     "nav.explore": "Explore",
@@ -46,6 +49,9 @@ const dictionaries = {
     "notifications.empty": "You're all caught up",
   },
   pl: {
+    "nav.home": "Główna",
+    "nav.ranks": "Rankingi",
+    "nav.inbox": "Skrzynka",
     "nav.forYou": "Dla Ciebie",
     "nav.following": "Obserwowane",
     "nav.explore": "Odkrywaj",

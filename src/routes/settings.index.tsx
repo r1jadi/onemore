@@ -182,7 +182,9 @@ function Settings() {
             Log in to manage your account, or browse the public catalogue as a guest.
           </p>
           <Button asChild className="mt-3">
-            <Link to="/login">Log in</Link>
+            <Link to="/login" search={{ redirect: "/settings" }}>
+              Log in
+            </Link>
           </Button>
         </div>
       )}

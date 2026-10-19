@@ -4,13 +4,16 @@ import { useState, type ReactNode } from "react";
 import {
   Avatar,
   EmptyState,
+  ErrorState,
   FollowButton,
   GridSkeleton,
+  ListSkeleton,
   Page,
   PageHeader,
   Stat,
   UserName,
 } from "@/components/common";
+import type { Game } from "@/lib/games/catalog";
 import { ShareSheet } from "@/components/social/Sheets";
 import { Button } from "@/components/ui/button";
 import {
@@ -56,11 +59,103 @@ export type ProfileHeader = {
   hidePlayed?: boolean;
 };
 
+function BestScores({ state }: { state: ScoreList }) {
+  if (state.status === "loading") return <ListSkeleton rows={4} avatar={false} />;
+  if (state.status === "error") {
+    return (
+      <ErrorState
+        title="Couldn't load your scores"
+        body={state.error ?? "Try again in a moment."}
+        onRetry={state.retry}
+      />
+    );
+  }
+  const entries = state.entries ?? [];
+  if (entries.length === 0) {
+    return (
+      <EmptyState
+        title="No scores yet"
+        body="A score appears here after a run is verified and saved."
+      />
+    );
+  }
+  return (
+    <ul className="mx-4 divide-y divide-border overflow-hidden rounded-xl bg-surface md:mx-0">
+      {entries.map((entry, i) => (
+        <li
+          key={`${entry.game?.slug ?? "game"}-${i}`}
+          className="flex items-center gap-3 px-4 py-3"
+        >
+          <span className="min-w-0 flex-1 truncate text-sm">
+            {entry.game ? (
+              <Link to="/games/$id" params={{ id: entry.game.slug }} className="hover:underline">
+                {entry.game.title}
+              </Link>
+            ) : (
+              <span className="text-muted-foreground">A game</span>
+            )}
+          </span>
+          <span className="font-semibold tabular">{entry.score}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function RecentGames({ state }: { state: GameList }) {
+  if (state.status === "loading") return <ListSkeleton rows={4} avatar={false} />;
+  if (state.status === "error") {
+    return (
+      <ErrorState
+        title="Couldn't load recently played games"
+        body={state.error ?? "Try again in a moment."}
+        onRetry={state.retry}
+      />
+    );
+  }
+  const games = state.games ?? [];
+  if (games.length === 0) {
+    return (
+      <EmptyState
+        title="No games played yet"
+        body="A game appears here after a scored run is saved. Guest runs are not saved."
+      />
+    );
+  }
+  return (
+    <ul className="mx-4 divide-y divide-border overflow-hidden rounded-xl bg-surface md:mx-0">
+      {games.map((game) => (
+        <li key={game.slug} className="px-4 py-3 text-sm">
+          <Link to="/games/$id" params={{ id: game.slug }} className="hover:underline">
+            {game.title}
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+type ScoreList = {
+  status: "anonymous" | "loading" | "ready" | "error";
+  entries?: Array<{ game: Game | null; score: number }>;
+  error?: string;
+  retry?: () => void;
+};
+
+type GameList = {
+  status: "anonymous" | "loading" | "ready" | "error";
+  games?: Game[];
+  error?: string;
+  retry?: () => void;
+};
+
 export function ProfileView({
   user,
   self,
   loading,
   fallback,
+  bestScores,
+  recentlyPlayed,
 }: {
   user: ProfileHeader;
   self?: boolean;
@@ -75,6 +170,10 @@ export function ProfileView({
    * its shape and the way out (settings, sign in) is always reachable.
    */
   fallback?: ReactNode;
+  /** The caller's own best score per game, from saved score rows. */
+  bestScores?: ScoreList;
+  /** The caller's own games, newest first, from saved score rows. */
+  recentlyPlayed?: GameList;
 }) {
   const skeleton = loading ?? false;
   const [tab, setTab] = useState<(typeof tabs)[number]>("Best scores");
@@ -255,16 +354,19 @@ export function ProfileView({
               <GridSkeleton count={4} />
             ) : (
               <>
-                {tab === "Best scores" && (
-                  <EmptyState
-                    title="No scores yet"
-                    body="Scores appear here once play history is recorded for this account."
-                  />
-                )}
+                {tab === "Best scores" &&
+                  (bestScores ? (
+                    <BestScores state={bestScores} />
+                  ) : (
+                    <EmptyState
+                      title="Best scores live on each game's board"
+                      body="Open a game's leaderboard to see verified scores for this account."
+                    />
+                  ))}
                 {tab === "Activity" && (
                   <EmptyState
-                    title="No activity here"
-                    body="Recent plays, likes, comments and saves live on the Activity page."
+                    title="Activity has its own page"
+                    body="Recent plays, likes, comments and saves are listed together on the Activity page."
                     action={
                       <Button asChild variant="secondary">
                         <Link to="/activity">View activity</Link>
@@ -274,8 +376,8 @@ export function ProfileView({
                 )}
                 {tab === "Saved" && (
                   <EmptyState
-                    title="Nothing saved yet"
-                    body="Games you save live on the Saved page."
+                    title="Saved games have their own page"
+                    body="Everything you saved is listed on the Saved page."
                     action={
                       <Button asChild variant="secondary">
                         <Link to="/saved">View saved games</Link>
@@ -283,12 +385,20 @@ export function ProfileView({
                     }
                   />
                 )}
-                {tab === "Recent" && (
-                  <EmptyState
-                    title="No games played yet"
-                    body="Playing a game is not recorded yet."
-                  />
-                )}
+                {tab === "Recent" &&
+                  (recentlyPlayed ? (
+                    <RecentGames state={recentlyPlayed} />
+                  ) : (
+                    <EmptyState
+                      title="Recent games live on their own page"
+                      body="Games with a saved score are listed newest first on Recently played."
+                      action={
+                        <Button asChild variant="secondary">
+                          <Link to="/recent">View recently played</Link>
+                        </Button>
+                      }
+                    />
+                  ))}
                 {tab === "Achievements" && (
                   <EmptyState
                     icon={Award}

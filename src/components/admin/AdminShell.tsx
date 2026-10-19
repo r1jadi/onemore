@@ -125,7 +125,9 @@ export function AdminShell({ children }: { children?: ReactNode }) {
           body="The admin API answers only requests that carry a verified session."
         >
           <Button asChild>
-            <Link to="/login">Sign in</Link>
+            <Link to="/login" search={{ redirect: "/admin" }}>
+              Sign in
+            </Link>
           </Button>
         </AdminGate>
       );

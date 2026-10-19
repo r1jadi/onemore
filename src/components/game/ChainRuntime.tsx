@@ -371,7 +371,9 @@ function Finished({
         </Button>
         {!result.ranked && (
           <Button asChild variant="ghost" size="lg">
-            <Link to="/login">Sign in to rank your scores</Link>
+            <Link to="/login" search={{ redirect: `/games/${slug}` }}>
+              Sign in to rank your scores
+            </Link>
           </Button>
         )}
       </div>

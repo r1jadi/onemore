@@ -18,26 +18,27 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth/session";
 import { useUnreadCount } from "@/lib/notifications/store";
 import { useAdminVisibility } from "@/lib/admin/visibility";
+import { useLanguage, type TranslationKey } from "@/lib/settings/language";
 
-const mobile = [
-  { to: "/", label: "Home", icon: Home },
-  { to: "/explore", label: "Explore", icon: Compass },
-  { to: "/leaderboards", label: "Ranks", icon: Trophy },
-  { to: "/notifications", label: "Inbox", icon: Bell },
-  { to: "/profile", label: "Profile", icon: User },
-] as const;
+const mobile: Array<{ to: string; key: TranslationKey; icon: typeof Home }> = [
+  { to: "/", key: "nav.home", icon: Home },
+  { to: "/explore", key: "nav.explore", icon: Compass },
+  { to: "/leaderboards", key: "nav.ranks", icon: Trophy },
+  { to: "/notifications", key: "nav.inbox", icon: Bell },
+  { to: "/profile", key: "nav.profile", icon: User },
+];
 
-const desktop = [
-  { to: "/", label: "For You", icon: Home },
-  { to: "/following", label: "Following", icon: Users },
-  { to: "/explore", label: "Explore", icon: Compass },
-  { to: "/search", label: "Search", icon: Search },
-  { to: "/leaderboards", label: "Leaderboards", icon: Trophy },
-  { to: "/notifications", label: "Notifications", icon: Bell },
-  { to: "/saved", label: "Saved", icon: Bookmark },
-  { to: "/recent", label: "Recently played", icon: Clock },
-  { to: "/profile", label: "Profile", icon: User },
-] as const;
+const desktop: Array<{ to: string; key: TranslationKey; icon: typeof Home }> = [
+  { to: "/", key: "nav.forYou", icon: Home },
+  { to: "/following", key: "nav.following", icon: Users },
+  { to: "/explore", key: "nav.explore", icon: Compass },
+  { to: "/search", key: "nav.search", icon: Search },
+  { to: "/leaderboards", key: "nav.leaderboards", icon: Trophy },
+  { to: "/notifications", key: "nav.notifications", icon: Bell },
+  { to: "/saved", key: "nav.saved", icon: Bookmark },
+  { to: "/recent", key: "nav.recent", icon: Clock },
+  { to: "/profile", key: "nav.profile", icon: User },
+];
 
 /**
  * Main navigation. Authentication comes from the single reactive session
@@ -55,6 +56,7 @@ const desktop = [
 export function AppShell({ children }: { children: ReactNode }) {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const auth = useAuth();
+  const { t } = useLanguage();
   const unread = useUnreadCount();
   const showAdmin = useAdminVisibility();
   const isAnonymous = auth.status === "anonymous";
@@ -72,7 +74,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <Logo />
         </Link>
         <nav className="flex flex-1 flex-col gap-0.5" aria-label="Main">
-          {desktop.map(({ to, label, icon: Icon }) => (
+          {desktop.map(({ to, key, icon: Icon }) => (
             <Link
               key={to}
               to={to}
@@ -82,7 +84,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               )}
             >
               <Icon className="size-[18px]" strokeWidth={1.75} />
-              <span className="flex-1">{label}</span>
+              <span className="flex-1">{t(key)}</span>
               {to === "/notifications" && showBadge && (
                 <span className="rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground tabular">
                   {unread.count}
@@ -100,7 +102,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             )}
           >
             <Settings className="size-[18px]" strokeWidth={1.75} />
-            Settings
+            {t("nav.settings")}
           </Link>
           {showAdmin && (
             <Link
@@ -111,7 +113,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               )}
             >
               <Shield className="size-[18px]" strokeWidth={1.75} />
-              Admin
+              {t("nav.admin")}
             </Link>
           )}
           {isAnonymous && (
@@ -124,6 +126,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </Link>
               <Link
                 to="/login"
+                search={{ redirect: path }}
                 className="flex h-10 items-center justify-center rounded-lg text-sm font-medium text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-foreground"
               >
                 Log in
@@ -152,7 +155,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         )}
       >
         <ul className="mx-auto grid h-16 max-w-md grid-cols-5">
-          {mobile.map(({ to, label, icon: Icon }) => (
+          {mobile.map(({ to, key, icon: Icon }) => (
             <li key={to}>
               <Link
                 to={to}
@@ -162,7 +165,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 )}
               >
                 <Icon className="size-[22px]" strokeWidth={isActive(to) ? 2.1 : 1.75} />
-                {label}
+                {t(key)}
                 {to === "/notifications" && showBadge && (
                   <span
                     className="absolute top-2.5 left-1/2 ml-2 size-2 rounded-full bg-primary"

@@ -79,16 +79,18 @@ export type GameComment = {
   author: PublicProfile | null;
 };
 
-function toApiError(error: unknown, area: "like" | "comment" | "save"): ApiError {
+function toApiError(error: unknown, area: "like" | "comment" | "save" | "score"): ApiError {
   const nouns = {
     like: "Couldn't update the like. Try again.",
     comment: "Couldn't load comments. Try again.",
     save: "Couldn't update the saved games. Try again.",
+    score: "Couldn't load your scores. Try again.",
   } as const;
   const codes = {
     like: "like_failed",
     comment: "comment_failed",
     save: "save_failed",
+    score: "score_failed",
   } as const;
   if (error instanceof ApiError) return error;
   if (error instanceof SupabaseRestError) {
@@ -396,6 +398,138 @@ export async function listMyRecentScores(
   } catch (error) {
     throw toApiError(error, "comment");
   }
+}
+
+/**
+ * The signed-in caller's best verified score per game, highest first.
+ *
+ * One row per game, taken from the scores the database retained. A game whose
+ * only run was a guest run has no row, because an unranked run is not saved —
+ * which is the honest answer, not a zero.
+ */
+export async function listMyBestScores(
+  limit = 200,
+): Promise<Array<{ gameId: string; score: number }>> {
+  const { token, userId } = requireCaller();
+  try {
+    const rows = await restGet<Array<{ game_id: string; score: number }>>(
+      `scores?user_id=eq.${userId}&select=game_id,score&order=score.desc&limit=${limit}`,
+      token,
+    );
+    const best = new Map<string, number>();
+    for (const row of rows) {
+      if (!best.has(row.game_id)) best.set(row.game_id, row.score);
+    }
+    return [...best]
+      .map(([gameId, score]) => ({ gameId, score }))
+      .sort((a, b) => b.score - a.score);
+  } catch (error) {
+    throw toApiError(error, "score");
+  }
+}
+
+export type ScoreEntry = { game: Game | null; score: number };
+
+type ScoreListState = {
+  entries: ScoreEntry[];
+  status: "anonymous" | "loading" | "ready" | "error";
+  error: string | undefined;
+  retry: () => void;
+};
+
+/** The caller's personal bests, with their catalogue games resolved. */
+export function useBestScores(): ScoreListState {
+  const [entries, setEntries] = useState<ScoreEntry[]>([]);
+  const [status, setStatus] = useState<ScoreListState["status"]>("loading");
+  const [error, setError] = useState<string | undefined>();
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const auth = getAuthState();
+    if (auth.status !== "authenticated") {
+      setStatus("anonymous");
+      setEntries([]);
+      return;
+    }
+    let cancelled = false;
+    setStatus("loading");
+    setError(undefined);
+    listMyBestScores()
+      .then(async (rows) => {
+        const games = new Map(
+          (await fetchGameRecords(rows.map((row) => row.gameId))).map((record) => [
+            record.id,
+            record.game,
+          ]),
+        );
+        if (cancelled) return;
+        setEntries(rows.map((row) => ({ game: games.get(row.gameId) ?? null, score: row.score })));
+        setStatus("ready");
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(err instanceof ApiError ? err.message : "Couldn't load your scores. Try again.");
+        setStatus("error");
+      });
+    const unsubscribe = subscribeToAuth(() => setTick((n) => n + 1));
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [tick]);
+
+  return { entries, status, error, retry: useCallback(() => setTick((n) => n + 1), []) };
+}
+
+/**
+ * Games the caller played, newest first, derived from saved scores.
+ *
+ * There is no separate play-history table. A score is written only when a run
+ * finished and was verified, so it is the only record of a played game — using
+ * it keeps this page consistent with Activity instead of claiming nothing was
+ * played after a scored run.
+ */
+export function useRecentlyPlayed(limit = 20): GameListState {
+  const [games, setGames] = useState<Game[]>([]);
+  const [status, setStatus] = useState<GameListState["status"]>("loading");
+  const [error, setError] = useState<string | undefined>();
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const auth = getAuthState();
+    if (auth.status !== "authenticated") {
+      setStatus("anonymous");
+      setGames([]);
+      return;
+    }
+    let cancelled = false;
+    setStatus("loading");
+    setError(undefined);
+    listMyRecentScores(limit)
+      .then(async (rows) => {
+        // Newest first, one card per game: the score list can name a game more
+        // than once and the page is "games you played", not "runs you played".
+        const ids = [...new Set(rows.map((row) => row.gameId))];
+        const byId = new Map(
+          (await fetchGameRecords(ids)).map((record) => [record.id, record.game]),
+        );
+        if (cancelled) return;
+        setGames(ids.map((id) => byId.get(id)).filter((game): game is Game => Boolean(game)));
+        setStatus("ready");
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(err instanceof ApiError ? err.message : "Couldn't load recent games. Try again.");
+        setStatus("error");
+      });
+    const unsubscribe = subscribeToAuth(() => setTick((n) => n + 1));
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [limit, tick]);
+
+  return { games, status, error, retry: useCallback(() => setTick((n) => n + 1), []) };
 }
 
 // ── Games by id (liked / saved / activity lists) ────────────────────────────

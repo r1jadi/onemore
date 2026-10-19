@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { Check, ChevronDown } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { Avatar, EmptyState, ErrorState, Page, PageHeader } from "@/components/common";
@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { ApiError } from "@/lib/api/client";
-import { changePassword, fetchLinkedProviders, useAuth } from "@/lib/auth/session";
+import { changePassword, fetchLinkedProviders, signOut, useAuth } from "@/lib/auth/session";
 import { offeredLanguages, useLanguage } from "@/lib/settings/language";
 import { useTheme, type Appearance } from "@/lib/settings/theme";
 import { useAccessibility } from "@/lib/settings/accessibility";
@@ -20,18 +20,26 @@ import {
   type UserPreferences,
 } from "@/lib/settings/preferences";
 import { listBlocked, unblockUser } from "@/lib/settings/blocked";
-import { avatarUrl, useProfile } from "@/lib/users/profile";
+import { avatarUrl, clearProfile, useProfile } from "@/lib/users/profile";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/settings/$section")({
   head: ({ params }) => {
-    const t = allSettings.find((s) => s.slug === params.section)?.title ?? "Settings";
+    const t = allSettings.find((s) => s.slug === params.section)?.title;
+    // An unknown section has no name of its own; without the guard the title
+    // reads "Settings settings — onemore".
     return {
       meta: [
-        { title: `${t} settings — onemore` },
-        { name: "description", content: `Manage ${t.toLowerCase()} on onemore.` },
-        { property: "og:title", content: `${t} — onemore` },
-        { property: "og:description", content: `Manage ${t.toLowerCase()} on onemore.` },
+        { title: t ? `${t} settings — onemore` : "Settings — onemore" },
+        {
+          name: "description",
+          content: t ? `Manage ${t.toLowerCase()} on onemore.` : "Manage your onemore settings.",
+        },
+        { property: "og:title", content: t ? `${t} — onemore` : "Settings — onemore" },
+        {
+          property: "og:description",
+          content: t ? `Manage ${t.toLowerCase()} on onemore.` : "Manage your onemore settings.",
+        },
       ],
     };
   },
@@ -124,6 +132,8 @@ function usePrefs() {
 }
 
 function RequireSignIn({ body }: { body: string }) {
+  // Return the visitor to the setting they were trying to manage, not to Home.
+  const path = useRouterState({ select: (s) => s.location.pathname });
   return (
     <div className="px-4 md:px-0">
       <EmptyState
@@ -131,7 +141,9 @@ function RequireSignIn({ body }: { body: string }) {
         body={body}
         action={
           <Button asChild>
-            <Link to="/login">Log in</Link>
+            <Link to="/login" search={{ redirect: path }}>
+              Log in
+            </Link>
           </Button>
         }
       />
@@ -306,8 +318,8 @@ function Body({ section }: { section: string }) {
             </button>
           ))}
           <p className="text-xs text-muted-foreground">
-            Only fully translated languages are offered. More languages arrive when their
-            translations are complete.
+            Navigation labels change immediately. The rest of the interface is still English; more
+            copy is translated as the translations are completed.
           </p>
         </div>
       );
@@ -507,7 +519,8 @@ function maskEmail(email: string): string {
   return `${head}•••@${domain}`;
 }
 
-function SecuritySection({ signedIn }: { signedIn: boolean }) {
+export function SecuritySection({ signedIn }: { signedIn: boolean }) {
+  const navigate = useNavigate();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [status, setStatus] = useState<string>();
@@ -587,8 +600,22 @@ function SecuritySection({ signedIn }: { signedIn: boolean }) {
           label="This device"
           value="Current session"
           action={
-            <Button asChild size="sm" variant="ghost">
-              <Link to="/settings">Log out</Link>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={async () => {
+                // The session is cleared locally before the revoke is sent, so a
+                // failed call cannot leave the visitor inside a signed-in shell.
+                try {
+                  await signOut();
+                } catch {
+                  // The local session is already gone; the token expires on its own.
+                }
+                clearProfile();
+                void navigate({ to: "/welcome" });
+              }}
+            >
+              Log out
             </Button>
           }
         />
@@ -642,17 +669,11 @@ function ConnectedSection({ signedIn }: { signedIn: boolean }) {
           googleConnected ? (
             <span className="text-xs text-muted-foreground">Linked to this account</span>
           ) : (
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => {
-                void import("@/lib/auth/session").then(async ({ googleAuthorizeUrl }) => {
-                  window.location.href = await googleAuthorizeUrl("/settings/connected");
-                });
-              }}
-            >
-              Connect
-            </Button>
+            // Signing in with Google is not linking: the OAuth flow replaces the
+            // browser session, and a different Google account would land the
+            // visitor in a different account. Identity linking needs its own
+            // server-side flow, so it is reported as unavailable instead.
+            <span className="text-xs text-muted-foreground">Linking is not implemented</span>
           )
         }
       />

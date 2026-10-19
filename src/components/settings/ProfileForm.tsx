@@ -42,7 +42,9 @@ export function ProfileForm() {
           body="Your name, username, bio and photo belong to your account."
           action={
             <Button asChild>
-              <Link to="/login">Log in</Link>
+              <Link to="/login" search={{ redirect: "/settings/profile" }}>
+                Log in
+              </Link>
             </Button>
           }
         />

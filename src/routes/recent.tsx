@@ -1,6 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { GameListPage } from "@/components/game/GameListPage";
-import { EmptyState } from "@/components/common";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { Clock } from "lucide-react";
+import { EmptyState, ErrorState, GridSkeleton, Page, PageHeader } from "@/components/common";
+import { GameCard } from "@/components/game/GameCard";
+import { Button } from "@/components/ui/button";
+import { useRecentlyPlayed } from "@/lib/social/engagement";
 import { seo } from "@/lib/seo";
 
 export const Route = createFileRoute("/recent")({
@@ -11,18 +14,83 @@ export const Route = createFileRoute("/recent")({
 /**
  * Recently played.
  *
- * The list would come from the caller's own play sessions. No session is recorded
- * yet, and there is no per-user play history endpoint, so the prototype's six
- * hard-coded games were a fabrication of the caller's own behaviour — the least
- * defensible kind, because it looks like a memory of something they did.
+ * The only record of a played game is a saved score: a run writes one when it
+ * finishes and is verified. This page derives its list from those rows, newest
+ * first, and shows each game once. Guest runs are not saved, so they do not
+ * appear — which is what the copy says rather than pretending nothing works.
  */
 function Recent() {
+  const list = useRecentlyPlayed();
+
+  if (list.status === "anonymous") {
+    return (
+      <Page className="max-w-5xl">
+        <PageHeader back title="Recently played" subtitle="Pick up where you left off." />
+        <div className="px-4 md:px-0">
+          <EmptyState
+            icon={Clock}
+            title="Sign in to see your games"
+            body="Your recently played games belong to your account."
+            action={
+              <Button asChild>
+                <Link to="/login" search={{ redirect: "/recent" }}>
+                  Log in
+                </Link>
+              </Button>
+            }
+          />
+        </div>
+      </Page>
+    );
+  }
+
+  if (list.status === "loading") {
+    return (
+      <Page className="max-w-5xl">
+        <PageHeader back title="Recently played" subtitle="Pick up where you left off." />
+        <GridSkeleton />
+      </Page>
+    );
+  }
+
+  if (list.status === "error") {
+    return (
+      <Page className="max-w-5xl">
+        <PageHeader back title="Recently played" subtitle="Pick up where you left off." />
+        <div className="px-4 md:px-0">
+          <ErrorState
+            title="Couldn't load recently played games"
+            body={list.error}
+            onRetry={list.retry}
+          />
+        </div>
+      </Page>
+    );
+  }
+
+  if (list.games.length === 0) {
+    return (
+      <Page className="max-w-5xl">
+        <PageHeader back title="Recently played" subtitle="Pick up where you left off." />
+        <div className="px-4 md:px-0">
+          <EmptyState
+            icon={Clock}
+            title="No games played yet"
+            body="A game appears here after a scored run is saved. Guest runs are not saved."
+          />
+        </div>
+      </Page>
+    );
+  }
+
   return (
-    <GameListPage title="Recently played" subtitle="Pick up where you left off.">
-      <EmptyState
-        title="No play history yet"
-        body="Games you play will appear here once plays are recorded. Playing is not available yet."
-      />
-    </GameListPage>
+    <Page className="max-w-5xl">
+      <PageHeader back title="Recently played" subtitle="Pick up where you left off." />
+      <div className="grid grid-cols-2 gap-x-3 gap-y-5 px-4 md:grid-cols-3 md:px-0 lg:grid-cols-4">
+        {list.games.map((game) => (
+          <GameCard key={game.slug} game={game} />
+        ))}
+      </div>
+    </Page>
   );
 }
