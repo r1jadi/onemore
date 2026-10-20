@@ -834,12 +834,15 @@ paths:
                       type: array
                       description: |
                         The run, as the ordered list of board positions the run's
-                        moves addressed: a column for Stack 10, a pad for Chain.
-                        This is what is replayed; the rules for how a move is
-                        generated and what it does belong to the game (see
-                        `docs/games`).
+                        moves addressed: a column for Stack 10, a pad for Chain,
+                        a cell for Memory Flash. This is what is replayed; the
+                        rules for how a move is generated and what it does belong
+                        to the game (see `docs/games`). The bound is the largest
+                        board any shipped rules version addresses: Memory Flash's
+                        sixteen cells. Stack 10 and Chain address 0–3, and their
+                        verifiers refuse anything else.
                       maxItems: 60
-                      items: { type: integer, minimum: 0, maximum: 3 }
+                      items: { type: integer, minimum: 0, maximum: 15 }
       responses:
         "200":
           description: The verified run. Identical to a retry's answer, except that a retry sets `duplicate`.

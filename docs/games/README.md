@@ -3,9 +3,10 @@
 How OneMore's games work: the rules, who is allowed to decide a score, and how a
 game earns the right to be called playable.
 
-Two games are implemented today: **Stack 10** and **Chain** (Don't Break the
-Chain). The other five catalogue records are published but not playable —
-`playable: false`, `runtime: null` — and no screen offers to start them.
+Three games are implemented today: **Stack 10**, **Chain** (Don't Break the
+Chain) and **Memory Flash**. The other four catalogue records are published but
+not playable — `playable: false`, `runtime: null` — and no screen offers to start
+them.
 
 ## Stack 10
 
@@ -261,3 +262,123 @@ suites fails.
    suites.
 4. **A full-width seed** — `9223372036854775807` deals `1, 3, 3, 3, 1, 0, 1, 0, …`,
    which is what catches a client that rounded the seed to a double.
+
+## Memory Flash
+
+Watch the pattern light, then tap the same cells back **in any order**. Each round
+shows one cell more than the last; a tap outside the pattern — or a second tap on a
+cell already lit — ends the run.
+
+### The board
+
+| Thing   | Value                                                     |
+| ------- | --------------------------------------------------------- |
+| Board   | 4×4, sixteen cells (indexes 0–15)                          |
+| Rounds  | 10 per run — the run always ends, so two scores measure one thing |
+| Taps    | 55 in a perfect run (1 + 2 + … + 10)                       |
+| Rules   | `memory-flash@1`                                           |
+| Runtime | `memory-flash` (the catalogue's `games.runtime` value)      |
+
+### The patterns
+
+The cells are not random at play time: they are a function of the run's seed, which
+the **server** chooses when it issues the session. The client must produce exactly
+the same patterns or its submission is refused, so the generator is written out in
+full rather than described:
+
+```
+state₀ = ((seed mod 2³²) + 2³²) mod 2³²        // the seed is a bigint, reduced to 32 bits
+if state₀ = 0 then state₀ = 2654435769         // 0x9E3779B9: a zero state would be degenerate
+stateₙ = (stateₙ₋₁ × 1664525 + 1013904223) mod 2³²
+cellₙ  = (stateₙ >> 16) mod 16                 // 0..15
+```
+
+Round `r` lights exactly `r` **distinct** cells: the generator is advanced until
+`r` cells the round does not already hold have been drawn, and the rejection is
+part of the rules rather than a drawing detail. The state carries across rounds —
+round two starts drawing where round one stopped — so the ten patterns are one
+sequence, not ten independent draws.
+
+The state progression is the same LCG Stack 10's deck uses; only the digit read out
+of each state differs. Cells are read from bits 16–19, deliberately not from the low
+four bits: this LCG's low bits advance with a period of two to the power of their
+width, so `state % 16` would flash a slice of one repeated sixteen-draw cycle and a
+later round would teach nothing an earlier one had not. Bits 16–19 have the full
+period, so each seed flashes its own patterns.
+
+The seed travels as a **decimal string** for the same reason Stack 10's does: it is
+a `bigint` column, and parsing it as a double would round it, flash different
+patterns, and reject every honest run.
+
+### A move
+
+A move is a **cell index, 0–15**. Round `r` has `r` cells lit, and a tap is correct
+when it is one of those cells that has not been entered yet. The order does not
+matter — the pattern is a set — but a tap outside the set, or a repeat, is a mistake:
+
+1. **A cell in the pattern, not yet entered** → it stays lit, and the round
+   continues. Entering the last cell clears the round.
+2. **A cell outside the pattern, or one already entered** → the run is over. The
+   tap is still part of the run and is still submitted; it is a legal tap that
+   loses, not an invalid one.
+
+### Scoring
+
+A cleared pattern scores **10 points**. A pattern is all-or-nothing: a round with
+four of its five cells entered and then a mistake scores nothing for that round.
+A perfect run clears ten patterns for **100 points**.
+
+### How a run ends
+
+| Outcome   | When                                                       |
+| --------- | ---------------------------------------------------------- |
+| `over`    | A tap was outside the pattern or repeated a lit cell. The ordinary ending. |
+| `cleared` | All ten patterns were rebuilt — all fifty-five taps.        |
+
+The score already earned is kept. Every tap of the run must be submitted, losing
+tap included: a submission that stops early is refused, so a player cannot discard
+the tap that broke their pattern. Tapping nothing is impossible — round one is a
+single cell — so every run has at least one move.
+
+### Verified scores
+
+**The database decides the score**, under the same rules as Stack 10 and Chain: see
+`supabase/migrations/20261020120000_memory_flash_sessions.sql` for the code.
+
+- `public.memory_flash_pattern(seed, round)` draws one round's pattern. It is
+  internals: execute is not granted to a client, because a player already holds the
+  seed their own board draws from, and the verifier is the only caller.
+- `public.start_game_session(slug, rules, client)` issues the run with the seed, the
+  pinned version and the expiry. Its gate is a pair — (`stack-10`, `stack-10@1`),
+  (`chain`, `chain@1`) or (`memory-flash`, `memory-flash@1`) — and anything else is
+  `unsupported_runtime`. A Memory Flash session's `tile_count` is 55: the field
+  counts the moves a complete run holds, and its moves are cell taps.
+- `public.complete_memory_flash_run(session, actions, score, duration)` replays the
+  tap list pattern by pattern, derives the score, compares it with the claim, and
+  only then closes the session and records it. Its outcome vocabulary
+  (`recorded`, `duplicate`, `score_mismatch`, …) and its ledger behaviour are
+  identical to the other two verifiers, and the Go service maps them onto HTTP the
+  same way — routing at the verifier the pinned rules version names and accepting
+  cell indexes up to 15 for this game's board.
+
+A guest can play. Their run is verified and closed exactly like a signed-in
+player's, and it is never ranked.
+
+### Test vectors
+
+Each vector is asserted by both the SQL suite and the client engine; if either side
+drifts, one of the two suites fails.
+
+1. **Seed 1's patterns** — `[8]`, `[8,6]`, `[3,0,8]`, `[6,2,8,5]`, `[13,0,7,1,8]`,
+   `[3,14,15,13,7,2]`, `[15,2,11,14,8,10,0]`, `[11,2,1,10,5,12,3,13]`,
+   `[3,14,13,9,11,8,0,4,15]`, `[1,4,7,2,10,6,9,5,14,11]`.
+2. **Seed 1, the perfect line** — those fifty-five cells in that order: ten cleared
+   patterns, **100 points**. Asserted in
+   [`tests/security/rls_test.sql`](../../tests/security/rls_test.sql) and in
+   [`src/lib/games/memory-flash.test.ts`](../../src/lib/games/memory-flash.test.ts).
+3. **Seed 1, the broken pattern** — `8, 8, 0`: round one rebuilt, the first cell of
+   round two entered, then a cell round two does not light. **10 points**, 3 taps
+   placed, 1 round cleared. Asserted in both suites.
+4. **A full-width seed** — `9223372036854775807` flashes `[5]`, `[7,3]`,
+   `[15,5,4]`, `[5,0,2,11]`, … which is what catches a client that rounded the seed
+   to a double.

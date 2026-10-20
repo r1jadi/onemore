@@ -1,6 +1,6 @@
 // Package supabaseplay is the play-session service's typed client for the
 // database functions that own a run: `start_game_session` and the verifiers,
-// `complete_stack10_run` and `complete_chain_run`.
+// `complete_stack10_run`, `complete_chain_run` and `complete_memory_flash_run`.
 //
 // Three properties shape it, and all three are deliberate:
 //
@@ -227,14 +227,19 @@ func (c *Client) CompleteRun(ctx context.Context, request CompleteRequest) (Resu
 }
 
 // completeFunction names the verifier for a pinned rules version. The version
-// selects the replay: a Chain run is verified by complete_chain_run, anything
-// else by complete_stack10_run — which answers wrong_rules for a version it
-// does not implement, so an unknown version is still a refusal, never a pass.
+// selects the replay: a Chain run is verified by complete_chain_run, a Memory
+// Flash run by complete_memory_flash_run, and anything else by
+// complete_stack10_run — which answers wrong_rules for a version it does not
+// implement, so an unknown version is still a refusal, never a pass.
 func completeFunction(rulesVersion string) string {
-	if strings.HasPrefix(rulesVersion, "chain@") {
+	switch {
+	case strings.HasPrefix(rulesVersion, "chain@"):
 		return "complete_chain_run"
+	case strings.HasPrefix(rulesVersion, "memory-flash@"):
+		return "complete_memory_flash_run"
+	default:
+		return "complete_stack10_run"
 	}
-	return "complete_stack10_run"
 }
 
 // rpc posts to one Data API function and decodes its single-object answer.

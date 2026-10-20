@@ -130,7 +130,7 @@ func TestStartSessionPassesRefusalsThrough(t *testing.T) {
 	rec := newRecorder(t, http.StatusOK, `{"outcome":"not_playable"}`)
 
 	start, err := rec.client(t).StartSession(context.Background(), StartRequest{
-		GameSlug:     "memory-flash",
+		GameSlug:     "color-merge",
 		RulesVersion: "stack-10@1",
 	})
 	if err != nil {
@@ -213,6 +213,26 @@ func TestCompleteRunRoutesChainRulesToChainVerifier(t *testing.T) {
 	// complete_chain_run, not by Stack 10's function.
 	if rec.path != "/rest/v1/rpc/complete_chain_run" {
 		t.Fatalf("path = %s, want the Chain verifier function", rec.path)
+	}
+}
+
+func TestCompleteRunRoutesMemoryFlashRulesToMemoryFlashVerifier(t *testing.T) {
+	rec := newRecorder(t, http.StatusOK, resultRow)
+
+	if _, err := rec.client(t).CompleteRun(context.Background(), CompleteRequest{
+		SessionID:    "cccccccc-1111-4111-8111-cccccccccccc",
+		RulesVersion: "memory-flash@1",
+		Actions:      []int32{8, 8, 0},
+		Score:        10,
+		DurationMS:   12000,
+	}); err != nil {
+		t.Fatalf("CompleteRun: %v", err)
+	}
+
+	// The pinned version selects the replay: a Memory Flash run is verified by
+	// complete_memory_flash_run, not by either of the other two.
+	if rec.path != "/rest/v1/rpc/complete_memory_flash_run" {
+		t.Fatalf("path = %s, want the Memory Flash verifier function", rec.path)
 	}
 }
 

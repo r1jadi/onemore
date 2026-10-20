@@ -5,8 +5,9 @@
 //
 //   - **The database is the authority, and this service holds no master key.**
 //     `public.start_game_session` picks the seed, and the verifier for the run's
-//     pinned rules (`complete_stack10_run`, `complete_chain_run`) replays the
-//     submitted actions, derives the score and writes the ledger. This service validates the request shape,
+//     pinned rules (`complete_stack10_run`, `complete_chain_run`,
+//     `complete_memory_flash_run`) replays the submitted actions, derives the
+//     score and writes the ledger. This service validates the request shape,
 //     maps the verifier's outcome onto an HTTP answer, and never sees a score it
 //     can change. That is why there is no service_role key anywhere in the
 //     configuration: a credential that bypasses every policy is a much larger
@@ -27,6 +28,7 @@ package gamesessions
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -48,13 +50,16 @@ const (
 	// maxBodyBytes bounds a request body: a run is at most a few hundred bytes.
 	maxBodyBytes = 8 * 1024
 	// maxActions bounds the moves in a run: sixty tiles for Stack 10,
-	// fifty-five taps for a perfect Chain run. The verifier enforces its own
-	// game's count too; this only keeps an absurd body from reaching the
-	// database at all.
+	// fifty-five taps for a perfect Chain or Memory Flash run. The verifier
+	// enforces its own game's count too; this only keeps an absurd body from
+	// reaching the database at all.
 	maxActions = 60
-	// columns is the bound a move has to fit: a column for Stack 10, a pad for
-	// Chain. Both games address board positions 0 to 3.
-	columns = 4
+	// The bounds a move has to fit. Stack 10 addresses a column and Chain a pad,
+	// both 0 to 3; Memory Flash addresses one of the sixteen cells of its 4×4
+	// board. The pinned rules version picks the bound, because the two games live
+	// behind one endpoint.
+	stackChainPositions = 4
+	memoryFlashCells    = 16
 )
 
 // Patterns mirror the database constraints, so a bad request is a 400 that names
@@ -284,10 +289,13 @@ func (s *service) completeSession(w http.ResponseWriter, r *http.Request) {
 	}
 	// A move outside the board is malformed input rather than a bad run;
 	// whether the *sequence* is possible is the verifier's call, not this one's.
+	// The board the pinned rules play on decides the bound: Memory Flash has
+	// sixteen cells, Stack 10 and Chain four positions.
+	positions := boardSize(rules)
 	for _, action := range actions {
-		if action < 0 || action >= columns {
+		if action < 0 || int(action) >= positions {
 			httpx.WriteError(w, r, httpx.NewError(httpx.CodeBadRequest,
-				"Every action must be a board position from 0 to 3.",
+				fmt.Sprintf("Every action must be a board position from 0 to %d.", positions-1),
 				apierr.Detail{Field: "progress.actions", Rule: "range"}))
 			return
 		}
@@ -349,6 +357,17 @@ func (s *service) completeSession(w http.ResponseWriter, r *http.Request) {
 	default:
 		s.unexpectedOutcome(w, r, "submit a run", result.Outcome)
 	}
+}
+
+// boardSize is how many positions the pinned rules address. The rules version
+// is what selects a replay in the database, so it is also what selects the board
+// here; an unknown version keeps the smallest bound, and the verifier refuses the
+// run as `wrong_rules` rather than this layer guessing.
+func boardSize(rulesVersion string) int {
+	if strings.HasPrefix(rulesVersion, "memory-flash@") {
+		return memoryFlashCells
+	}
+	return stackChainPositions
 }
 
 func deref[T any](value *T) T {

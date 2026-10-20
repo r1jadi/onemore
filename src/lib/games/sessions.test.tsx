@@ -9,6 +9,7 @@ import {
   startSession,
   useChainRun,
   useLeaderboard,
+  useMemoryFlashRun,
   useStack10Run,
   type PlaySession,
   type RunResult,
@@ -675,6 +676,163 @@ describe("useChainRun", () => {
     expect(hook.result.stage).toBe("submit");
     // The run is not thrown away: it is unverified, not lost.
     expect(hook.result.run?.taps).toEqual([0, 0, 0, 1]);
+
+    act(() => hook.result.retry());
+    await waitFor(() => expect(hook.result.status).toBe("finished"));
+
+    const sends = spy.mock.calls
+      .map((call, index) => ({ call, index }))
+      .filter(({ call }) => String(call[0]).includes("/complete"));
+    expect(sends).toHaveLength(2);
+    // Same run, same body: a retry cannot become a second, different score.
+    expect(requestBody(spy, sends[0].index)).toEqual(requestBody(spy, sends[1].index));
+    // And no new session was started to do it.
+    const sessionCalls = spy.mock.calls.filter((call) =>
+      String(call[0]).endsWith("/api/v1/sessions"),
+    );
+    expect(sessionCalls).toHaveLength(1);
+  });
+});
+
+// ── The Memory Flash run lifecycle ──────────────────────────────────────────
+// Seed 1 flashes [8], then [8,6]: round one is one cell, round two two cells.
+
+/** A Memory Flash session payload, per the contract. */
+function memoryFlashSessionPayload(overrides: Partial<PlaySession> = {}): PlaySession {
+  return {
+    id: "eeeeeeee-1111-4111-8111-eeeeeeeeeeee",
+    gameSlug: "memory-flash",
+    rulesVersion: "memory-flash@1",
+    seed: "1",
+    tileCount: 55,
+    startedAt: "2026-10-20T12:00:00.000Z",
+    expiresAt: "2026-10-20T14:00:00.000Z",
+    ranked: true,
+    ...overrides,
+  };
+}
+
+/** A Memory Flash result payload, per the contract. */
+function memoryFlashResultPayload(overrides: Partial<RunResult> = {}): RunResult {
+  return {
+    sessionId: "eeeeeeee-1111-4111-8111-eeeeeeeeeeee",
+    gameSlug: "memory-flash",
+    score: 10,
+    clearedColumns: 1,
+    tilesPlaced: 3,
+    durationMs: 3800,
+    ranked: true,
+    recordedAt: "2026-10-20T12:01:00.000Z",
+    personalBest: 10,
+    rank: 1,
+    duplicate: false,
+    ...overrides,
+  };
+}
+
+describe("useMemoryFlashRun", () => {
+  it("starts a real run from the server's session, under Memory Flash rules", async () => {
+    const spy = mockFetch(() => jsonResponse(memoryFlashSessionPayload(), 201));
+
+    const hook = renderHook(() => useMemoryFlashRun("memory-flash"));
+    expect(hook.result.status).toBe("starting");
+
+    await waitFor(() => expect(hook.result.status).toBe("playing"));
+    if (hook.result.status !== "playing") throw new Error("run did not start");
+
+    // The session asked for Memory Flash rules, and the board is the seed's
+    // first pattern.
+    const body = requestBody(spy);
+    expect(body.rulesVersion).toBe("memory-flash@1");
+    expect(hook.result.session.seed).toBe("1");
+    expect(hook.result.run.round).toBe(1);
+    expect(hook.result.run.score).toBe(0);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("plays without asking the server anything until the run ends", async () => {
+    const spy = mockFetch((url) =>
+      url.includes("/complete")
+        ? jsonResponse(memoryFlashResultPayload())
+        : jsonResponse(memoryFlashSessionPayload(), 201),
+    );
+
+    const hook = renderHook(() => useMemoryFlashRun("memory-flash"));
+    await waitFor(() => expect(hook.result.status).toBe("playing"));
+
+    act(() => {
+      // Round one is [8]: one tap clears it and scores ten.
+      hook.result.tap(8);
+    });
+
+    if (hook.result.status !== "playing") throw new Error("run ended early");
+    expect(hook.result.run.taps).toEqual([8]);
+    expect(hook.result.run.score).toBe(10);
+    expect(hook.result.run.round).toBe(2);
+    // One request so far: the session. Scoring is not a per-move conversation.
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("submits the finished run once and shows the score the server derived", async () => {
+    const spy = mockFetch((url) =>
+      url.includes("/complete")
+        ? // The server's number, deliberately different from the client's 10, to
+          // prove the screen shows the verified score rather than its own arithmetic.
+          jsonResponse(memoryFlashResultPayload({ score: 40 }))
+        : jsonResponse(memoryFlashSessionPayload(), 201),
+    );
+
+    const hook = renderHook(() => useMemoryFlashRun("memory-flash"));
+    await waitFor(() => expect(hook.result.status).toBe("playing"));
+
+    act(() => {
+      // Round one rebuilt, then a cell round two does not light.
+      [8, 8, 0].forEach((cell) => hook.result.tap(cell));
+    });
+
+    await waitFor(() => expect(hook.result.status).toBe("finished"));
+    if (hook.result.status !== "finished") throw new Error("run was not verified");
+
+    expect(hook.result.result.score).toBe(40);
+    expect(hook.result.run.score).toBe(10);
+    expect(hook.result.run.outcome).toBe("over");
+
+    const completeCalls = spy.mock.calls.filter((call) => String(call[0]).includes("/complete"));
+    expect(completeCalls).toHaveLength(1);
+    // And the body is the run: the cell list including the losing tap, the
+    // claimed score, the duration — and the session's pinned rules version.
+    const body = requestBody(
+      spy,
+      spy.mock.calls.findIndex((c) => String(c[0]).includes("/complete")),
+    );
+    expect(body.progress.actions).toEqual([8, 8, 0]);
+    expect(body.progress.rulesVersion).toBe("memory-flash@1");
+    expect(body.score).toBe(10);
+    expect(body.durationMs).toBeGreaterThan(0);
+  });
+
+  it("reports a failed verification as a failure, keeps the run, and retries the identical body", async () => {
+    let completions = 0;
+    const spy = mockFetch((url) => {
+      if (!url.includes("/complete")) return jsonResponse(memoryFlashSessionPayload(), 201);
+      completions += 1;
+      return completions === 1
+        ? errorResponse(503, "service_unavailable", "Play sessions are not available right now.")
+        : jsonResponse(memoryFlashResultPayload());
+    });
+
+    const hook = renderHook(() => useMemoryFlashRun("memory-flash"));
+    await waitFor(() => expect(hook.result.status).toBe("playing"));
+
+    act(() => {
+      [8, 8, 0].forEach((cell) => hook.result.tap(cell));
+    });
+
+    await waitFor(() => expect(hook.result.status).toBe("error"));
+    if (hook.result.status !== "error") throw new Error("expected a failure");
+    expect(hook.result.stage).toBe("submit");
+    // The run is not thrown away: it is unverified, not lost.
+    expect(hook.result.run?.taps).toEqual([8, 8, 0]);
 
     act(() => hook.result.retry());
     await waitFor(() => expect(hook.result.status).toBe("finished"));

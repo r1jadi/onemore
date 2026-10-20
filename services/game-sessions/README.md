@@ -18,17 +18,21 @@ is the authority for the shapes; the rules themselves are in
 
 This is the least obvious thing about the service, so it is worth stating plainly.
 
-The rules live in the database, in `public.complete_stack10_run` and
-`public.complete_chain_run` ([migration](../../supabase/migrations/20261013120000_play_sessions.sql)
-and [`20261014120000_chain_sessions.sql`](../../supabase/migrations/20261014120000_chain_sessions.sql)).
+The rules live in the database, in `public.complete_stack10_run`,
+`public.complete_chain_run` and `public.complete_memory_flash_run`
+([migration](../../supabase/migrations/20261013120000_play_sessions.sql),
+[`20261014120000_chain_sessions.sql`](../../supabase/migrations/20261014120000_chain_sessions.sql)
+and
+[`20261020120000_memory_flash_sessions.sql`](../../supabase/migrations/20261020120000_memory_flash_sessions.sql)).
 The pinned rules version selects which one replays a submission. Each function
 replays the submitted action list from the session's seed, derives the
 score, compares it with the claim, and only then closes the session and writes
 the score row. This service:
 
 - validates the request's *shape* — a slug, a rules version, an action list within
-  the board, a positive duration — so a malformed request is a `400` that names the
-  field rather than a `500` from a function;
+  the board the rules version plays on (four positions for Stack 10 and Chain,
+  sixteen cells for Memory Flash), a positive duration — so a malformed request is
+  a `400` that names the field rather than a `500` from a function;
 - calls the database **with the caller's own access token**, so `auth.uid()` inside
   those functions *is* the caller and no body can name a user;
 - maps the verifier's outcome onto HTTP and nothing else.
@@ -49,7 +53,7 @@ bypasses every policy in the project; there is none to be wrong with. See
 | `abandoned`             | 409  | A newer run of the same game replaced it, so only the open one can be submitted.                                                       |
 | `closed`                | 409  | Already recorded, and a *different* submission may not replace it.                                                                     |
 | `wrong_rules`           | 409  | The session is pinned to a rules version this verifier does not implement.                                                             |
-| `invalid_actions`       | 422  | The sequence is not one the rules can produce — a column off the board, play after the run ended, or a run that stops early.            |
+| `invalid_actions`       | 422  | The sequence is not one the rules can produce — a position off the board, play after the run ended, or a run that stops early.          |
 | `invalid_duration`      | 422  | The claim is longer than the session has existed.                                                                                      |
 | `score_mismatch`        | 422  | The replay disagrees with the claimed score. The message reports the replayed score; nothing is recorded.                               |
 | anything else           | 500  | An outcome this service does not know is an unclear run state, and an unclear run is never reported as success.                         |

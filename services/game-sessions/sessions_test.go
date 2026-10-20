@@ -28,7 +28,11 @@ const (
 	theSeed      = "9223372036854775807"
 	greedyRun    = "[0,0,1,0,0,0,2,2,2,3,0,0,0,0]"
 	rulesVersion = "stack-10@1"
-	testUserID   = "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f"
+	// Seed 1's first pattern is one cell, then two: a rebuilt pattern and a
+	// losing tap, for ten points and one cleared round.
+	memoryFlashRules = "memory-flash@1"
+	memoryFlashRun   = "[8,8,0]"
+	testUserID       = "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f"
 )
 
 // token signs a token the platform verifier accepts, with the given subject.
@@ -182,8 +186,12 @@ func startBody(slug, rules string) string {
 }
 
 func completeBody(score, duration, actions string) string {
+	return completeBodyRules(rulesVersion, score, duration, actions)
+}
+
+func completeBodyRules(rules, score, duration, actions string) string {
 	return `{"score":` + score + `,"durationMs":` + duration +
-		`,"progress":{"rulesVersion":"` + rulesVersion + `","actions":` + actions + `}}`
+		`,"progress":{"rulesVersion":"` + rules + `","actions":` + actions + `}}`
 }
 
 func errorCode(t *testing.T, body map[string]any) string {
@@ -253,7 +261,7 @@ func TestStartSessionRefusesAGameThatCannotBePlayed(t *testing.T) {
 	backend.start = supabaseplay.Start{Outcome: "not_playable"}
 	server := testServer(t, backend)
 
-	status, body := post(t, server, "/api/v1/sessions", startBody("memory-flash", rulesVersion), "")
+	status, body := post(t, server, "/api/v1/sessions", startBody("color-merge", rulesVersion), "")
 
 	if status != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", status)
@@ -509,6 +517,85 @@ func TestCompleteSessionVerifiesAChainRun(t *testing.T) {
 	}
 	if len(backend.lastRun.Actions) != 4 {
 		t.Fatalf("actions = %v, want the submitted taps", backend.lastRun.Actions)
+	}
+}
+
+func TestCompleteSessionVerifiesAMemoryFlashRun(t *testing.T) {
+	backend := testBackend()
+	started := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	backend.result = supabaseplay.Result{
+		Outcome:        "recorded",
+		SessionID:      sessionID,
+		GameSlug:       "memory-flash",
+		Score:          ptr(int64(10)),
+		ClearedColumns: ptr(1),
+		TilesPlaced:    ptr(3),
+		DurationMS:     ptr(12000),
+		Ranked:         ptr(true),
+		RecordedAt:     &started,
+		PersonalBest:   ptr(int64(10)),
+		Rank:           ptr(int64(1)),
+	}
+	server := testServer(t, backend)
+
+	// Round one rebuilt, the first cell of round two entered, then a losing tap:
+	// ten points, one cleared pattern, three taps placed.
+	status, body := post(t, server,
+		"/api/v1/sessions/"+sessionID+"/complete",
+		completeBodyRules(memoryFlashRules, "10", "12000", memoryFlashRun), "")
+
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%#v)", status, body)
+	}
+	if body["score"] != float64(10) || body["gameSlug"] != "memory-flash" {
+		t.Fatalf("body = %#v, want the verified Memory Flash run", body)
+	}
+	// The pinned version travels through untouched: it is what selects the
+	// verifier behind the handler.
+	if backend.lastRun.RulesVersion != memoryFlashRules {
+		t.Fatalf("rules version = %q, want the run's pinned memory-flash@1", backend.lastRun.RulesVersion)
+	}
+	if len(backend.lastRun.Actions) != 3 || backend.lastRun.Actions[2] != 0 {
+		t.Fatalf("actions = %v, want the submitted taps", backend.lastRun.Actions)
+	}
+}
+
+func TestCompleteSessionAcceptsAMemoryFlashCellBeyondFour(t *testing.T) {
+	// Memory Flash addresses sixteen cells. The bound is selected by the pinned
+	// rules version, so a cell index the Stack 10 board would reject must reach
+	// the Memory Flash verifier.
+	backend := testBackend()
+	server := testServer(t, backend)
+
+	status, body := post(t, server,
+		"/api/v1/sessions/"+sessionID+"/complete",
+		completeBodyRules(memoryFlashRules, "0", "45000", "[15]"), "")
+
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%#v)", status, body)
+	}
+	if len(backend.lastRun.Actions) != 1 || backend.lastRun.Actions[0] != 15 {
+		t.Fatalf("actions = %v, want the sixteenth cell", backend.lastRun.Actions)
+	}
+}
+
+func TestCompleteSessionRejectsAMemoryFlashCellPastTheBoard(t *testing.T) {
+	backend := testBackend()
+	server := testServer(t, backend)
+
+	status, body := post(t, server,
+		"/api/v1/sessions/"+sessionID+"/complete",
+		completeBodyRules(memoryFlashRules, "0", "45000", "[16]"), "")
+
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (%#v)", status, body)
+	}
+	if errorCode(t, body) != "bad_request" {
+		t.Fatalf("code = %s, want bad_request", errorCode(t, body))
+	}
+	// A sixteenth cell is malformed input, so it must never start a replay.
+	if backend.runCalls != 0 {
+		t.Fatal("a cell outside the board reached the verifier")
 	}
 }
 
