@@ -50,3 +50,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local QA artifacts (captured tokens, screenshots, scratch services). A token
+# captured while testing must never be committed: the secret scan reads history
+# and a deleted file is still a leaked credential.
+.qa-logs/

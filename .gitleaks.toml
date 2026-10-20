@@ -29,3 +29,24 @@ description = "Fake JWT subject in the follows test, not a credential"
 # the file — so a real key committed to the same test still fails the scan.
 regexTarget = "match"
 regexes = ['''5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a''']
+
+[[allowlists]]
+description = "Supabase session captured during QA, deleted in the next commit — the token must be revoked"
+# Not a fixture: this is the only entry here that covers something that really
+# was a credential. Commit afc8293 committed two files written by a manual QA
+# run — a captured access token (.qa-logs/access) and the stored session that
+# carried it (.qa-logs/session.json, which also held the refresh token). Both
+# files are removed and .qa-logs/ is ignored now, but a deleted file is still a
+# leaked secret: history keeps it, and rewriting published history is not an
+# option for this repository.
+#
+# The scope is one commit, not one path: paths would blind the scanner to those
+# names forever, while a commit is immutable — the findings it can hide are exactly
+# the two that exist in it, and nothing committed later can hide behind it. A new
+# secret in .qa-logs, or anywhere else, still fails the scan.
+#
+# REQUIRED FOLLOW-UP: revoke the session that token belonged to. Until it is
+# revoked, this entry hides a live credential rather than a spent one. Revoke
+# from Supabase → Authentication → Sessions ("sign out all users"), or with the
+# service role key: POST /auth/v1/admin/users/<id>/logout?scope=global.
+commits = ["afc8293f4dade8538ca9b1533901008801b6e583"]
