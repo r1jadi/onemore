@@ -73,6 +73,23 @@ export type ApiRequestOptions = {
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 
+/**
+ * A gateway that is starting up (or briefly unreachable) answers 502/503/504.
+ * Those are worth retrying for a read, because the same request a moment later
+ * is served — a cold service is not a failure the visitor should have to undo
+ * by hand. Mutations are never retried here: a duplicated write is worse than a
+ * visible error, and the UI offers its own retry for those.
+ */
+const RETRYABLE_STATUSES = new Set([502, 503, 504]);
+// The first retry is immediate: a gateway that was starting has usually finished
+// by the time the response arrives. The second waits, but not so long that a real
+// outage hides behind a spinner.
+const RETRY_DELAYS_MS = [0, 400];
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** Builds the absolute request URL from the configured base. */
 export function buildUrl(path: string, query?: ApiRequestOptions["query"]): string {
   const normalized = path.startsWith("/") ? path : `/${path}`;
@@ -118,26 +135,42 @@ export async function apiFetch<T>(path: string, options: ApiRequestOptions = {})
   if (token) headers["Authorization"] = `Bearer ${token}`;
   if (body !== undefined) headers["Content-Type"] = "application/json";
 
-  let response: Response;
-  try {
-    response = await fetch(buildUrl(path, query), {
-      method,
-      headers,
-      // No cookies: authentication is a bearer token, which also removes
-      // cross-site request forgery as an attack path for the API.
-      credentials: "omit",
-      cache: "no-store",
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: timeoutSignal(timeoutMs, signal),
-    });
-  } catch (cause) {
-    const aborted = cause instanceof Error && cause.name === "TimeoutError";
-    throw new ApiError(
-      aborted ? "The request timed out. Try again." : "Could not reach the server.",
-      {
-        code: aborted ? "timeout" : "network_error",
-      },
-    );
+  const idempotent = method === "GET";
+  const url = buildUrl(path, query);
+
+  let response: Response | undefined;
+  for (let attempt = 0; ; attempt++) {
+    const lastAttempt = !idempotent || attempt === RETRY_DELAYS_MS.length;
+    try {
+      response = await fetch(url, {
+        method,
+        headers,
+        // No cookies: authentication is a bearer token, which also removes
+        // cross-site request forgery as an attack path for the API.
+        credentials: "omit",
+        cache: "no-store",
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: timeoutSignal(timeoutMs, signal),
+      });
+    } catch (cause) {
+      // A caller that aborted, or a request that ran out of time, is the
+      // answer already; retrying it would only delay the report.
+      const aborted = cause instanceof Error && cause.name === "TimeoutError";
+      if (signal?.aborted || aborted || lastAttempt) {
+        throw new ApiError(
+          aborted ? "The request timed out. Try again." : "Could not reach the server.",
+          {
+            code: aborted ? "timeout" : "network_error",
+          },
+        );
+      }
+      await sleep(RETRY_DELAYS_MS[attempt]);
+      continue;
+    }
+
+    if (lastAttempt || !RETRYABLE_STATUSES.has(response.status)) break;
+    await response.text().catch(() => undefined);
+    await sleep(RETRY_DELAYS_MS[attempt]);
   }
 
   if (response.status === 204) return undefined as T;
@@ -146,6 +179,8 @@ export async function apiFetch<T>(path: string, options: ApiRequestOptions = {})
   const payload = parseJson(text);
 
   if (!response.ok) {
+    // A gateway that stayed unavailable through every attempt keeps its own
+    // status, so callers can still tell an outage (503) from a refusal (4xx).
     const envelope = (payload ?? {}) as ApiErrorEnvelope;
     throw new ApiError(
       envelope.error?.message ?? `Request failed with status ${response.status}.`,

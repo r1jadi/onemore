@@ -11,17 +11,18 @@ export const Route = createFileRoute("/trending")({
 /**
  * Trending, honestly reported as unavailable.
  *
- * A trend is a change in play activity over a window. That needs recorded plays
- * and a ranking algorithm, and neither exists — the prototype listed its fixture
- * games in insertion order and called them trending. There is no honest way to
- * show this page yet, so it says so.
+ * A trend is a change in play activity over a window. Plays are recorded — every
+ * finished run adds one — but nothing ranks them, and there is no windowed trend
+ * query behind this page. The prototype listed its fixture games in insertion
+ * order and called them trending. There is no honest way to show that yet, so the
+ * page says what is missing: the ranking, not the plays.
  */
 function Trending() {
   return (
     <GameListPage title="Trending games" subtitle="What everyone is playing right now.">
       <EmptyState
         title="Trending is not available yet"
-        body="A trend needs recorded plays over time, and nothing records plays yet. Browse the newest games instead."
+        body="A trend ranks plays over a window of time. Plays are recorded, but no game is ranked from them yet. Browse the newest games instead."
       />
     </GameListPage>
   );

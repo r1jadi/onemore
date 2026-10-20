@@ -240,25 +240,31 @@ describe("useResource", () => {
   });
 
   it("re-reads on retry, and never falls back to a cached page", async () => {
-    let attempts = 0;
-    const spy = mockApi(() => {
-      attempts += 1;
-      return attempts === 1
+    // A gateway that is down for the whole load: the read is retried briefly,
+    // still fails, and the retry is what asks again — one attempt sequence each.
+    let down = true;
+    const spy = mockApi(() =>
+      down
         ? overhead(503)
-        : jsonResponse({ totalUsers: 4, series: [], activity: [], topGames: [] });
-    });
+        : jsonResponse({ totalUsers: 4, series: [], activity: [], topGames: [] }),
+    );
     await signedIn(spy);
+    const beforeLoad = spy.mock.calls.length;
 
     const hook = renderHook(() => useAdminOverview());
 
     await waitFor(() => expect(hook.result.status).toBe("error"));
+    // Three attempts before the failure is reported, not one.
+    expect(spy.mock.calls.length - beforeLoad).toBe(3);
 
+    down = false;
     await act(async () => {
       hook.result.retry();
     });
 
     await waitFor(() => expect(hook.result.status).toBe("ready"));
-    expect(spy.mock.calls.length).toBe(3);
+    // The retry is one fresh read, not a cached page played back.
+    expect(spy.mock.calls.length - beforeLoad).toBe(4);
   });
 });
 

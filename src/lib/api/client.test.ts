@@ -108,6 +108,40 @@ describe("apiFetch", () => {
     expect(error.message).toBe("Could not reach the server.");
   });
 
+  it("retries a read through a gateway that is still starting", async () => {
+    // A cold service answers 503; the same request a moment later is served.
+    let calls = 0;
+    const spy = mockFetch(() => {
+      calls += 1;
+      return calls === 1
+        ? new Response("<html>503</html>", { status: 503 })
+        : new Response(JSON.stringify({ items: [] }), { status: 200 });
+    });
+
+    await expect(apiFetch("/games")).resolves.toEqual({ items: [] });
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry a write, so a slow gateway cannot duplicate it", async () => {
+    const spy = mockFetch(() => new Response("<html>503</html>", { status: 503 }));
+
+    const error = (await apiFetch("/games/stack-10/like", { method: "POST", token: "t" }).catch(
+      (e: unknown) => e,
+    )) as ApiError;
+
+    expect(error.status).toBe(503);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports the outage once every retry has failed", async () => {
+    const spy = mockFetch(() => new Response("<html>503</html>", { status: 503 }));
+
+    const error = (await apiFetch("/admin/leaderboards").catch((e: unknown) => e)) as ApiError;
+
+    expect(error.status).toBe(503);
+    expect(spy).toHaveBeenCalledTimes(3);
+  });
+
   it("flags 429 responses as rate limited", async () => {
     mockFetch(
       () => new Response(JSON.stringify({ error: { code: "rate_limited" } }), { status: 429 }),

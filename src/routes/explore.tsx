@@ -50,8 +50,10 @@ function SectionError({ children, onRetry }: { children: ReactNode; onRetry: () 
  *
  * The daily challenge and the category list are real. "Trending" and "Popular"
  * are not, and say so rather than reusing the newest games under a ranking
- * heading: both need play counts, and nothing records a play yet. Showing the
- * catalogue in publication order under "Trending" would be a fabricated ranking.
+ * heading: both need a ranking of recorded plays over a window, and the catalogue
+ * has no ranking endpoint. Plays themselves are recorded (each finished run is a
+ * play), so the absence is the ranking, not the data. Showing the catalogue in
+ * publication order under "Trending" would be a fabricated ranking.
  */
 export function Explore() {
   const daily = useGames({ category: "daily", limit: 1 });
@@ -159,12 +161,12 @@ export function Explore() {
           [
             "Trending",
             "/trending",
-            "Trending needs play counts. Nothing records plays yet, so no game can be ranked.",
+            "Trending needs plays ranked over time. Plays are recorded, but the catalogue does not rank them yet, so no game can be listed here.",
           ],
           [
             "Popular",
             "/popular",
-            "Popularity needs play counts. Nothing records plays yet, so no game can be ranked.",
+            "Popularity needs plays counted and ranked. Plays are recorded, but the catalogue does not rank them yet, so no game can be listed here.",
           ],
         ] as const
       ).map(([title, to, body]) => (

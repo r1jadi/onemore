@@ -569,6 +569,10 @@ export function SecuritySection({ signedIn }: { signedIn: boolean }) {
               className="h-11 w-full rounded-lg bg-surface-2 px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </label>
+          {/* The rule the server enforces, stated where it is needed: without it
+              a short password left the button disabled with no reason. It sits
+              outside the label so it does not become part of the field's name. */}
+          <p className="text-xs text-muted-foreground">At least 8 characters.</p>
           <label className="block space-y-1.5" htmlFor="confirm-password">
             <span className="text-sm">Confirm password</span>
             <input
@@ -590,7 +594,7 @@ export function SecuritySection({ signedIn }: { signedIn: boolean }) {
               {error}
             </p>
           )}
-          <Button type="submit" disabled={busy || password.length < 8}>
+          <Button type="submit" disabled={busy}>
             Update password
           </Button>
         </form>

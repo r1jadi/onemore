@@ -315,13 +315,17 @@ describe("a failed read", () => {
     expect(screen.queryByText("Most played games")).not.toBeInTheDocument();
     expect(screen.queryByText("Recent activity")).not.toBeInTheDocument();
 
+    // The read is retried through a transient gateway failure before it is
+    // reported, so a load costs more than one attempt; what matters here is that
+    // pressing Retry sends the read again rather than reusing what it had.
+    const reads = () => paths(spy).filter((path) => path === "/api/v1/admin/overview").length;
+    const before = reads();
+
     await act(async () => {
       fireEvent.click(retry);
     });
 
-    await waitFor(() =>
-      expect(paths(spy).filter((path) => path === "/api/v1/admin/overview").length).toBe(2),
-    );
+    await waitFor(() => expect(reads()).toBeGreaterThan(before));
   });
 });
 

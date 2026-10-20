@@ -5,7 +5,7 @@ import {
   createRoute,
   createRouter,
 } from "@tanstack/react-router";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SESSION_STORAGE_KEY, clearSession, signIn } from "@/lib/auth/session";
@@ -43,6 +43,27 @@ function sessionPayload() {
  * The bug this test guards against: the Security screen's Log out was a link to
  * `/settings`, so it navigated without ever revoking or clearing the session.
  */
+/** The API the signed-in screens talk to, stubbed down to what they call. */
+function mockApi() {
+  const spy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes("/api/v1/auth/sign-in")) return jsonResponse(sessionPayload());
+    if (url.includes("/api/v1/auth/session")) {
+      return jsonResponse({ userId: testUserID, role: "user" });
+    }
+    if (url.includes("/api/v1/auth/sign-out") && init?.method === "POST") {
+      return jsonResponse({});
+    }
+    if (url.includes("/api/v1/admin/session")) {
+      return jsonResponse({ userId: testUserID, role: "user", isStaff: false });
+    }
+    if (url.startsWith(supabaseBase)) return jsonResponse([]);
+    throw new Error(`unexpected fetch ${url}`);
+  });
+  vi.stubGlobal("fetch", spy);
+  return spy;
+}
+
 async function renderSecurity() {
   const root = createRootRoute();
   const router = createRouter({
@@ -77,23 +98,58 @@ afterEach(() => {
 });
 
 describe("security settings", () => {
-  it("logs out instead of navigating to settings", async () => {
-    const spy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.includes("/api/v1/auth/sign-in")) return jsonResponse(sessionPayload());
-      if (url.includes("/api/v1/auth/session")) {
-        return jsonResponse({ userId: testUserID, role: "user" });
-      }
-      if (url.includes("/api/v1/auth/sign-out") && init?.method === "POST") {
-        return jsonResponse({});
-      }
-      if (url.includes("/api/v1/admin/session")) {
-        return jsonResponse({ userId: testUserID, role: "user", isStaff: false });
-      }
-      if (url.startsWith(supabaseBase)) return jsonResponse([]);
-      throw new Error(`unexpected fetch ${url}`);
+  /**
+   * The bug this guards against: "Update password" was disabled below eight
+   * characters, so the length rule was never explained and the error behind the
+   * disabled button could not be reached.
+   */
+  it("explains the length rule and reports a short password", async () => {
+    mockApi();
+    await renderSecurity();
+
+    expect(screen.getByText("At least 8 characters.")).toBeInTheDocument();
+
+    const short = "short";
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("New password"), { target: { value: short } });
+      fireEvent.change(screen.getByLabelText("Confirm password"), { target: { value: short } });
     });
-    vi.stubGlobal("fetch", spy);
+
+    const submit = screen.getByRole("button", { name: "Update password" });
+    expect(submit).toBeEnabled();
+
+    await act(async () => {
+      submit.click();
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Use at least 8 characters for your password.",
+    );
+  });
+
+  it("refuses two different passwords before calling the API", async () => {
+    const spy = mockApi();
+    await renderSecurity();
+
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("New password"), {
+        target: { value: "correct-horse" },
+      });
+      fireEvent.change(screen.getByLabelText("Confirm password"), {
+        target: { value: "correct-horse-battery" },
+      });
+    });
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Update password" }).click();
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Passwords don't match.");
+    expect(spy.mock.calls.some(([input]) => String(input).includes("/auth/password"))).toBe(false);
+  });
+
+  it("logs out instead of navigating to settings", async () => {
+    const spy = mockApi();
 
     await signIn("player@example.com", "correct-horse");
     expect(window.localStorage.getItem(SESSION_STORAGE_KEY)).not.toBeNull();

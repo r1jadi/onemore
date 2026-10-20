@@ -149,6 +149,21 @@ describe("Explore's catalogue sections", () => {
     expect(screen.getByText("Trending is not available yet")).toBeInTheDocument();
   });
 
+  /**
+   * The bug this guards against: the unfilled sections said "nothing records
+   * plays yet" while the catalogue was showing play counts from real sessions.
+   * The absence is the ranking, so the copy has to name that instead.
+   */
+  it("does not claim plays go unrecorded", async () => {
+    catalogFetch(false);
+
+    await renderExplore();
+
+    expect(screen.queryByText(/nothing records plays/i)).toBeNull();
+    // Both unfilled sections say the same thing: the plays exist, the ranking does not.
+    expect(screen.getAllByText(/does not rank them yet/i)).toHaveLength(2);
+  });
+
   it("recovers a failed section from its own retry, with no reload", async () => {
     let down = true;
     const spy = vi.fn(async (input: RequestInfo | URL) => {
