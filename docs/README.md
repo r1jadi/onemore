@@ -47,10 +47,10 @@ one that covers an area before changing its design.
 
 The foundation is complete — the UI, the API, the database and the deployment
 path all exist — and the first features have landed on top of it: **Stack 10**,
-**Chain** and **Memory Flash**, three real games with server-issued sessions,
-server-verified scores and working leaderboards. Of the seven catalogue games,
-those three are `playable`; the other four are published but not playable and no
-screen offers to start them.
+**Chain**, **Memory Flash** and **One Move**, four real games with server-issued
+sessions, server-verified scores and working leaderboards. Of the seven catalogue
+games, those four are `playable`; the other three are published but not playable
+and no screen offers to start them.
 
 The remaining features (the other games, social, notifications, search,
 moderation, analytics, payments) each have a published contract and an

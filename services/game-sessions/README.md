@@ -19,11 +19,13 @@ is the authority for the shapes; the rules themselves are in
 This is the least obvious thing about the service, so it is worth stating plainly.
 
 The rules live in the database, in `public.complete_stack10_run`,
-`public.complete_chain_run` and `public.complete_memory_flash_run`
+`public.complete_chain_run`, `public.complete_memory_flash_run` and
+`public.complete_one_move_run`
 ([migration](../../supabase/migrations/20261013120000_play_sessions.sql),
-[`20261014120000_chain_sessions.sql`](../../supabase/migrations/20261014120000_chain_sessions.sql)
+[`20261014120000_chain_sessions.sql`](../../supabase/migrations/20261014120000_chain_sessions.sql),
+[`20261020120000_memory_flash_sessions.sql`](../../supabase/migrations/20261020120000_memory_flash_sessions.sql)
 and
-[`20261020120000_memory_flash_sessions.sql`](../../supabase/migrations/20261020120000_memory_flash_sessions.sql)).
+[`20261021120000_one_move_sessions.sql`](../../supabase/migrations/20261021120000_one_move_sessions.sql)).
 The pinned rules version selects which one replays a submission. Each function
 replays the submitted action list from the session's seed, derives the
 score, compares it with the claim, and only then closes the session and writes
@@ -31,8 +33,9 @@ the score row. This service:
 
 - validates the request's *shape* — a slug, a rules version, an action list within
   the board the rules version plays on (four positions for Stack 10 and Chain,
-  sixteen cells for Memory Flash), a positive duration — so a malformed request is
-  a `400` that names the field rather than a `500` from a function;
+  sixteen cells for Memory Flash, twenty-five for One Move), a positive duration —
+  so a malformed request is a `400` that names the field rather than a `500` from a
+  function;
 - calls the database **with the caller's own access token**, so `auth.uid()` inside
   those functions *is* the caller and no body can name a user;
 - maps the verifier's outcome onto HTTP and nothing else.

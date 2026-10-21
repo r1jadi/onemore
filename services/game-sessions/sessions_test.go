@@ -32,7 +32,11 @@ const (
 	// losing tap, for ten points and one cleared round.
 	memoryFlashRules = "memory-flash@1"
 	memoryFlashRun   = "[8,8,0]"
-	testUserID       = "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f"
+	// Seed 1's first board wins on cell 7; the second tap misses, for ten points
+	// and one restored board.
+	oneMoveRules = "one-move@1"
+	oneMoveRun   = "[7,0]"
+	testUserID   = "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f"
 )
 
 // token signs a token the platform verifier accepts, with the given subject.
@@ -594,6 +598,84 @@ func TestCompleteSessionRejectsAMemoryFlashCellPastTheBoard(t *testing.T) {
 		t.Fatalf("code = %s, want bad_request", errorCode(t, body))
 	}
 	// A sixteenth cell is malformed input, so it must never start a replay.
+	if backend.runCalls != 0 {
+		t.Fatal("a cell outside the board reached the verifier")
+	}
+}
+
+func TestCompleteSessionVerifiesAOneMoveRun(t *testing.T) {
+	backend := testBackend()
+	started := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	backend.result = supabaseplay.Result{
+		Outcome:        "recorded",
+		SessionID:      sessionID,
+		GameSlug:       "one-move",
+		Score:          ptr(int64(10)),
+		ClearedColumns: ptr(1),
+		TilesPlaced:    ptr(2),
+		DurationMS:     ptr(12000),
+		Ranked:         ptr(true),
+		RecordedAt:     &started,
+		PersonalBest:   ptr(int64(10)),
+		Rank:           ptr(int64(1)),
+	}
+	server := testServer(t, backend)
+
+	// Board one restored, then a losing tap on board two: ten points, one
+	// restored board, two taps placed.
+	status, body := post(t, server,
+		"/api/v1/sessions/"+sessionID+"/complete",
+		completeBodyRules(oneMoveRules, "10", "12000", oneMoveRun), "")
+
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%#v)", status, body)
+	}
+	if body["score"] != float64(10) || body["gameSlug"] != "one-move" {
+		t.Fatalf("body = %#v, want the verified One Move run", body)
+	}
+	// The pinned version travels through untouched: it is what selects the
+	// verifier behind the handler.
+	if backend.lastRun.RulesVersion != oneMoveRules {
+		t.Fatalf("rules version = %q, want the run's pinned one-move@1", backend.lastRun.RulesVersion)
+	}
+	if len(backend.lastRun.Actions) != 2 || backend.lastRun.Actions[0] != 7 {
+		t.Fatalf("actions = %v, want the submitted taps", backend.lastRun.Actions)
+	}
+}
+
+func TestCompleteSessionAcceptsAOneMoveCellBeyondMemoryFlash(t *testing.T) {
+	// One Move's largest board is 5×5. A cell the Memory Flash board would
+	// reject must reach the One Move verifier.
+	backend := testBackend()
+	server := testServer(t, backend)
+
+	status, body := post(t, server,
+		"/api/v1/sessions/"+sessionID+"/complete",
+		completeBodyRules(oneMoveRules, "0", "45000", "[24]"), "")
+
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%#v)", status, body)
+	}
+	if len(backend.lastRun.Actions) != 1 || backend.lastRun.Actions[0] != 24 {
+		t.Fatalf("actions = %v, want the twenty-fifth cell", backend.lastRun.Actions)
+	}
+}
+
+func TestCompleteSessionRejectsAOneMoveCellPastTheBoard(t *testing.T) {
+	backend := testBackend()
+	server := testServer(t, backend)
+
+	status, body := post(t, server,
+		"/api/v1/sessions/"+sessionID+"/complete",
+		completeBodyRules(oneMoveRules, "0", "45000", "[25]"), "")
+
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (%#v)", status, body)
+	}
+	if errorCode(t, body) != "bad_request" {
+		t.Fatalf("code = %s, want bad_request", errorCode(t, body))
+	}
+	// A twenty-sixth cell is malformed input, so it must never start a replay.
 	if backend.runCalls != 0 {
 		t.Fatal("a cell outside the board reached the verifier")
 	}

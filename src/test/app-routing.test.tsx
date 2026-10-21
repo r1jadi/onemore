@@ -14,4 +14,11 @@ describe("App routing", () => {
 
     expect(matches.at(-1)?.routeId).not.toBe(rootRouteId);
   });
+
+  it("matches a game's detail and play screens by slug, so a direct link works", () => {
+    const router = createRouter({ routeTree, context: { queryClient: new QueryClient() } });
+
+    expect(router.matchRoutes("/games/one-move").at(-1)?.routeId).toBe("/games/$id");
+    expect(router.matchRoutes("/play/one-move").at(-1)?.routeId).toBe("/play/$id");
+  });
 });

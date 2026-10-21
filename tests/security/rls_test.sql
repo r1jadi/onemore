@@ -1290,6 +1290,10 @@ reset role;
 -- order, 55 taps, ten clears, 100 points. See the Memory Flash section of
 -- docs/games/README.md.
 \set memory_perfect 'array[8,8,6,3,0,8,6,2,8,5,13,0,7,1,8,3,14,15,13,7,2,15,2,11,14,8,10,0,11,2,1,10,5,12,3,13,3,14,13,9,11,8,0,4,15,1,4,7,2,10,6,9,5,14,11]'
+-- Seed 1's One Move line: the winning cells of boards 1–12 in order, one tap each,
+-- twelve restored boards, 120 points. See the One Move section of
+-- docs/games/README.md.
+\set one_move_perfect 'array[7,8,7,7,0,8,6,2,5,18,13,5]'
 
 -- A published, playable game — the only kind a run can be started for — plus one
 -- that stays unpublished, so the refusal path has a subject. The sessions below
@@ -1304,6 +1308,7 @@ reset role;
 \set secret_game   'aaaaaaaa-5555-4555-8555-aaaaaaaaaaaa'
 \set chain_game    'aaaaaaaa-6666-4666-8666-aaaaaaaaaaaa'
 \set memory_game   'aaaaaaaa-7777-4777-8777-aaaaaaaaaaaa'
+\set one_move_game 'aaaaaaaa-8888-4888-8888-aaaaaaaaaaaa'
 \set pending_session   'cccccccc-1111-4111-8111-cccccccccccc'
 \set expired_session   'cccccccc-2222-4222-8222-cccccccccccc'
 \set abandoned_session 'cccccccc-3333-4333-8333-cccccccccccc'
@@ -1318,6 +1323,10 @@ reset role;
 \set memory_loss_session  'eeeeeeee-2222-4222-8222-eeeeeeeeeeee'
 \set memory_guest_session 'eeeeeeee-4444-4444-8444-eeeeeeeeeeee'
 \set memory_old_session   'eeeeeeee-5555-4555-8555-eeeeeeeeeeee'
+\set one_move_session       'ffffffff-1111-4111-8111-ffffffffffff'
+\set one_move_loss_session  'ffffffff-2222-4222-8222-ffffffffffff'
+\set one_move_guest_session 'ffffffff-4444-4444-8444-ffffffffffff'
+\set one_move_old_session   'ffffffff-5555-4555-8555-ffffffffffff'
 
 insert into public.games (id, owner_id, slug, title, status, published_at, runtime, playable, category_id) values
   (:'runnable_game', :'alice', 'fixture-runnable', 'Fixture Runnable', 'published', now(), 'stack-10', true,
@@ -1325,9 +1334,10 @@ insert into public.games (id, owner_id, slug, title, status, published_at, runti
   (:'secret_game',   :'alice', 'fixture-secret',   'Fixture Secret',   'draft',     null, 'stack-10', true,
    (select id from public.categories where slug = 'puzzle')),
   (:'chain_game',    :'alice', 'fixture-chain',    'Fixture Chain',    'published', now(), 'chain', true,
-   (select id from public.categories where slug = 'reaction')),
-  (:'memory_game',   :'alice', 'fixture-memory',   'Fixture Memory',   'published', now(), 'memory-flash', true,
-   (select id from public.categories where slug = 'memory'));
+   (select id from public.categories where slug = 'reaction')),  (:'memory_game',    :'alice', 'fixture-memory',   'Fixture Memory',   'published', now(), 'memory-flash', true,
+   (select id from public.categories where slug = 'memory')),
+  (:'one_move_game',  :'alice', 'fixture-one-move', 'Fixture One Move', 'published', now(), 'one-move', true,
+   (select id from public.categories where slug = 'logic'));
 
 -- Runs that have been open for five minutes, which is what makes a claimed
 -- 45-second duration credible: a run cannot have taken longer than the session
@@ -1350,7 +1360,31 @@ insert into public.game_sessions (id, game_id, user_id, seed, rules_version, sta
   (:'memory_session',       :'memory_game', :'alice', 1, 'memory-flash@1', now() - interval '5 minutes', now() + interval '2 hours', null),
   (:'memory_loss_session',  :'memory_game', :'alice', 1, 'memory-flash@1', now() - interval '5 minutes', now() + interval '2 hours', null),
   (:'memory_guest_session', :'memory_game', null,     1, 'memory-flash@1', now() - interval '5 minutes', now() + interval '2 hours', null),
-  (:'memory_old_session',   :'memory_game', :'alice', 1, 'memory-flash@0', now() - interval '5 minutes', now() + interval '2 hours', null);
+  (:'memory_old_session',   :'memory_game', :'alice', 1, 'memory-flash@0', now() - interval '5 minutes', now() + interval '2 hours', null),
+  -- One Move fixtures. Seed 1 wins on cells 7, 8, 7, 7, 0, 8, 6, 2, 5, 18, 13, 5:
+  -- a 3×3 board for the first four, 4×4 for the next four, 5×5 for the last four.
+  (:'one_move_session',       :'one_move_game', :'alice', 1, 'one-move@1', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'one_move_loss_session',  :'one_move_game', :'alice', 1, 'one-move@1', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'one_move_guest_session', :'one_move_game', null,     1, 'one-move@1', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'one_move_old_session',   :'one_move_game', :'alice', 1, 'one-move@0', now() - interval '5 minutes', now() + interval '2 hours', null);
+
+-- The generator, asserted directly: seed 1's twelve winning cells are the ones
+-- the client engine computes and the ones the verifier replays. A drift here is
+-- a drift in both copies, and every honest One Move run would be refused.
+select rls_test.ok(
+  (select array_agg(public.one_move_center(1, level) order by level) = array[7,8,7,7,0,8,6,2,5,18,13,5]::integer[]
+     from generate_series(1, public.one_move_levels()) as level),
+  'the One Move generator draws seed 1''s twelve winning cells'
+);
+select rls_test.ok(
+  (select array_agg(public.one_move_center(9223372036854775807, level) order by level) = array[1,8,6,6,5,4,5,0,24,13,3,7]::integer[]
+     from generate_series(1, public.one_move_levels()) as level),
+  'the One Move generator replays a full-width seed exactly'
+);
+select rls_test.ok(
+  public.one_move_size(1) = 3 and public.one_move_size(5) = 4 and public.one_move_size(9) = 5,
+  'a One Move board grows from 3×3 to 4×4 to 5×5'
+);
 
 select set_config('request.jwt.claims', '{"role":"anon"}', true);
 set local role anon;
@@ -1416,11 +1450,11 @@ select rls_test.visible(
 );
 -- `fixture-%` are this suite's own playable games (the ones the refusal paths
 -- need), so the claim is about the catalogue: of the games this repository
--- ships, only the three with runtimes are playable.
+-- ships, only the four with runtimes are playable.
 select rls_test.visible(
   $$select 1 from public.games
-     where slug not in ('stack-10', 'dont-break-the-chain', 'memory-flash') and slug not like 'fixture-%' and (playable or runtime is not null)$$,
-  0, 'no shipped game besides the three runtimes is marked playable'
+     where slug not in ('stack-10', 'dont-break-the-chain', 'memory-flash', 'one-move') and slug not like 'fixture-%' and (playable or runtime is not null)$$,
+  0, 'no shipped game besides the four runtimes is marked playable'
 );
 select rls_test.says_field(
   $$public.start_game_session('stack-10', 'stack-10@1', 'test/1.0')$$,
@@ -1490,6 +1524,38 @@ select rls_test.says(
   $$public.start_game_session('fixture-runnable', 'memory-flash@1', 'test/1.0')$$,
   'unsupported_runtime', 'a Stack 10 game cannot start a Memory Flash run'
 );
+-- The shipped One Move game, same shape: playable, naming its runtime, issuing a
+-- run whose move count is one tap per board.
+select rls_test.visible(
+  $$select 1 from public.games where slug = 'one-move' and playable and runtime = 'one-move'$$,
+  1, 'the shipped One Move game is playable and names its runtime'
+);
+select rls_test.says_field(
+  $$public.start_game_session('one-move', 'one-move@1', 'test/1.0')$$,
+  'game_slug', 'one-move', 'the shipped One Move game issues a run like any other'
+);
+select rls_test.says_field(
+  $$public.start_game_session('one-move', 'one-move@1', 'test/1.0')$$,
+  'tile_count', '12', 'a One Move session counts one tap per board'
+);
+-- The gate knows the fourth pair too, and refuses a game paired with another
+-- game's rules.
+select rls_test.says(
+  $$public.start_game_session('fixture-one-move', 'one-move@1', 'test/1.0')$$,
+  'started', 'a guest can start a One Move run'
+);
+select rls_test.says(
+  $$public.start_game_session('fixture-one-move', 'memory-flash@1', 'test/1.0')$$,
+  'unsupported_runtime', 'a One Move game cannot start a Memory Flash run'
+);
+select rls_test.says(
+  $$public.start_game_session('fixture-memory', 'one-move@1', 'test/1.0')$$,
+  'unsupported_runtime', 'a Memory Flash game cannot start a One Move run'
+);
+select rls_test.says(
+  $$public.start_game_session('fixture-runnable', 'one-move@1', 'test/1.0')$$,
+  'unsupported_runtime', 'a Stack 10 game cannot start a One Move run'
+);
 
 -- A guest run completes and is verified, and stays unranked: there is no score
 -- row for it, because `scores.user_id` is NOT NULL by design.
@@ -1530,6 +1596,19 @@ select rls_test.says(
 select rls_test.says_field(
   format($$public.complete_memory_flash_run('eeeeeeee-4444-4444-8444-eeeeeeeeeeee'::uuid, %s, 100, 45000)$$, :'memory_perfect'),
   'ranked', 'false', 'a guest Memory Flash run is never ranked'
+);
+-- A guest One Move run completes the same way: verified, recorded, unranked.
+select rls_test.says(
+  format($$public.complete_one_move_run('ffffffff-4444-4444-8444-ffffffffffff'::uuid, %s, 120, 45000)$$, :'one_move_perfect'),
+  'recorded', 'a guest One Move run is replayed and recorded'
+);
+select rls_test.says(
+  format($$public.complete_one_move_run('ffffffff-4444-4444-8444-ffffffffffff'::uuid, %s, 120, 45000)$$, :'one_move_perfect'),
+  'duplicate', 'a repeated guest One Move submission is recognised, not recorded again'
+);
+select rls_test.says_field(
+  format($$public.complete_one_move_run('ffffffff-4444-4444-8444-ffffffffffff'::uuid, %s, 120, 45000)$$, :'one_move_perfect'),
+  'ranked', 'false', 'a guest One Move run is never ranked'
 );
 
 reset role;
@@ -1774,6 +1853,80 @@ select rls_test.ok(
 select rls_test.ok(
   (select rank = 1 and score = 100 from public.game_standing('fixture-memory', '11111111-1111-4111-8111-111111111111', null)),
   'your Memory Flash standing is your recorded best at its real rank'
+);
+
+-- ── One Move: the same properties, replayed against growing boards ──
+--
+-- Seed 1 wins on cells 7, 8, 7, 7, 0, 8, 6, 2, 5, 18, 13, 5. The perfect line
+-- restores all twelve boards in twelve taps for 120 points; the broken line
+-- restores board one, then taps a cell board two does not win on: 10 points.
+--
+-- The expected numbers are arithmetic from the seed, not values read back.
+-- One call, every number it derives: outcome, score, restored boards and taps.
+select rls_test.ok(
+  (select r.outcome = 'recorded'
+      and r.score = 120
+      and r.cleared_columns = 12
+      and r.tiles_placed = 12
+     from public.complete_one_move_run(
+       'ffffffff-1111-4111-8111-ffffffffffff'::uuid, :one_move_perfect, 120, 45000) r),
+  'a perfect One Move run is recorded: twelve boards, twelve taps, 120 points'
+);
+select rls_test.says(
+  format($$public.complete_one_move_run('ffffffff-1111-4111-8111-ffffffffffff'::uuid, %s, 120, 45000)$$, :'one_move_perfect'),
+  'duplicate', 'a retry of the same One Move run is safe to repeat'
+);
+select rls_test.says(
+  $$public.complete_one_move_run('ffffffff-1111-4111-8111-ffffffffffff'::uuid, array[7], 10, 45000)$$,
+  'closed', 'a closed One Move session does not accept a different run'
+);
+-- Refusals, all leaving the loss fixture open for the run that follows.
+select rls_test.says(
+  format($$public.complete_one_move_run('ffffffff-2222-4222-8222-ffffffffffff'::uuid, %s, 999, 45000)$$, :'one_move_perfect'),
+  'score_mismatch', 'a One Move score the replay does not produce is refused'
+);
+select rls_test.says_field(
+  format($$public.complete_one_move_run('ffffffff-2222-4222-8222-ffffffffffff'::uuid, %s, 999, 45000)$$, :'one_move_perfect'),
+  'score', '120', 'the One Move replay is the score, and it is reported back'
+);
+select rls_test.says(
+  $$public.complete_one_move_run('ffffffff-2222-4222-8222-ffffffffffff'::uuid, array[7], 10, 45000)$$,
+  'invalid_actions', 'a One Move run that stops before the twelfth board is partial'
+);
+select rls_test.says(
+  $$public.complete_one_move_run('ffffffff-2222-4222-8222-ffffffffffff'::uuid, array[7,0,7], 10, 45000)$$,
+  'invalid_actions', 'taps after the tap that ended the run are impossible play'
+);
+select rls_test.says(
+  $$public.complete_one_move_run('ffffffff-2222-4222-8222-ffffffffffff'::uuid, array[9], 0, 45000)$$,
+  'invalid_actions', 'a cell past the first board is impossible play'
+);
+select rls_test.raises(
+  $$select public.complete_one_move_run('ffffffff-2222-4222-8222-ffffffffffff'::uuid, array[null]::integer[], 0, 45000)$$,
+  '22023', 'a ragged One Move action list is a request error, not a scored run'
+);
+select rls_test.says(
+  $$public.complete_one_move_run('ffffffff-5555-4555-8555-ffffffffffff'::uuid, array[7], 10, 45000)$$,
+  'wrong_rules', 'a One Move session pinned to other rules is refused by its own verifier'
+);
+-- The loss is a recorded run, not a discarded one: board one restored, then a
+-- losing tap on board two.
+select rls_test.ok(
+  (select r.outcome = 'recorded'
+      and r.score = 10
+      and r.cleared_columns = 1
+      and r.tiles_placed = 2
+     from public.complete_one_move_run(
+       'ffffffff-2222-4222-8222-ffffffffffff'::uuid, array[7,0], 10, 45000) r),
+  'a missed One Move is recorded: one restored board, two taps, losing tap included'
+);
+select rls_test.ok(
+  (select verified_score = 10 from public.game_sessions where id = 'ffffffff-2222-4222-8222-ffffffffffff'),
+  'a player can read the verified score on their own One Move session'
+);
+select rls_test.ok(
+  (select rank = 1 and score = 120 from public.game_standing('fixture-one-move', '11111111-1111-4111-8111-111111111111', null)),
+  'your One Move standing is your recorded best at its real rank'
 );
 
 -- Starting replaces your own open run, so a player cannot accumulate runs and

@@ -23,6 +23,10 @@ The schema's only history. Applied in filename order by the Supabase CLI and by
 | `20261014120300_profile_username.sql`               | Grants `UPDATE (username)` on `public.profiles` to authenticated. The existing owner-scoped update policy already covers the row, so renames need no new policy — only the column grant was missing. |
 | `20261017120000_profile_backfill.sql`              | Recreates `handle_new_user` with collision- and length-safe defaults, then backfills the profile and `user` role row for any existing `auth.users` row that lacks them. Apply once after 0017; safe to re-run. |
 | `20261017230000_legacy_accounts_onboarded.sql`     | Backfills `profiles.onboarded_at` for accounts created before the sign-up completion flow, using `auth.users.created_at`. The auth service derives the same answer at runtime and repairs a null marker on the first session read, so this is a one-pass bulk repair rather than a correctness dependency. Apply once after 0018; safe to re-run. |
+| `20261020120000_memory_flash_sessions.sql`         | The Memory Flash pattern generator and verifier (`complete_memory_flash_run`), plus the start gate learning Memory Flash's (runtime, rules version) pair. Nothing user-visible changes yet. |
+| `20261020120100_memory_flash_playable.sql`         | Flips Memory Flash to `playable` and names its runtime. Apply **last**, after the play schema and the deployment carrying the runtime are live. |
+| `20261021120000_one_move_sessions.sql`             | The One Move winning-cell generator and verifier (`complete_one_move_run`), plus the start gate learning One Move's (runtime, rules version) pair. Nothing user-visible changes yet. |
+| `20261021120100_one_move_playable.sql`             | Flips One Move to `playable` and names its runtime. Apply **last**, after the play schema and the deployment carrying the runtime are live. |
 
 Two migrations exist for one feature — the play schema and the catalogue flip — because
 the flip is a claim about shipped code. Applying it before the service that answers

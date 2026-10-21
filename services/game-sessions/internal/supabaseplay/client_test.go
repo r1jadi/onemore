@@ -236,6 +236,26 @@ func TestCompleteRunRoutesMemoryFlashRulesToMemoryFlashVerifier(t *testing.T) {
 	}
 }
 
+func TestCompleteRunRoutesOneMoveRulesToOneMoveVerifier(t *testing.T) {
+	rec := newRecorder(t, http.StatusOK, resultRow)
+
+	if _, err := rec.client(t).CompleteRun(context.Background(), CompleteRequest{
+		SessionID:    "cccccccc-1111-4111-8111-cccccccccccc",
+		RulesVersion: "one-move@1",
+		Actions:      []int32{7, 0},
+		Score:        10,
+		DurationMS:   12000,
+	}); err != nil {
+		t.Fatalf("CompleteRun: %v", err)
+	}
+
+	// The pinned version selects the replay: a One Move run is verified by
+	// complete_one_move_run, not by any of the other three.
+	if rec.path != "/rest/v1/rpc/complete_one_move_run" {
+		t.Fatalf("path = %s, want the One Move verifier function", rec.path)
+	}
+}
+
 func TestCompleteRunKeepsStack10RulesOnStackVerifier(t *testing.T) {
 	rec := newRecorder(t, http.StatusOK, resultRow)
 

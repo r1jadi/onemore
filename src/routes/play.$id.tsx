@@ -2,11 +2,13 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Clock, X } from "lucide-react";
 import { ChainRuntime } from "@/components/game/ChainRuntime";
 import { MemoryFlashRuntime } from "@/components/game/MemoryFlashRuntime";
+import { OneMoveRuntime } from "@/components/game/OneMoveRuntime";
 import { Stack10Runtime } from "@/components/game/Stack10Runtime";
 import { Button } from "@/components/ui/button";
 import { titleFromSlug, useGame } from "@/lib/games/catalog";
 import { CHAIN_RUNTIME } from "@/lib/games/chain";
 import { MEMORY_FLASH_RUNTIME } from "@/lib/games/memory-flash";
+import { ONE_MOVE_RUNTIME } from "@/lib/games/one-move";
 import { STACK10_RUNTIME } from "@/lib/games/stack10";
 
 export const Route = createFileRoute("/play/$id")({
@@ -33,10 +35,10 @@ export const Route = createFileRoute("/play/$id")({
  * catalogue says the game has one.
  *
  * The runtime is chosen by the game's `runtime` identifier — `stack-10` plays Stack
- * 10, `chain` plays Chain, `memory-flash` plays Memory Flash, and anything else
- * gets the honest "no runtime yet" screen rather than a board that does not follow
- * that game's rules. Four of the seven catalogue games are in that position, which
- * is why this branch is a feature and not a leftover.
+ * 10, `chain` plays Chain, `memory-flash` plays Memory Flash, `one-move` plays One
+ * Move, and anything else gets the honest "no runtime yet" screen rather than a
+ * board that does not follow that game's rules. Three of the seven catalogue games
+ * are in that position, which is why this branch is a feature and not a leftover.
  */
 function PlayScreen() {
   const { id } = Route.useParams();
@@ -49,7 +51,8 @@ function PlayScreen() {
     state.status === "ready" &&
     (state.game.runtime === STACK10_RUNTIME ||
       state.game.runtime === CHAIN_RUNTIME ||
-      state.game.runtime === MEMORY_FLASH_RUNTIME);
+      state.game.runtime === MEMORY_FLASH_RUNTIME ||
+      state.game.runtime === ONE_MOVE_RUNTIME);
 
   return (
     <div className="fixed inset-0 flex flex-col bg-background">
@@ -80,6 +83,10 @@ function PlayScreen() {
 
       {state.status === "ready" && state.game.runtime === MEMORY_FLASH_RUNTIME && playable && (
         <MemoryFlashRuntime key={state.game.slug} slug={state.game.slug} title={state.game.title} />
+      )}
+
+      {state.status === "ready" && state.game.runtime === ONE_MOVE_RUNTIME && playable && (
+        <OneMoveRuntime key={state.game.slug} slug={state.game.slug} title={state.game.title} />
       )}
 
       {state.status === "ready" && !(hasShippedRuntime && playable) && (

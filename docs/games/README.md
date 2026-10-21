@@ -3,10 +3,10 @@
 How OneMore's games work: the rules, who is allowed to decide a score, and how a
 game earns the right to be called playable.
 
-Three games are implemented today: **Stack 10**, **Chain** (Don't Break the
-Chain) and **Memory Flash**. The other four catalogue records are published but
-not playable — `playable: false`, `runtime: null` — and no screen offers to start
-them.
+Four games are implemented today: **Stack 10**, **Chain** (Don't Break the
+Chain), **Memory Flash** and **One Move**. The other three catalogue records are
+published but not playable — `playable: false`, `runtime: null` — and no screen
+offers to start them.
 
 ## Stack 10
 
@@ -382,3 +382,123 @@ drifts, one of the two suites fails.
 4. **A full-width seed** — `9223372036854775807` flashes `[5]`, `[7,3]`,
    `[15,5,4]`, `[5,0,2,11]`, … which is what catches a client that rounded the seed
    to a double.
+
+## One Move
+
+Every board is a checkerboard with exactly one move already made. Find the cell
+that restores it; any other tap ends the run.
+
+### The board
+
+| Thing   | Value                                                     |
+| ------- | --------------------------------------------------------- |
+| Boards  | 12 per run — the run always ends, so two scores measure one thing |
+| Taps    | 12 in a perfect run — one per board                        |
+| Board   | 3×3 for boards 1–4, 4×4 for boards 5–8, 5×5 for boards 9–12 |
+| Rules   | `one-move@1`                                              |
+| Runtime | `one-move` (the catalogue's `games.runtime` value)        |
+
+### The boards
+
+The winning cells are not random at play time: they are a function of the run's
+seed, which the **server** chooses when it issues the session. The client must
+produce exactly the same cells or its submission is refused, so the generator is
+written out in full rather than described:
+
+```
+state₀ = ((seed mod 2³²) + 2³²) mod 2³²        // the seed is a bigint, reduced to 32 bits
+if state₀ = 0 then state₀ = 2654435769         // 0x9E3779B9: a zero state would be degenerate
+stateₙ = (stateₙ₋₁ × 1664525 + 1013904223) mod 2³²
+cells(n) = side(n)²                             // 9, 16 or 25
+centerₙ = (stateₙ >> 16) mod cells(n)           // the winning cell of board n
+```
+
+The state advances once per board, so board two draws from the second state and
+not the first. Cells are read from bits 16–19 rather than the low bits for the
+same reason Memory Flash reads them there: this LCG's low bits cycle with a
+period of two to the power of the bit width. The cell count changes with the
+board, so the value is reduced modulo the current board's cells, not modulo 16.
+
+The seed travels as a **decimal string** for the same reason Stack 10's does: it
+is a `bigint` column, and parsing it as a double would win on different cells and
+reject every honest run.
+
+A **solved board is a checkerboard**: a cell is dark when `row + col` is even.
+Board `n` is that solved board with one cross flipped, where the cross of cell `c`
+is `c` itself plus the cells above, below, left and right that exist — three cells
+at a corner, four at an edge, five in the middle. The winning cell is the centre of
+that cross.
+
+It is the board's **only** winning move. Tapping another cell flips a different
+cross, and two different crosses are different sets, so their symmetric difference
+is non-empty and the board cannot come back solved. Both engine copies derive the
+same cell, and both the winning-cell vector and the uniqueness property are tested.
+
+### A move
+
+A move is a **cell index on the current board**. Exactly one of two things happens:
+
+1. **The cell is the board's winning cell** → the checkerboard is restored, the
+   board scores ten points, and the next board is drawn — a larger one when the
+   run reaches 5×5, or the run clears after the twelfth.
+2. **Any other cell** → the run is over. The tap is still part of the run and is
+   still submitted; it is a legal move that loses, not an invalid one.
+
+### Scoring
+
+Each restored board scores **10 points**. A perfect run restores all twelve for
+**120 points**. A losing run keeps the boards it restored before the losing tap.
+
+### How a run ends
+
+| Outcome   | When                                                      |
+| --------- | --------------------------------------------------------- |
+| `over`    | A tap was not the board's winning cell. The ordinary ending. |
+| `cleared` | All twelve boards were restored — all twelve taps.          |
+
+The score already earned is kept. Every tap of the run must be submitted, losing
+tap included: a submission that stops early is refused, so a player cannot discard
+the tap that ended their run. Tapping nothing is impossible — board one has a
+winning cell — so every run has at least one move.
+
+### Verified scores
+
+**The database decides the score**, under the same rules as the other three: see
+`supabase/migrations/20261021120000_one_move_sessions.sql` for the code.
+
+- `public.one_move_center(seed, level)` draws one board's winning cell. It is
+  internals: execute is not granted to a client, because a player already holds
+  the seed their own boards draw from, and the verifier is the only caller.
+- `public.start_game_session(slug, rules, client)` issues the run with the seed,
+  the pinned version and the expiry. Its gate is a pair — (`stack-10`,
+  `stack-10@1`), (`chain`, `chain@1`), (`memory-flash`, `memory-flash@1`) or
+  (`one-move`, `one-move@1`) — and anything else is `unsupported_runtime`. A One
+  Move session's `tile_count` is 12: the field counts the moves a complete run
+  holds, and its moves are board taps.
+- `public.complete_one_move_run(session, actions, score, duration)` replays the tap
+  list board by board, derives the score, compares it with the claim, and only
+  then closes the session and records it. Its outcome vocabulary (`recorded`,
+  `duplicate`, `score_mismatch`, …) and its ledger behaviour are identical to the
+  other three verifiers, and the Go service maps them onto HTTP the same way —
+  routing at the verifier the pinned rules version names and accepting cell indexes
+  up to 24 for this game's largest board.
+
+A guest can play. Their run is verified and closed exactly like a signed-in
+player's, and it is never ranked.
+
+### Test vectors
+
+Each vector is asserted by both the SQL suite and the client engine; if either side
+drifts, one of the two suites fails.
+
+1. **Seed 1's winning cells** — `7, 8, 7, 7, 0, 8, 6, 2, 5, 18, 13, 5`.
+2. **Seed 1, the perfect line** — those twelve cells in that order: twelve restored
+   boards, **120 points**. Asserted in
+   [`tests/security/rls_test.sql`](../../tests/security/rls_test.sql) and in
+   [`src/lib/games/one-move.test.ts`](../../src/lib/games/one-move.test.ts).
+3. **Seed 1, the missed move** — `7, 0`: board one restored, then a tap that is not
+   board two's winning cell. **10 points**, 2 taps placed, 1 board restored.
+   Asserted in both suites.
+4. **A full-width seed** — `9223372036854775807` wins on
+   `1, 8, 6, 6, 5, 4, 5, 0, 24, 13, 3, 7`, which is what catches a client that
+   rounded the seed to a double.

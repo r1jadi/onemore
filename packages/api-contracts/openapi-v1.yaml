@@ -835,14 +835,15 @@ paths:
                       description: |
                         The run, as the ordered list of board positions the run's
                         moves addressed: a column for Stack 10, a pad for Chain,
-                        a cell for Memory Flash. This is what is replayed; the
-                        rules for how a move is generated and what it does belong
-                        to the game (see `docs/games`). The bound is the largest
-                        board any shipped rules version addresses: Memory Flash's
-                        sixteen cells. Stack 10 and Chain address 0–3, and their
-                        verifiers refuse anything else.
+                        a cell for Memory Flash, a cell for One Move. This is what
+                        is replayed; the rules for how a move is generated and
+                        what it does belong to the game (see `docs/games`). The
+                        bound is the largest board any shipped rules version
+                        addresses: One Move's twenty-five cells. Memory Flash
+                        addresses sixteen, and Stack 10 and Chain 0–3; each
+                        verifier refuses anything past its own board.
                       maxItems: 60
-                      items: { type: integer, minimum: 0, maximum: 15 }
+                      items: { type: integer, minimum: 0, maximum: 24 }
       responses:
         "200":
           description: The verified run. Identical to a retry's answer, except that a retry sets `duplicate`.
@@ -1957,9 +1958,10 @@ components:
         runtime:
           type: [string, "null"]
           description: |
-            The client runtime that plays this game (`stack-10`), or null when none
-            exists. It is the runtime's identifier, not its title, because the
-            client mounts a runtime by that name.
+            The client runtime that plays this game (`stack-10`, `chain`,
+            `memory-flash` or `one-move`), or null when none exists. It is the
+            runtime's identifier, not its title, because the client mounts a
+            runtime by that name.
         playable:
           type: boolean
           description: |
@@ -2055,7 +2057,7 @@ components:
         tileCount:
           type: integer
           minimum: 1
-          description: "How many moves a complete run holds: tiles for Stack 10, taps for Chain. The client does not choose it."
+          description: "How many moves a complete run holds: tiles for Stack 10, taps for Chain, Memory Flash and One Move. The client does not choose it."
         startedAt: { type: string, format: date-time }
         expiresAt:
           type: string
