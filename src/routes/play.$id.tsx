@@ -5,6 +5,7 @@ import { ColorMergeRuntime } from "@/components/game/ColorMergeRuntime";
 import { DontTouchRuntime } from "@/components/game/DontTouchRuntime";
 import { MemoryFlashRuntime } from "@/components/game/MemoryFlashRuntime";
 import { OneMoveRuntime } from "@/components/game/OneMoveRuntime";
+import { SevenSecondRuntime } from "@/components/game/SevenSecondRuntime";
 import { Stack10Runtime } from "@/components/game/Stack10Runtime";
 import { Button } from "@/components/ui/button";
 import { titleFromSlug, useGame } from "@/lib/games/catalog";
@@ -13,6 +14,7 @@ import { COLOR_MERGE_RUNTIME } from "@/lib/games/color-merge";
 import { DONT_TOUCH_RUNTIME } from "@/lib/games/dont-touch";
 import { MEMORY_FLASH_RUNTIME } from "@/lib/games/memory-flash";
 import { ONE_MOVE_RUNTIME } from "@/lib/games/one-move";
+import { SEVEN_SECOND_RUNTIME } from "@/lib/games/seven-second";
 import { STACK10_RUNTIME } from "@/lib/games/stack10";
 
 export const Route = createFileRoute("/play/$id")({
@@ -41,9 +43,10 @@ export const Route = createFileRoute("/play/$id")({
  * The runtime is chosen by the game's `runtime` identifier — `stack-10` plays Stack
  * 10, `chain` plays Chain, `memory-flash` plays Memory Flash, `one-move` plays One
  * Move, `color-merge` plays Color Merge, `dont-touch` plays Don't Touch the Black,
- * and anything else gets the honest "no runtime yet" screen rather than a board
- * that does not follow that game's rules. The one catalogue game with no runtime
- * is in that position, which is why this branch is a feature and not a leftover.
+ * `seven-second` plays 7 Second, and anything else gets the honest "no runtime
+ * yet" screen rather than a board that does not follow that game's rules. Every
+ * catalogue game now has a runtime, but the branch stays a feature rather than a
+ * leftover: it is what stops a future catalogue entry from silently pretending.
  */
 function PlayScreen() {
   const { id } = Route.useParams();
@@ -59,7 +62,8 @@ function PlayScreen() {
       state.game.runtime === MEMORY_FLASH_RUNTIME ||
       state.game.runtime === ONE_MOVE_RUNTIME ||
       state.game.runtime === COLOR_MERGE_RUNTIME ||
-      state.game.runtime === DONT_TOUCH_RUNTIME);
+      state.game.runtime === DONT_TOUCH_RUNTIME ||
+      state.game.runtime === SEVEN_SECOND_RUNTIME);
 
   return (
     <div className="fixed inset-0 flex flex-col bg-background">
@@ -102,6 +106,10 @@ function PlayScreen() {
 
       {state.status === "ready" && state.game.runtime === DONT_TOUCH_RUNTIME && playable && (
         <DontTouchRuntime key={state.game.slug} slug={state.game.slug} title={state.game.title} />
+      )}
+
+      {state.status === "ready" && state.game.runtime === SEVEN_SECOND_RUNTIME && playable && (
+        <SevenSecondRuntime key={state.game.slug} slug={state.game.slug} title={state.game.title} />
       )}
 
       {state.status === "ready" && !(hasShippedRuntime && playable) && (

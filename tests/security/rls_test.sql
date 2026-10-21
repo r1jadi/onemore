@@ -1348,6 +1348,13 @@ reset role;
 \set dont_touch_guest_session '77777777-4444-4444-8444-777777777777'
 \set dont_touch_old_session   '77777777-5555-4555-8555-777777777777'
 \set dont_touch_empty_session '77777777-6666-4666-8666-777777777777'
+\set seven_second_game          '88888888-aaaa-4aaa-8aaa-888888888888'
+\set seven_second_session       '88888888-1111-4111-8111-888888888888'
+\set seven_second_line_session  '88888888-2222-4222-8222-888888888888'
+\set seven_second_guest_session '88888888-4444-4444-8444-888888888888'
+\set seven_second_old_session   '88888888-5555-4555-8555-888888888888'
+\set seven_second_empty_session '88888888-6666-4666-8666-888888888888'
+\set seven_second_done_session  '88888888-7777-4777-8777-888888888888'
 
 insert into public.games (id, owner_id, slug, title, status, published_at, runtime, playable, category_id) values
   (:'runnable_game', :'alice', 'fixture-runnable', 'Fixture Runnable', 'published', now(), 'stack-10', true,
@@ -1362,7 +1369,9 @@ insert into public.games (id, owner_id, slug, title, status, published_at, runti
   (:'color_merge_game', :'alice', 'fixture-color-merge', 'Fixture Color Merge', 'published', now(), 'color-merge', true,
    (select id from public.categories where slug = 'puzzle')),
   (:'dont_touch_game', :'alice', 'fixture-dont-touch', 'Fixture Don''t Touch the Black', 'published', now(), 'dont-touch', true,
-   (select id from public.categories where slug = 'arcade'));
+   (select id from public.categories where slug = 'arcade')),
+  (:'seven_second_game', :'alice', 'fixture-seven-second', 'Fixture 7 Second', 'published', now(), 'seven-second', true,
+   (select id from public.categories where slug = 'daily'));
 
 -- Runs that have been open for five minutes, which is what makes a claimed
 -- 45-second duration credible: a run cannot have taken longer than the session
@@ -1406,7 +1415,24 @@ insert into public.game_sessions (id, game_id, user_id, seed, rules_version, sta
   (:'dont_touch_loss_session',  :'dont_touch_game', :'alice', 1, 'dont-touch@1', now() - interval '5 minutes', now() + interval '2 hours', null),
   (:'dont_touch_guest_session', :'dont_touch_game', null,     1, 'dont-touch@1', now() - interval '5 minutes', now() + interval '2 hours', null),
   (:'dont_touch_old_session',   :'dont_touch_game', :'alice', 1, 'dont-touch@0', now() - interval '5 minutes', now() + interval '2 hours', null),
-  (:'dont_touch_empty_session', :'dont_touch_game', :'alice', 1, 'dont-touch@1', now() - interval '5 minutes', now() + interval '2 hours', null);
+  (:'dont_touch_empty_session', :'dont_touch_game', :'alice', 1, 'dont-touch@1', now() - interval '5 minutes', now() + interval '2 hours', null),
+  -- 7 Second fixtures. Seed 1's first four challenges want buttons 0, 0, 2, 1;
+  -- the line [0,1,2,1] clears three of them for thirty points. The done session
+  -- carries *today's* seed and is already completed, which is what consumes
+  -- Alice's daily attempt below.
+  (:'seven_second_session',       :'seven_second_game', :'alice', 1, 'seven-second@1', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'seven_second_line_session',  :'seven_second_game', :'alice', 1, 'seven-second@1', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'seven_second_guest_session', :'seven_second_game', null,     1, 'seven-second@1', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'seven_second_old_session',   :'seven_second_game', :'alice', 1, 'seven-second@0', now() - interval '5 minutes', now() + interval '2 hours', null),
+  -- Seed 2, so the empty-line test is a different day's deck from the one the
+  -- ledger's one-score-a-day guard is about.
+  (:'seven_second_empty_session', :'seven_second_game', :'alice', 2, 'seven-second@1', now() - interval '5 minutes', now() + interval '2 hours', null);
+
+insert into public.game_sessions
+  (id, game_id, user_id, seed, rules_version, started_at, expires_at, completed_at, verified_score, verified_digest)
+values (:'seven_second_done_session', :'seven_second_game', :'alice', public.seven_second_seed(),
+        'seven-second@1', now() - interval '5 minutes', now() + interval '2 hours',
+        now() - interval '1 minute', 0, md5('daily-fixture'));
 
 -- The generator, asserted directly: seed 1's twelve winning cells are the ones
 -- the client engine computes and the ones the verifier replays. A drift here is
@@ -1483,6 +1509,40 @@ select rls_test.raises(
   $$select public.dont_touch_black(1, 60)$$,
   '22023', 'a sixty-first cell is not on the deck'
 );
+-- 7 Second's daily deck, asserted directly: the right button at a position is
+-- the one the client engine draws and the verifier replays. The seed function is
+-- the day itself, so the assertion is against the UTC date rather than a value
+-- that would only be true today by accident.
+select rls_test.ok(
+  public.seven_second_rules_version() = 'seven-second@1'
+  and public.seven_second_options() = 3
+  and public.seven_second_answers() = 60,
+  'a 7 Second run is three buttons and at most sixty answers'
+);
+select rls_test.ok(
+  (select array_agg(public.seven_second_correct(1, index) order by index)
+     from generate_series(0, 3) as index) = array[0,0,2,1]::integer[],
+  'the generator draws seed 1''s first four right buttons'
+);
+select rls_test.ok(
+  (select array_agg(public.seven_second_correct(2654435769, index) order by index)
+     from generate_series(0, 5) as index) = array[1,0,0,2,1,2]::integer[],
+  'the generator draws the zero-state fallback''s first six right buttons'
+);
+select rls_test.ok(
+  public.seven_second_seed()
+    = ((extract(epoch from (now() at time zone 'utc')::date)::bigint / 86400) * 2654435761 + 7),
+  'the daily seed is the UTC date, hashed'
+);
+select rls_test.ok(
+  public.seven_second_correct(9223372036854775807, 0)
+    between 0 and public.seven_second_options() - 1,
+  'a full-width seed still names a button that exists'
+);
+select rls_test.raises(
+  $$select public.seven_second_correct(1, 60)$$,
+  '22023', 'a sixty-first challenge is not on the deck'
+);
 
 select set_config('request.jwt.claims', '{"role":"anon"}', true);
 set local role anon;
@@ -1551,8 +1611,8 @@ select rls_test.visible(
 -- ships, only the six with runtimes are playable.
 select rls_test.visible(
   $$select 1 from public.games
-     where slug not in ('stack-10', 'dont-break-the-chain', 'memory-flash', 'one-move', 'color-merge', 'dont-touch-the-black') and slug not like 'fixture-%' and (playable or runtime is not null)$$,
-  0, 'no shipped game besides the six runtimes is marked playable'
+     where slug not in ('stack-10', 'dont-break-the-chain', 'memory-flash', 'one-move', 'color-merge', 'dont-touch-the-black', '7-second') and slug not like 'fixture-%' and (playable or runtime is not null)$$,
+  0, 'no shipped game besides the seven runtimes is marked playable'
 );
 select rls_test.says_field(
   $$public.start_game_session('stack-10', 'stack-10@1', 'test/1.0')$$,
@@ -1718,11 +1778,41 @@ select rls_test.says(
   $$public.start_game_session('fixture-runnable', 'dont-touch@1', 'test/1.0')$$,
   'unsupported_runtime', 'a Stack 10 game cannot start a Don''t Touch the Black run'
 );
--- The one catalogue game still waiting for its runtime stays unplayable: this
--- flip ships one game, and the gate refuses the other by name.
+-- The shipped 7 Second game, same shape: playable, naming its runtime, issuing
+-- a daily run whose move count is the answer cap.
+select rls_test.visible(
+  $$select 1 from public.games where slug = '7-second' and playable and runtime = 'seven-second'$$,
+  1, 'the shipped 7 Second game is playable and names its runtime'
+);
+select rls_test.says_field(
+  $$public.start_game_session('7-second', 'seven-second@1', 'test/1.0')$$,
+  'game_slug', '7-second', 'the shipped 7 Second game issues a run like any other'
+);
+select rls_test.says_field(
+  $$public.start_game_session('7-second', 'seven-second@1', 'test/1.0')$$,
+  'tile_count', '60', 'a 7 Second session counts the answers a run can hold'
+);
 select rls_test.says(
   $$public.start_game_session('7-second', 'dont-touch@1', 'test/1.0')$$,
-  'not_playable', '7 Second still cannot start a run: it has no runtime'
+  'unsupported_runtime', 'the shipped 7 Second game cannot start a Don''t Touch the Black run'
+);
+-- The gate knows the seventh pair too, and refuses a game paired with another
+-- game's rules.
+select rls_test.says(
+  $$public.start_game_session('fixture-seven-second', 'seven-second@1', 'test/1.0')$$,
+  'started', 'a guest can start a 7 Second run, daily limit or not'
+);
+select rls_test.says(
+  $$public.start_game_session('fixture-seven-second', 'dont-touch@1', 'test/1.0')$$,
+  'unsupported_runtime', 'a 7 Second game cannot start a Don''t Touch the Black run'
+);
+select rls_test.says(
+  $$public.start_game_session('fixture-dont-touch', 'seven-second@1', 'test/1.0')$$,
+  'unsupported_runtime', 'a Don''t Touch the Black game cannot start a 7 Second run'
+);
+select rls_test.says(
+  $$public.start_game_session('fixture-runnable', 'seven-second@1', 'test/1.0')$$,
+  'unsupported_runtime', 'a Stack 10 game cannot start a 7 Second run'
 );
 
 -- A guest run completes and is verified, and stays unranked: there is no score
@@ -1805,6 +1895,30 @@ select rls_test.says_field(
   format($$public.complete_dont_touch_run('77777777-4444-4444-8444-777777777777'::uuid, %s, 410, 45000)$$, :'dont_touch_perfect'),
   'ranked', 'false', 'a guest Don''t Touch the Black run is never ranked'
 );
+-- A guest 7 Second run: the claimed score is checked against the replay, then
+-- recorded unranked. Seed 1's line [0,1,2,1] clears three of four for thirty.
+select rls_test.ok(
+  (select r.outcome = 'score_mismatch' and r.score = 30
+     from public.complete_seven_second_run(
+       '88888888-4444-4444-8444-888888888888'::uuid, array[0,1,2,1], 40, 45000) r),
+  'a 7 Second claim the replay contradicts is refused, and the real score comes back'
+);
+select rls_test.ok(
+  (select r.outcome = 'invalid_actions'
+     from public.complete_seven_second_run(
+       '88888888-4444-4444-8444-888888888888'::uuid, array[3], 0, 45000) r),
+  'a fourth button is not a 7 Second answer'
+);
+select rls_test.ok(
+  (select r.outcome = 'recorded' and r.score = 30 and r.tiles_placed = 4 and not r.ranked
+     from public.complete_seven_second_run(
+       '88888888-4444-4444-8444-888888888888'::uuid, array[0,1,2,1], 30, 45000) r),
+  'a guest 7 Second run is replayed and recorded at thirty, unranked'
+);
+select rls_test.says(
+  $$public.complete_seven_second_run('88888888-4444-4444-8444-888888888888'::uuid, array[0,1,2,1], 30, 45000)$$,
+  'duplicate', 'a repeated guest 7 Second submission is recognised, not recorded again'
+);
 
 reset role;
 
@@ -1815,6 +1929,15 @@ set local role authenticated;
 select rls_test.denied(
   $$insert into public.game_sessions (game_id, user_id) values ('aaaaaaaa-4444-4444-8444-aaaaaaaaaaaa', '11111111-1111-4111-8111-111111111111')$$,
   'a signed-in player cannot insert a session either: the seed has to be the server''s'
+);
+
+-- The daily limit is a rule of the game, not of the screen: Alice already
+-- finished a run of today's seed (the done fixture), so asking for another is
+-- refused by name. The same request from a guest is *not* refused, because a
+-- guest has no score to set — that is asserted in the anonymous section above.
+select rls_test.says(
+  $$public.start_game_session('fixture-seven-second', 'seven-second@1', 'test/1.0')$$,
+  'already_played', 'a signed-in player gets one ranked 7 Second attempt a day'
 );
 
 -- Refusals: another player's session, a guest session, an expired one, an
@@ -2281,6 +2404,55 @@ select rls_test.ok(
 select rls_test.ok(
   (select rank = 1 and score = 410 from public.game_standing('fixture-dont-touch', '11111111-1111-4111-8111-111111111111', null)),
   'your Don''t Touch the Black standing is your recorded best at its real rank'
+);
+
+-- 7 Second as a signed-in player: the same replay, but the recorded run earns a
+-- score row and a standing. The empty line is valid — a clock can run out before
+-- a first answer — and a session pinned to another rules version is refused.
+select rls_test.ok(
+  (select r.outcome = 'score_mismatch' and r.score = 30
+     from public.complete_seven_second_run(
+       '88888888-2222-4222-8222-888888888888'::uuid, array[0,1,2,1], 40, 45000) r),
+  'a signed-in 7 Second claim the replay contradicts is refused'
+);
+select rls_test.ok(
+  (select r.outcome = 'invalid_actions'
+     from public.complete_seven_second_run(
+       '88888888-2222-4222-8222-888888888888'::uuid, array[0,1,2,3], 30, 45000) r),
+  'a 7 Second line with a choice past the buttons is impossible play'
+);
+select rls_test.ok(
+  (select r.outcome = 'recorded' and r.score = 30 and r.tiles_placed = 4 and r.ranked
+     from public.complete_seven_second_run(
+       '88888888-2222-4222-8222-888888888888'::uuid, array[0,1,2,1], 30, 45000) r),
+  'a signed-in 7 Second run is replayed, recorded at thirty, and ranked'
+);
+select rls_test.says(
+  $$public.complete_seven_second_run('88888888-2222-4222-8222-888888888888'::uuid, array[0,1,2,1], 30, 45000)$$,
+  'duplicate', 'a repeated signed-in 7 Second submission is recognised, not recorded twice'
+);
+select rls_test.says(
+  $$public.complete_seven_second_run('88888888-1111-4111-8111-888888888888'::uuid, array[0,1,2,1], 30, 45000)$$,
+  'already_played', 'a second session of the same day''s deck cannot become a second score'
+);
+select rls_test.ok(
+  (select r.outcome = 'recorded' and r.score = 0 and r.tiles_placed = 0
+     from public.complete_seven_second_run(
+       '88888888-6666-4666-8666-888888888888'::uuid, array[]::integer[], 0, 45000) r),
+  'a 7 Second run with no answers is recorded at zero'
+);
+select rls_test.says(
+  $$public.complete_seven_second_run('88888888-5555-4555-8555-888888888888'::uuid, array[]::integer[], 0, 45000)$$,
+  'wrong_rules', 'a 7 Second session pinned to rules this verifier does not implement is refused'
+);
+select rls_test.ok(
+  (select verified_score = 30 from public.game_sessions where id = '88888888-2222-4222-8222-888888888888'),
+  'a player can read the verified score on their own 7 Second session'
+);
+select rls_test.ok(
+  (select rank = 1 and score = 30
+     from public.game_standing('fixture-seven-second', '11111111-1111-4111-8111-111111111111', null)),
+  'your 7 Second standing is your recorded best at its real rank'
 );
 
 -- Starting replaces your own open run, so a player cannot accumulate runs and

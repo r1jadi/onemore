@@ -3,10 +3,11 @@
 How OneMore's games work: the rules, who is allowed to decide a score, and how a
 game earns the right to be called playable.
 
-Six games are implemented today: **Stack 10**, **Chain** (Don't Break the
-Chain), **Memory Flash**, **One Move**, **Color Merge** and **Don't Touch the
-Black**. The one remaining catalogue record (7 Second) is published but not
-playable — `playable: false`, `runtime: null` — and no screen offers to start it.
+Seven games are implemented today: **Stack 10**, **Chain** (Don't Break the
+Chain), **Memory Flash**, **One Move**, **Color Merge**, **Don't Touch the Black**
+and **7 Second**. Every catalogue record is playable, and each one names the
+runtime that plays it; the "no runtime yet" screen remains for any future entry
+that is published before its runtime ships.
 
 ## Stack 10
 
@@ -764,3 +765,145 @@ drifts, one of the two suites fails.
 
    It scores **90**: the black tap is recorded as the ending rather than scored,
    and the run is a complete submission. Asserted in both suites.
+
+## 7 Second
+
+The daily game. **Seven seconds** on the clock, one arithmetic challenge at a time,
+three answers to choose from. A right answer buys time and scores; a wrong one
+costs time. Everyone plays the same deck on the same UTC day, and a signed-in
+player gets **one ranked attempt per day**.
+
+### The board
+
+| Thing    | Value                                                     |
+| -------- | --------------------------------------------------------- |
+| Clock    | 7.0 seconds, plus 1.5 per right answer, minus 2 per wrong |
+| Answers  | 3 per challenge — one right, two wrong                    |
+| Cap      | 60 answers per submission                                 |
+| Score    | 10 points per right answer                                |
+| Rules    | `seven-second@1`                                          |
+| Runtime  | `seven-second` (the catalogue's `games.runtime` value)    |
+| Category | Daily                                                     |
+
+### The daily deck
+
+The seed is **the UTC date**, hashed once:
+
+```
+seed = (days since 1970-01-01) × 2654435761 + 7
+```
+
+That makes the deck a property of the day rather than of the player: every run
+started on 24 October 2026 receives the same seed, so two scores measure the same
+challenges. It is also why the daily limit works — `start_game_session` compares a
+completed session's seed with today's seed, not two wall-clock timestamps.
+
+From there the generator is the same 32-bit LCG the other games use:
+
+```
+state₀ = ((seed mod 2³²) + 2³²) mod 2³²
+if state₀ = 0 then state₀ = 2654435769
+stateₙ = (stateₙ₋₁ × 1664525 + 1013904223) mod 2³²
+
+// challenge k, 0-based: advance k + 1 times, then read one state
+left     = 2 + ((state >> 8)  mod 18)      // 2..19
+right    = 1 + ((state >> 16) mod 9)       // 1..9
+minus    = ((state >> 24) mod 2) = 0       // subtraction when set
+if minus and right > left then swap        // never pose a negative answer
+answer   = minus ? left - right : left + right
+
+offset₁  = 1 + ((state >> 4)  mod 5)       // 1..5
+offset₂  = offset₁ + 1 + ((state >> 12) mod 4)
+correct  = state mod 3                     // the button the answer sits on
+options  = [answer + offset₁, answer + offset₂] with `answer` inserted at `correct`
+```
+
+Both wrong answers are therefore above the right one and distinct, which is enough
+to stop the answer being found by shape rather than arithmetic. The right button
+moves because its position is the state modulo three, so mashing one position is
+not a strategy.
+
+### A run
+
+The screen starts the clock when the player presses Start, not when the session
+arrives — reading the rules must not cost seven seconds. Each press is an answer
+button index, 0–2:
+
+- **right** → 10 points, and 1.5 seconds go back on the clock. The next challenge
+  appears.
+- **wrong** → nothing, and 2 seconds come off. The next challenge appears.
+- **clock at zero** → the run ends and the answers already given are submitted.
+  That is the ordinary ending; a run with no answers is valid and scores zero.
+- **sixty answers** → the run ends too. It is the contract's cap and a real
+  ending, not a number the UI invented.
+
+The rules deliberately do not know about time: the screen decides _when_ a run is
+over, while the submitted list says only which buttons were pressed. A press after
+the clock empties is not recorded, so what is replayed is exactly what was played.
+
+Because the clock is not replayed, a modified client could submit sixty correct
+answers without waiting. The answer cap makes that score **600**, the same ceiling
+a perfect run reaches, and the server still checks every answer — so the cheat is
+bounded to the score the game already awards, never beyond it.
+
+### Verified scores
+
+**The database decides the score**, under the same rules as the other six: see
+`supabase/migrations/20261024120000_seven_second_sessions.sql`.
+
+- `public.seven_second_seed()` is today's seed. It is stable rather than immutable,
+  and clients never call it: the seed arrives with the session.
+- `public.seven_second_correct(seed, index)` is the right button for one challenge.
+  It is an internal; execute is not granted to clients, because a player already
+  holds the seed their deck grows from.
+- `public.start_game_session(slug, rules, client)` issues the run with the daily
+  seed, the pinned version and the expiry. Its gate is a pair — the six earlier
+  pairs plus (`seven-second`, `seven-second@1`) — and anything else is
+  `unsupported_runtime`. A 7 Second session's `tile_count` is 60, the answer cap.
+  For a signed-in caller it also answers `already_played` when a completed session
+  exists for today's seed, and issues nothing.
+- `public.complete_seven_second_run(session, actions, score, duration)` replays the
+  answers from the seed, scores ten per right one, compares the total with the
+  claim, and only then closes the session and records it. Its outcome vocabulary
+  (`recorded`, `duplicate`, `score_mismatch`, …) and ledger behaviour are identical
+  to the other six verifiers, and the Go service maps them onto HTTP the same way —
+  routing `seven-second@1` to this verifier, accepting choices 0–2, and answering
+  `409` for `already_played`.
+
+  The ledger keeps the daily rule on its own: if two sessions of the same day's
+  deck reach completion — a start and a completion can race — the second is
+  refused with `already_played` rather than becoming a second score. The race can
+  cost a run; it cannot put two entries on the board.
+
+A guest can play, and can play again: their run is verified and closed exactly like
+a signed-in player's, and it is never ranked, so repeated practice cannot put a
+score on a board. The daily limit is the rule that makes the daily board a
+comparison of the same deck, and it applies to the ranked attempt.
+
+### Test vectors
+
+Each vector is asserted by both the SQL suite and the client engine; if either side
+drifts, one of the two suites fails.
+
+1. **Seed 1's first four challenges** — prompts, options, and the right button:
+
+   ```
+   0: 11 − 8  → [3, 5, 7]   right = 0
+   1:  9 − 5  → [4, 6, 7]   right = 0
+   2: 13 + 8  → [26, 27, 21] right = 2
+   3: 16 − 8  → [9, 8, 13]  right = 1
+   ```
+
+   Asserted in
+   [`tests/security/rls_test.sql`](../../tests/security/rls_test.sql) and in
+   [`src/lib/games/seven-second.test.ts`](../../src/lib/games/seven-second.test.ts).
+
+2. **Seed 1's answer line `0,1,2,1`** — right, wrong, right, right: **three
+   correct, 30 points**, submitted as four answers. Asserted in both suites.
+
+3. **The zero-state fallback** — seed `2654435769` draws the same deck as a seed of
+   `0`; its first six right buttons are `1,0,0,2,1,2`. Asserted in both.
+
+4. **A perfect sixty-answer run** on seed 42 scores **600** and ends itself at the
+   cap. Asserted in the client engine; the verifier accepts any line from zero to
+   sixty answers, so the line is valid play and the score is its replay.

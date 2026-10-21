@@ -47,10 +47,11 @@ one that covers an area before changing its design.
 
 The foundation is complete — the UI, the API, the database and the deployment
 path all exist — and the first features have landed on top of it: **Stack 10**,
-**Chain**, **Memory Flash**, **One Move**, **Color Merge** and **Don't Touch the
-Black**, six real games with server-issued sessions, server-verified scores and
-working leaderboards. Of the seven catalogue games, those six are `playable`; 7
-Second is published but not playable, and no screen offers to start it.
+**Chain**, **Memory Flash**, **One Move**, **Color Merge**, **Don't Touch the
+Black** and **7 Second**, seven real games with server-issued sessions,
+server-verified scores and working leaderboards. All seven catalogue games are
+`playable`, each names the runtime that plays it, and 7 Second is the daily one:
+same deck for everyone on a UTC day, one ranked attempt a day.
 
 The remaining features (the other games, social, notifications, search,
 moderation, analytics, payments) each have a published contract and an

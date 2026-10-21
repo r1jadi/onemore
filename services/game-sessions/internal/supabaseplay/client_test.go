@@ -296,6 +296,26 @@ func TestCompleteRunRoutesDontTouchRulesToDontTouchVerifier(t *testing.T) {
 	}
 }
 
+func TestCompleteRunRoutesSevenSecondRulesToSevenSecondVerifier(t *testing.T) {
+	rec := newRecorder(t, http.StatusOK, resultRow)
+
+	if _, err := rec.client(t).CompleteRun(context.Background(), CompleteRequest{
+		SessionID:    "cccccccc-1111-4111-8111-cccccccccccc",
+		RulesVersion: "seven-second@1",
+		Actions:      []int32{0, 1, 2, 1},
+		Score:        30,
+		DurationMS:   9000,
+	}); err != nil {
+		t.Fatalf("CompleteRun: %v", err)
+	}
+
+	// The pinned version selects the replay: a 7 Second run is verified by
+	// complete_seven_second_run, not by any of the other six.
+	if rec.path != "/rest/v1/rpc/complete_seven_second_run" {
+		t.Fatalf("path = %s, want the 7 Second verifier function", rec.path)
+	}
+}
+
 func TestCompleteRunKeepsStack10RulesOnStackVerifier(t *testing.T) {
 	rec := newRecorder(t, http.StatusOK, resultRow)
 

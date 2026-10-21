@@ -739,6 +739,11 @@ paths:
 
         Starting a run also abandons the caller's previous open run of the same
         game, so a reload cannot leave two completable sessions behind.
+
+        A daily game gets one ranked attempt per UTC day. When a signed-in caller
+        has already completed a run of today's deck, the request answers `409`
+        and issues nothing. Guests are not limited: their runs are verified and
+        unranked, so repeated practice cannot put a score on a board.
       security:
         - {}
         - bearerAuth: []
@@ -769,6 +774,11 @@ paths:
               schema: { $ref: "#/components/schemas/PlaySession" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: |
+            The signed-in caller has already completed today's daily run. The
+            next run is issued at midnight UTC. This is a rule of the game, not a
+            temporary failure; retrying the same request cannot succeed today.
         "429": { $ref: "#/components/responses/RateLimited" }
         "503": { $ref: "#/components/responses/Unavailable" }
 
@@ -789,8 +799,11 @@ paths:
         the replay does not produce is refused (`422`, with the replayed score in
         the message rather than recorded).
 
-        The whole run must be submitted: a body that stops before the move which
-        ended the run is refused, so a player cannot discard the move that lost.
+        Where a game records its ending in the action list, the whole run must be
+        submitted: a body that stops before the move which ended the run is
+        refused, so a player cannot discard the move that lost. 7 Second is the
+        exception in the other direction — its clock decides when a run ends, so
+        a submission is valid with any number of answers from zero to sixty.
 
         Retries are safe and expected. A repeated submission of the run already
         recorded answers `200` with `duplicate: true` and the recorded score, and a
@@ -801,6 +814,11 @@ paths:
         pinned to rules the server does not implement is refused (`409`). A session
         that has expired (`409`) or was abandoned by a newer run (`409`) cannot be
         submitted at all.
+
+        A daily game's ledger is guarded too: a second session of the same day's
+        deck cannot become a second score. Its completion answers `409` and the
+        first recorded run is the one that counts, so a start racing a completion
+        cannot double a player's entry.
       security:
         - {}
         - bearerAuth: []
@@ -833,17 +851,18 @@ paths:
                     actions:
                       type: array
                       description: |
-                        The run, as the ordered list of board positions the run's
-                        moves addressed: a column for Stack 10, a pad for Chain,
-                        a cell for Memory Flash, a cell for One Move, a direction
-                        for Color Merge, a cell for Don't Touch the Black. This is
-                        what is replayed; the rules for how a move is generated
-                        and what it does belong to the game (see `docs/games`). The
-                        bound is the largest board any shipped rules version
-                        addresses: Don't Touch the Black's sixty cells. One Move
-                        addresses twenty-five, Memory Flash sixteen, and Stack 10,
-                        Chain and Color Merge 0–3; each verifier refuses anything
-                        past its own board.
+                        The run, as the ordered list of positions the run's moves
+                        addressed: a column for Stack 10, a pad for Chain, a cell
+                        for Memory Flash, a cell for One Move, a direction for
+                        Color Merge, a cell for Don't Touch the Black, and an
+                        answer button for 7 Second. This is what is replayed; the
+                        rules for how a move is generated and what it does belong
+                        to the game (see `docs/games`). The bound is the largest
+                        board any shipped rules version addresses: Don't Touch the
+                        Black's sixty cells. One Move addresses twenty-five,
+                        Memory Flash sixteen, Stack 10, Chain and Color Merge 0–3,
+                        and 7 Second 0–2; each verifier refuses anything past its
+                        own board.
                       maxItems: 60
                       # The highest position any shipped version addresses: a cell
                       # on Don't Touch the Black's sixty-cell deck (0–59).
@@ -1963,9 +1982,10 @@ components:
           type: [string, "null"]
           description: |
             The client runtime that plays this game (`stack-10`, `chain`,
-            `memory-flash`, `one-move`, `color-merge` or `dont-touch`), or null
-            when none exists. It is the runtime's identifier, not its title,
-            because the client mounts a runtime by that name.
+            `memory-flash`, `one-move`, `color-merge`, `dont-touch` or
+            `seven-second`), or null when none exists. It is the runtime's
+            identifier, not its title, because the client mounts a runtime by
+            that name.
         playable:
           type: boolean
           description: |
@@ -2061,7 +2081,7 @@ components:
         tileCount:
           type: integer
           minimum: 1
-          description: "How many moves a complete run holds: tiles for Stack 10, taps for Chain, Memory Flash and One Move, slides for Color Merge, cell taps for Don't Touch the Black. The client does not choose it."
+          description: "How many moves a complete run holds: tiles for Stack 10, taps for Chain, Memory Flash and One Move, slides for Color Merge, cell taps for Don't Touch the Black, and answers for 7 Second. The client does not choose it."
         startedAt: { type: string, format: date-time }
         expiresAt:
           type: string

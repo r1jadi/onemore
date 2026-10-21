@@ -44,7 +44,11 @@ const (
 	// touching the black scores ten and ends the run with both taps submitted.
 	dontTouchRules = "dont-touch@1"
 	dontTouchRun   = "[2,0]"
-	testUserID     = "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f"
+	// Seed 1's first four challenges each have one right button: 0, 0, 2, 1.
+	// Answering 0, 1, 2, 1 clears three of them for thirty points.
+	sevenSecondRules = "seven-second@1"
+	sevenSecondRun   = "[0,1,2,1]"
+	testUserID       = "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f"
 )
 
 // token signs a token the platform verifier accepts, with the given subject.
@@ -424,6 +428,7 @@ func TestCompleteSessionMapsEveryRefusal(t *testing.T) {
 		{"invalid_actions", http.StatusUnprocessableEntity, "unprocessable_entity", "an impossible run is not a score"},
 		{"invalid_duration", http.StatusUnprocessableEntity, "unprocessable_entity", "a duration longer than the session is impossible"},
 		{"score_mismatch", http.StatusUnprocessableEntity, "unprocessable_entity", "a claim the replay contradicts is refused"},
+		{"already_played", http.StatusConflict, "conflict", "a second run of today's deck cannot become a second score"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.outcome, func(t *testing.T) {
@@ -800,6 +805,85 @@ func TestCompleteSessionRejectsADontTouchCellPastTheDeck(t *testing.T) {
 	// A sixty-first cell is malformed input, so it must never start a replay.
 	if backend.runCalls != 0 {
 		t.Fatal("a cell outside the deck reached the verifier")
+	}
+}
+
+func TestStartSessionReportsTodaysAttemptAsDone(t *testing.T) {
+	backend := testBackend()
+	// The database answers `already_played` when a signed-in player has already
+	// finished today's deck. It is a rule, not a failure, and the client shows it
+	// as one — so it must be a 409 and not a generic 503.
+	backend.start = supabaseplay.Start{Outcome: "already_played"}
+	server := testServer(t, backend)
+
+	status, body := post(t, server,
+		"/api/v1/sessions", startBody("7-second", sevenSecondRules), token(t, testUserID))
+
+	if status != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (%#v)", status, body)
+	}
+	if errorCode(t, body) != "conflict" {
+		t.Fatalf("code = %s, want conflict", errorCode(t, body))
+	}
+	failure := body["error"].(map[string]any)
+	if message, _ := failure["message"].(string); !strings.Contains(message, "midnight UTC") {
+		t.Fatalf("message = %q, want the next deck's time", message)
+	}
+}
+
+func TestCompleteSessionVerifiesASevenSecondRun(t *testing.T) {
+	backend := testBackend()
+	started := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
+	backend.result = supabaseplay.Result{
+		Outcome:      "recorded",
+		SessionID:    sessionID,
+		GameSlug:     "7-second",
+		Score:        ptr(int64(30)),
+		TilesPlaced:  ptr(4),
+		DurationMS:   ptr(9000),
+		Ranked:       ptr(true),
+		RecordedAt:   &started,
+		PersonalBest: ptr(int64(30)),
+		Rank:         ptr(int64(1)),
+	}
+	server := testServer(t, backend)
+
+	status, body := post(t, server,
+		"/api/v1/sessions/"+sessionID+"/complete",
+		completeBodyRules(sevenSecondRules, "30", "9000", sevenSecondRun), "")
+
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%#v)", status, body)
+	}
+	if body["score"] != float64(30) || body["gameSlug"] != "7-second" {
+		t.Fatalf("body = %#v, want the verified 7 Second run", body)
+	}
+	if backend.lastRun.RulesVersion != sevenSecondRules {
+		t.Fatalf("rules version = %q, want the run's pinned seven-second@1", backend.lastRun.RulesVersion)
+	}
+	if len(backend.lastRun.Actions) != 4 || backend.lastRun.Actions[2] != 2 {
+		t.Fatalf("actions = %v, want the submitted answers", backend.lastRun.Actions)
+	}
+}
+
+func TestCompleteSessionRejectsASevenSecondChoicePastTheButtons(t *testing.T) {
+	backend := testBackend()
+	server := testServer(t, backend)
+
+	status, body := post(t, server,
+		"/api/v1/sessions/"+sessionID+"/complete",
+		completeBodyRules(sevenSecondRules, "0", "45000", "[3]"), "")
+
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (%#v)", status, body)
+	}
+	if errorCode(t, body) != "bad_request" {
+		t.Fatalf("code = %s, want bad_request", errorCode(t, body))
+	}
+	// A fourth button does not exist, so it is malformed input and must never
+	// start a replay.
+	if backend.runCalls != 0 {
+		t.Fatal("a choice outside the buttons reached the verifier")
 	}
 }
 
