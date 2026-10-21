@@ -3,10 +3,10 @@
 How OneMore's games work: the rules, who is allowed to decide a score, and how a
 game earns the right to be called playable.
 
-Four games are implemented today: **Stack 10**, **Chain** (Don't Break the
-Chain), **Memory Flash** and **One Move**. The other three catalogue records are
-published but not playable — `playable: false`, `runtime: null` — and no screen
-offers to start them.
+Five games are implemented today: **Stack 10**, **Chain** (Don't Break the
+Chain), **Memory Flash**, **One Move** and **Color Merge**. The other two
+catalogue records are published but not playable — `playable: false`,
+`runtime: null` — and no screen offers to start them.
 
 ## Stack 10
 
@@ -15,13 +15,13 @@ Place the numbered tiles the game deals into four columns. A column that adds up
 
 ### The board
 
-| Thing     | Value                                                     |
-| --------- | --------------------------------------------------------- |
-| Columns   | 4                                                         |
+| Thing     | Value                                                             |
+| --------- | ----------------------------------------------------------------- |
+| Columns   | 4                                                                 |
 | Tiles     | 60 per run — the run always ends, so two scores measure one thing |
-| Tile face | 1–9                                                       |
-| Rules     | `stack-10@1`                                              |
-| Runtime   | `stack-10` (the catalogue's `games.runtime` value)        |
+| Tile face | 1–9                                                               |
+| Rules     | `stack-10@1`                                                      |
+| Runtime   | `stack-10` (the catalogue's `games.runtime` value)                |
 
 ### The deck
 
@@ -66,12 +66,12 @@ first**:
 clear score = 10 + 5 × (tiles cleared − 1)
 ```
 
-| Tiles in the clear | Score | Example             |
-| ------------------ | ----- | ------------------- |
+| Tiles in the clear | Score | Example                                            |
+| ------------------ | ----- | -------------------------------------------------- |
 | 1                  | 10    | unreachable with a 1–9 deck, and still spelled out |
-| 2                  | 15    | `4+6`, `1+9`        |
-| 3                  | 20    | `1+7+2`, `3+4+3`    |
-| 4                  | 25    | `3+2+1+4`           |
+| 2                  | 15    | `4+6`, `1+9`                                       |
+| 3                  | 20    | `1+7+2`, `3+4+3`                                   |
+| 4                  | 25    | `3+2+1+4`                                          |
 
 Stacking is what scores: a column that clears in three is worth twice one that
 clears in one, and it is also the riskier play, because the tiles sitting in it are
@@ -82,9 +82,9 @@ has at least one move.
 
 ### How a run ends
 
-| Outcome   | When                                                      |
-| --------- | --------------------------------------------------------- |
-| `over`    | A column passed ten. The ordinary ending.                  |
+| Outcome   | When                                                                                              |
+| --------- | ------------------------------------------------------------------------------------------------- |
+| `over`    | A column passed ten. The ordinary ending.                                                         |
 | `cleared` | All sixty tiles were placed. A perfect run, and a real one: seed 1 admits at least one such line. |
 
 The score already earned is kept. Every tile of the run must be submitted: a
@@ -108,15 +108,15 @@ never trusted — see
 
 Outcomes the API maps onto HTTP:
 
-| Verifier outcome                        | HTTP | What it means to the player                                                  |
-| --------------------------------------- | ---- | ---------------------------------------------------------------------------- |
-| `recorded`                              | 200  | Verified and saved.                                                          |
-| `duplicate`                             | 200  | The same run, submitted again — a retry. Safe, and it never scores twice.     |
-| `not_found`                             | 404  | No such run, or somebody else's — deliberately the same answer.               |
-| `expired`, `abandoned`, `closed`        | 409  | The run can no longer be submitted; start a new one.                          |
-| `wrong_rules`                           | 409  | The session was pinned to rules this server does not implement.               |
-| `invalid_actions`, `invalid_duration`   | 422  | The sequence is not one the rules can produce.                                |
-| `score_mismatch`                        | 422  | The replay disagrees with the claimed score. The replayed number is returned. |
+| Verifier outcome                      | HTTP | What it means to the player                                                   |
+| ------------------------------------- | ---- | ----------------------------------------------------------------------------- |
+| `recorded`                            | 200  | Verified and saved.                                                           |
+| `duplicate`                           | 200  | The same run, submitted again — a retry. Safe, and it never scores twice.     |
+| `not_found`                           | 404  | No such run, or somebody else's — deliberately the same answer.               |
+| `expired`, `abandoned`, `closed`      | 409  | The run can no longer be submitted; start a new one.                          |
+| `wrong_rules`                         | 409  | The session was pinned to rules this server does not implement.               |
+| `invalid_actions`, `invalid_duration` | 422  | The sequence is not one the rules can produce.                                |
+| `score_mismatch`                      | 422  | The replay disagrees with the claimed score. The replayed number is returned. |
 
 A guest can play. Their run is verified and closed exactly like a signed-in
 player's, and it is never ranked: `scores.user_id` is `NOT NULL`, so there is no row
@@ -163,13 +163,13 @@ shows one symbol more than the last; a wrong tap breaks the chain and ends the r
 
 ### The board
 
-| Thing     | Value                                                     |
-| --------- | --------------------------------------------------------- |
-| Pads      | 4                                                         |
-| Rounds    | 10 per run — the run always ends, so two scores measure one thing |
-| Taps      | 55 in a perfect run (1 + 2 + … + 10)                      |
-| Rules     | `chain@1`                                                 |
-| Runtime   | `chain` (the catalogue's `games.runtime` value)           |
+| Thing   | Value                                                             |
+| ------- | ----------------------------------------------------------------- |
+| Pads    | 4                                                                 |
+| Rounds  | 10 per run — the run always ends, so two scores measure one thing |
+| Taps    | 55 in a perfect run (1 + 2 + … + 10)                              |
+| Rules   | `chain@1`                                                         |
+| Runtime | `chain` (the catalogue's `games.runtime` value)                   |
 
 ### The sequence
 
@@ -198,8 +198,8 @@ sequence, and reject every honest run.
 ### A move
 
 A move is a **pad index, 0–3**. Round r shows the run's first r symbols, and the
-player taps r pads — so a tap is checked against the symbol at its position *within
-its round*, not at its absolute position: the third tap of round three must equal the
+player taps r pads — so a tap is checked against the symbol at its position _within
+its round_, not at its absolute position: the third tap of round three must equal the
 sequence's third symbol, the way the verifier replays it. Exactly one of two things
 happens:
 
@@ -217,10 +217,10 @@ run has at least one move.
 
 ### How a run ends
 
-| Outcome   | When                                                      |
-| --------- | --------------------------------------------------------- |
-| `over`    | A tap broke the chain. The ordinary ending.                |
-| `cleared` | All ten rounds were reproduced — all fifty-five taps.      |
+| Outcome   | When                                                  |
+| --------- | ----------------------------------------------------- |
+| `over`    | A tap broke the chain. The ordinary ending.           |
+| `cleared` | All ten rounds were reproduced — all fifty-five taps. |
 
 The score already earned is kept. Every tap of the run must be submitted, losing tap
 included: a submission that stops early is refused, so a player cannot discard the
@@ -271,13 +271,13 @@ cell already lit — ends the run.
 
 ### The board
 
-| Thing   | Value                                                     |
-| ------- | --------------------------------------------------------- |
-| Board   | 4×4, sixteen cells (indexes 0–15)                          |
+| Thing   | Value                                                             |
+| ------- | ----------------------------------------------------------------- |
+| Board   | 4×4, sixteen cells (indexes 0–15)                                 |
 | Rounds  | 10 per run — the run always ends, so two scores measure one thing |
-| Taps    | 55 in a perfect run (1 + 2 + … + 10)                       |
-| Rules   | `memory-flash@1`                                           |
-| Runtime | `memory-flash` (the catalogue's `games.runtime` value)      |
+| Taps    | 55 in a perfect run (1 + 2 + … + 10)                              |
+| Rules   | `memory-flash@1`                                                  |
+| Runtime | `memory-flash` (the catalogue's `games.runtime` value)            |
 
 ### The patterns
 
@@ -330,10 +330,10 @@ A perfect run clears ten patterns for **100 points**.
 
 ### How a run ends
 
-| Outcome   | When                                                       |
-| --------- | ---------------------------------------------------------- |
+| Outcome   | When                                                                       |
+| --------- | -------------------------------------------------------------------------- |
 | `over`    | A tap was outside the pattern or repeated a lit cell. The ordinary ending. |
-| `cleared` | All ten patterns were rebuilt — all fifty-five taps.        |
+| `cleared` | All ten patterns were rebuilt — all fifty-five taps.                       |
 
 The score already earned is kept. Every tap of the run must be submitted, losing
 tap included: a submission that stops early is refused, so a player cannot discard
@@ -390,13 +390,13 @@ that restores it; any other tap ends the run.
 
 ### The board
 
-| Thing   | Value                                                     |
-| ------- | --------------------------------------------------------- |
+| Thing   | Value                                                             |
+| ------- | ----------------------------------------------------------------- |
 | Boards  | 12 per run — the run always ends, so two scores measure one thing |
-| Taps    | 12 in a perfect run — one per board                        |
-| Board   | 3×3 for boards 1–4, 4×4 for boards 5–8, 5×5 for boards 9–12 |
-| Rules   | `one-move@1`                                              |
-| Runtime | `one-move` (the catalogue's `games.runtime` value)        |
+| Taps    | 12 in a perfect run — one per board                               |
+| Board   | 3×3 for boards 1–4, 4×4 for boards 5–8, 5×5 for boards 9–12       |
+| Rules   | `one-move@1`                                                      |
+| Runtime | `one-move` (the catalogue's `games.runtime` value)                |
 
 ### The boards
 
@@ -451,10 +451,10 @@ Each restored board scores **10 points**. A perfect run restores all twelve for
 
 ### How a run ends
 
-| Outcome   | When                                                      |
-| --------- | --------------------------------------------------------- |
+| Outcome   | When                                                         |
+| --------- | ------------------------------------------------------------ |
 | `over`    | A tap was not the board's winning cell. The ordinary ending. |
-| `cleared` | All twelve boards were restored — all twelve taps.          |
+| `cleared` | All twelve boards were restored — all twelve taps.           |
 
 The score already earned is kept. Every tap of the run must be submitted, losing
 tap included: a submission that stops early is refused, so a player cannot discard
@@ -502,3 +502,144 @@ drifts, one of the two suites fails.
 4. **A full-width seed** — `9223372036854775807` wins on
    `1, 8, 6, 6, 5, 4, 5, 0, 24, 13, 3, 7`, which is what catches a client that
    rounded the seed to a double.
+
+## Color Merge
+
+Slide a 4×4 board of shades. Two equal tiles that meet merge into the next shade
+and score the tile they create. A run is **forty-eight slides**; it ends when the
+deck is empty, or earlier if the board locks.
+
+### The board
+
+| Thing   | Value                                                            |
+| ------- | ---------------------------------------------------------------- |
+| Board   | 4×4, sixteen cells                                               |
+| Tile    | A shade: `1` shows 2, `2` shows 4, `3` shows 8, and so on        |
+| Opening | Two tiles, dealt from the seed                                   |
+| Deck    | 48 slides — the run always ends, so two scores measure one thing |
+| Rules   | `color-merge@1`                                                  |
+| Runtime | `color-merge` (the catalogue's `games.runtime` value)            |
+
+A tile's **value** is `2 ** shade`, which is the number on its face. Shades are
+what the rules merge; values are what the player reads and what the score counts.
+
+### The deck
+
+The tiles are not random at play time: their cells and shades are a function of
+the run's seed, which the **server** chooses when it issues the session. The
+client must deal exactly the same board or its submission is refused, so the
+generator is written out in full:
+
+```
+state₀ = ((seed mod 2³²) + 2³²) mod 2³²        // the seed is a bigint, reduced to 32 bits
+if state₀ = 0 then state₀ = 2654435769         // 0x9E3779B9: a zero state would be degenerate
+stateₙ = (stateₙ₋₁ × 1664525 + 1013904223) mod 2³²
+
+// spawn k, 1-based: advance k times to pick the cell, once more for the shade
+cell(k)  = empties[stateₖ mod count(empties)]  // empties are in board order
+shade(k) = 2 if stateₖ₊₁ mod 10 = 0 else 1
+```
+
+Spawn `k` is a pure function of the seed and `k`, rather than a mutable generator
+both sides must advance in step, so the verifier can reach spawn twenty without
+replaying nineteen and neither copy can drift by one draw. The run opens with
+spawns 1 and 2; slide `n` deals spawn `n + 2`, except the last slide, which deals
+nothing because there is no next move to make with the tile.
+
+The seed travels as a **decimal string** for the same reason the other games' do:
+it is a `bigint` column, and parsing it as a double would deal a different board
+and reject every honest run.
+
+### A slide
+
+A slide is a **direction, 0–3**: up, right, down, left. Every line of the board is
+read in the direction of travel, compacted toward that edge, and its equal
+neighbours merge into the next shade. A tile merges **at most once per slide** —
+four 2s become two 4s, never one 8.
+
+A direction that would not change the board is **not a move**: it is not
+recorded, nothing is dealt, and nothing scores. That is why the verifier refuses
+an action list containing one — the submitted list is exactly the play.
+
+### Scoring
+
+Each merge scores the value of the tile it created: two 2s make a 4 and score 4,
+two 4s make an 8 and score 8. A dealt tile scores nothing until it merges.
+Merging preserves the board's total value, so the score is **not** a difference in
+what the board is worth — it is the sum of the merges, which is the conventional
+score for this game and the number the verifier derives.
+
+### How a run ends
+
+| Outcome | Reason   | When                                                                      |
+| ------- | -------- | ------------------------------------------------------------------------- |
+| `over`  | `deck`   | The forty-eighth slide was played. Every run that survives reaches this.  |
+| `over`  | `locked` | The board is full and no two neighbours match, so no slide can change it. |
+
+Every slide of the run must be submitted: a submission that ends before the deck
+is empty or before the board locks is refused, so a player cannot discard the
+slide that ended their run.
+
+### Verified scores
+
+**The database decides the score**, under the same rules as the other four: see
+`supabase/migrations/20261022120000_color_merge_sessions.sql` for the code.
+
+- `public.color_merge_board(seed)` deals the opening two tiles, and
+  `public.color_merge_spawn(seed, k, board)` deals spawn `k`. Both are internals:
+  execute is not granted to a client, because a player already holds the seed
+  their own board grows from, and the verifier is the only caller.
+- `public.color_merge_slide(board, direction)` compacts and merges every line, and
+  `public.color_merge_gain(board, direction)` reports the points the same slide
+  earns. They share one line function, so the board and the score cannot disagree.
+- `public.color_merge_can_move(board)` is the lock test: an empty cell, or two
+  equal neighbours.
+- `public.start_game_session(slug, rules, client)` issues the run with the seed,
+  the pinned version and the expiry. Its gate is a pair — (`stack-10`,
+  `stack-10@1`), (`chain`, `chain@1`), (`memory-flash`, `memory-flash@1`),
+  (`one-move`, `one-move@1`) or (`color-merge`, `color-merge@1`) — and anything
+  else is `unsupported_runtime`. A Color Merge session's `tile_count` is 48: the
+  field counts the moves a complete run holds, and its moves are slides.
+- `public.complete_color_merge_run(session, actions, score, duration)` replays the
+  direction list from the seed, deals the tiles, derives the score, compares it
+  with the claim, and only then closes the session and records it. Its outcome
+  vocabulary (`recorded`, `duplicate`, `score_mismatch`, …) and its ledger
+  behaviour are identical to the other four verifiers, and the Go service maps
+  them onto HTTP the same way — routing at the verifier the pinned rules version
+  names and accepting directions 0–3.
+
+A guest can play. Their run is verified and closed exactly like a signed-in
+player's, and it is never ranked.
+
+### Test vectors
+
+Each vector is asserted by both the SQL suite and the client engine; if either side
+drifts, one of the two suites fails.
+
+1. **Seed 1's opening board** — two shade-1 tiles at cells 12 and 13:
+   `0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0`. Seed `9223372036854775807` opens with a
+   shade-1 tile at cell 2 and a shade-2 tile at cell 8, which is what catches a
+   client that rounded the seed to a double.
+2. **Seed 1's deck line** — the first legal direction in the order down, left,
+   right, up, played forty-eight times:
+
+   ```
+   3,1,3,2,2,2,2,2,2,2,2,2,2,2,2,2,3,2,2,2,3,2,2,2,2,2,3,2,3,2,2,2,
+   2,2,2,2,2,3,2,3,3,2,2,2,2,2,2,2
+   ```
+
+   It scores **272** and leaves `1,0,0,0,2,1,0,0,4,3,2,1,5,4,3,3`. Asserted in
+   [`tests/security/rls_test.sql`](../../tests/security/rls_test.sql) and in
+   [`src/lib/games/color-merge.test.ts`](../../src/lib/games/color-merge.test.ts).
+
+3. **Seed 15's locked line** — the first legal direction in the order right, left,
+   up, down, forty-two slides, scoring **184** and leaving a full board with no
+   matching neighbours:
+
+   ```
+   1,2,4,1,3,4,1,3,1,3,4,2,2,1,2,1
+   ```
+
+   This is the vector that pins the lock ending: the run stops before the deck is
+   empty, and the verifier must record it rather than call it partial. Asserted in
+   both suites.

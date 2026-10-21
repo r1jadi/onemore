@@ -1294,6 +1294,10 @@ reset role;
 -- twelve restored boards, 120 points. See the One Move section of
 -- docs/games/README.md.
 \set one_move_perfect 'array[7,8,7,7,0,8,6,2,5,18,13,5]'
+-- Seed 1's Color Merge deck line: forty-eight slides, ending on the last one
+-- with 272 points; seed 15's line locks the board after forty-two slides for 184.
+\set color_merge_deck 'array[3,1,3,2,2,2,2,2,2,2,2,2,2,2,2,2,3,2,2,2,3,2,2,2,2,2,3,2,3,2,2,2,2,2,2,2,2,3,2,3,3,2,2,2,2,2,2,2]'
+\set color_merge_locked 'array[1,1,1,1,1,3,1,3,1,1,3,1,1,3,1,1,1,1,1,1,1,1,1,3,1,1,1,3,1,1,3,0,1,3,1,1,3,1,0,1,0,1]'
 
 -- A published, playable game — the only kind a run can be started for — plus one
 -- that stays unpublished, so the refusal path has a subject. The sessions below
@@ -1327,6 +1331,12 @@ reset role;
 \set one_move_loss_session  'ffffffff-2222-4222-8222-ffffffffffff'
 \set one_move_guest_session 'ffffffff-4444-4444-8444-ffffffffffff'
 \set one_move_old_session   'ffffffff-5555-4555-8555-ffffffffffff'
+\set color_merge_game           'aaaaaaaa-bbbb-4bbb-8bbb-aaaaaaaaaaaa'
+\set color_merge_session        '99999999-1111-4111-8111-999999999999'
+\set color_merge_loss_session   '99999999-2222-4222-8222-999999999999'
+\set color_merge_guest_session  '99999999-4444-4444-8444-999999999999'
+\set color_merge_old_session    '99999999-5555-4555-8555-999999999999'
+\set color_merge_locked_session '99999999-6666-4666-8666-999999999999'
 
 insert into public.games (id, owner_id, slug, title, status, published_at, runtime, playable, category_id) values
   (:'runnable_game', :'alice', 'fixture-runnable', 'Fixture Runnable', 'published', now(), 'stack-10', true,
@@ -1337,7 +1347,9 @@ insert into public.games (id, owner_id, slug, title, status, published_at, runti
    (select id from public.categories where slug = 'reaction')),  (:'memory_game',    :'alice', 'fixture-memory',   'Fixture Memory',   'published', now(), 'memory-flash', true,
    (select id from public.categories where slug = 'memory')),
   (:'one_move_game',  :'alice', 'fixture-one-move', 'Fixture One Move', 'published', now(), 'one-move', true,
-   (select id from public.categories where slug = 'logic'));
+   (select id from public.categories where slug = 'logic')),
+  (:'color_merge_game', :'alice', 'fixture-color-merge', 'Fixture Color Merge', 'published', now(), 'color-merge', true,
+   (select id from public.categories where slug = 'puzzle'));
 
 -- Runs that have been open for five minutes, which is what makes a claimed
 -- 45-second duration credible: a run cannot have taken longer than the session
@@ -1366,7 +1378,14 @@ insert into public.game_sessions (id, game_id, user_id, seed, rules_version, sta
   (:'one_move_session',       :'one_move_game', :'alice', 1, 'one-move@1', now() - interval '5 minutes', now() + interval '2 hours', null),
   (:'one_move_loss_session',  :'one_move_game', :'alice', 1, 'one-move@1', now() - interval '5 minutes', now() + interval '2 hours', null),
   (:'one_move_guest_session', :'one_move_game', null,     1, 'one-move@1', now() - interval '5 minutes', now() + interval '2 hours', null),
-  (:'one_move_old_session',   :'one_move_game', :'alice', 1, 'one-move@0', now() - interval '5 minutes', now() + interval '2 hours', null);
+  (:'one_move_old_session',   :'one_move_game', :'alice', 1, 'one-move@0', now() - interval '5 minutes', now() + interval '2 hours', null),
+  -- Color Merge fixtures. Seed 1 opens with two shade-1 tiles side by side;
+  -- seed 15's line locks the board after forty-two slides.
+  (:'color_merge_session',        :'color_merge_game', :'alice', 1,  'color-merge@1', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'color_merge_loss_session',   :'color_merge_game', :'alice', 1,  'color-merge@1', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'color_merge_guest_session',  :'color_merge_game', null,     1,  'color-merge@1', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'color_merge_old_session',    :'color_merge_game', :'alice', 1,  'color-merge@0', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'color_merge_locked_session', :'color_merge_game', :'alice', 15, 'color-merge@1', now() - interval '5 minutes', now() + interval '2 hours', null);
 
 -- The generator, asserted directly: seed 1's twelve winning cells are the ones
 -- the client engine computes and the ones the verifier replays. A drift here is
@@ -1384,6 +1403,33 @@ select rls_test.ok(
 select rls_test.ok(
   public.one_move_size(1) = 3 and public.one_move_size(5) = 4 and public.one_move_size(9) = 5,
   'a One Move board grows from 3×3 to 4×4 to 5×5'
+);
+-- The Color Merge generator, asserted directly: the opening board and the
+-- spawns after it are the ones the client engine computes and the verifier
+-- replays. A drift here is a drift in both copies.
+select rls_test.ok(
+  public.color_merge_board(1) = array[0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0]::integer[],
+  'the Color Merge generator deals seed 1''s opening board'
+);
+select rls_test.ok(
+  public.color_merge_board(9223372036854775807) = array[0,0,1,0,0,0,0,0,2,0,0,0,0,0,0,0]::integer[],
+  'the Color Merge generator deals a full-width seed exactly'
+);
+select rls_test.ok(
+  public.color_merge_slide(array[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]::integer[], 3)
+    = array[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]::integer[],
+  'a slide of an empty Color Merge board changes nothing'
+);
+select rls_test.ok(
+  public.color_merge_slide(array[1,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0]::integer[], 3)
+    = array[1,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0]::integer[],
+  'a Color Merge slide compacts toward the edge it is slid to'
+);
+select rls_test.ok(
+  public.color_merge_slide(array[1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0]::integer[], 3)
+    = array[2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0]::integer[]
+  and public.color_merge_gain(array[1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0]::integer[], 3) = 8,
+  'each Color Merge tile merges once per slide, and the gain is the merge'
 );
 
 select set_config('request.jwt.claims', '{"role":"anon"}', true);
@@ -1453,7 +1499,7 @@ select rls_test.visible(
 -- ships, only the four with runtimes are playable.
 select rls_test.visible(
   $$select 1 from public.games
-     where slug not in ('stack-10', 'dont-break-the-chain', 'memory-flash', 'one-move') and slug not like 'fixture-%' and (playable or runtime is not null)$$,
+     where slug not in ('stack-10', 'dont-break-the-chain', 'memory-flash', 'one-move', 'color-merge') and slug not like 'fixture-%' and (playable or runtime is not null)$$,
   0, 'no shipped game besides the four runtimes is marked playable'
 );
 select rls_test.says_field(
@@ -1556,6 +1602,38 @@ select rls_test.says(
   $$public.start_game_session('fixture-runnable', 'one-move@1', 'test/1.0')$$,
   'unsupported_runtime', 'a Stack 10 game cannot start a One Move run'
 );
+-- The shipped Color Merge game, same shape: playable, naming its runtime,
+-- issuing a run whose move count is the deck's slides.
+select rls_test.visible(
+  $$select 1 from public.games where slug = 'color-merge' and playable and runtime = 'color-merge'$$,
+  1, 'the shipped Color Merge game is playable and names its runtime'
+);
+select rls_test.says_field(
+  $$public.start_game_session('color-merge', 'color-merge@1', 'test/1.0')$$,
+  'game_slug', 'color-merge', 'the shipped Color Merge game issues a run like any other'
+);
+select rls_test.says_field(
+  $$public.start_game_session('color-merge', 'color-merge@1', 'test/1.0')$$,
+  'tile_count', '48', 'a Color Merge session counts the slides a run holds'
+);
+-- The gate knows the fifth pair too, and refuses a game paired with another
+-- game's rules.
+select rls_test.says(
+  $$public.start_game_session('fixture-color-merge', 'color-merge@1', 'test/1.0')$$,
+  'started', 'a guest can start a Color Merge run'
+);
+select rls_test.says(
+  $$public.start_game_session('fixture-color-merge', 'one-move@1', 'test/1.0')$$,
+  'unsupported_runtime', 'a Color Merge game cannot start a One Move run'
+);
+select rls_test.says(
+  $$public.start_game_session('fixture-one-move', 'color-merge@1', 'test/1.0')$$,
+  'unsupported_runtime', 'a One Move game cannot start a Color Merge run'
+);
+select rls_test.says(
+  $$public.start_game_session('fixture-runnable', 'color-merge@1', 'test/1.0')$$,
+  'unsupported_runtime', 'a Stack 10 game cannot start a Color Merge run'
+);
 
 -- A guest run completes and is verified, and stays unranked: there is no score
 -- row for it, because `scores.user_id` is NOT NULL by design.
@@ -1609,6 +1687,19 @@ select rls_test.says(
 select rls_test.says_field(
   format($$public.complete_one_move_run('ffffffff-4444-4444-8444-ffffffffffff'::uuid, %s, 120, 45000)$$, :'one_move_perfect'),
   'ranked', 'false', 'a guest One Move run is never ranked'
+);
+-- A guest Color Merge run completes the same way: verified, recorded, unranked.
+select rls_test.says(
+  format($$public.complete_color_merge_run('99999999-4444-4444-8444-999999999999'::uuid, %s, 272, 45000)$$, :'color_merge_deck'),
+  'recorded', 'a guest Color Merge run is replayed and recorded'
+);
+select rls_test.says(
+  format($$public.complete_color_merge_run('99999999-4444-4444-8444-999999999999'::uuid, %s, 272, 45000)$$, :'color_merge_deck'),
+  'duplicate', 'a repeated guest Color Merge submission is recognised, not recorded again'
+);
+select rls_test.says_field(
+  format($$public.complete_color_merge_run('99999999-4444-4444-8444-999999999999'::uuid, %s, 272, 45000)$$, :'color_merge_deck'),
+  'ranked', 'false', 'a guest Color Merge run is never ranked'
 );
 
 reset role;
@@ -1927,6 +2018,86 @@ select rls_test.ok(
 select rls_test.ok(
   (select rank = 1 and score = 120 from public.game_standing('fixture-one-move', '11111111-1111-4111-8111-111111111111', null)),
   'your One Move standing is your recorded best at its real rank'
+);
+
+-- ── Color Merge: the same properties, replayed against a sliding board ──
+--
+-- Seed 1's deck line plays all forty-eight slides for 38 points; seed 15's
+-- line locks the board after forty-two slides for 28. The expected numbers
+-- are arithmetic from the seed, not values read back.
+select rls_test.ok(
+  (select r.outcome = 'recorded'
+      and r.score = 272
+      and r.tiles_placed = 48
+     from public.complete_color_merge_run(
+       '99999999-1111-4111-8111-999999999999'::uuid, :color_merge_deck, 272, 45000) r),
+  'a full Color Merge deck is recorded: forty-eight slides, 272 points'
+);
+select rls_test.says(
+  format($$public.complete_color_merge_run('99999999-1111-4111-8111-999999999999'::uuid, %s, 272, 45000)$$, :'color_merge_deck'),
+  'duplicate', 'a retry of the same Color Merge run is safe to repeat'
+);
+select rls_test.says(
+  $$public.complete_color_merge_run('99999999-1111-4111-8111-999999999999'::uuid, array[2], 0, 45000)$$,
+  'closed', 'a closed Color Merge session does not accept a different run'
+);
+-- A board that locks ends the run before the deck does, and is recorded.
+select rls_test.ok(
+  (select r.outcome = 'recorded'
+      and r.score = 184
+      and r.tiles_placed = 42
+     from public.complete_color_merge_run(
+       '99999999-6666-4666-8666-999999999999'::uuid, :color_merge_locked, 184, 45000) r),
+  'a locked Color Merge board is recorded: forty-two slides, 184 points'
+);
+-- Refusals, all leaving the loss fixture open for the run that follows.
+select rls_test.says(
+  format($$public.complete_color_merge_run('99999999-2222-4222-8222-999999999999'::uuid, %s, 999, 45000)$$, :'color_merge_deck'),
+  'score_mismatch', 'a Color Merge score the replay does not produce is refused'
+);
+select rls_test.says_field(
+  format($$public.complete_color_merge_run('99999999-2222-4222-8222-999999999999'::uuid, %s, 999, 45000)$$, :'color_merge_deck'),
+  'score', '272', 'the Color Merge replay is the score, and it is reported back'
+);
+select rls_test.says(
+  format($$public.complete_color_merge_run('99999999-2222-4222-8222-999999999999'::uuid, %s, 0, 45000)$$, :'color_merge_locked'),
+  'invalid_actions', 'a Color Merge run that locks before the deck is partial'
+);
+select rls_test.says(
+  $$public.complete_color_merge_run('99999999-2222-4222-8222-999999999999'::uuid, array[2,4], 0, 45000)$$,
+  'invalid_actions', 'a direction past the board is impossible play'
+);
+select rls_test.says(
+  $$public.complete_color_merge_run('99999999-2222-4222-8222-999999999999'::uuid, array[2,2], 0, 45000)$$,
+  'invalid_actions', 'a slide that cannot change the board is not a move'
+);
+select rls_test.raises(
+  $$select public.complete_color_merge_run('99999999-2222-4222-8222-999999999999'::uuid, array[null]::integer[], 0, 45000)$$,
+  '22023', 'a ragged Color Merge action list is a request error, not a scored run'
+);
+select rls_test.says(
+  $$public.complete_color_merge_run('99999999-5555-4555-8555-999999999999'::uuid, array[2], 0, 45000)$$,
+  'wrong_rules', 'a Color Merge session pinned to other rules is refused by its own verifier'
+);
+-- Play continues past the end of the deck only in a rejected submission.
+select rls_test.says(
+  format($$public.complete_color_merge_run('99999999-2222-4222-8222-999999999999'::uuid, %s || 2, 272, 45000)$$, :'color_merge_deck'),
+  'invalid_actions', 'a Color Merge run cannot slide after its deck ended'
+);
+-- The loss fixture is then played to its own end and recorded.
+select rls_test.ok(
+  (select r.outcome = 'recorded' and r.score = 272 and r.tiles_placed = 48
+     from public.complete_color_merge_run(
+       '99999999-2222-4222-8222-999999999999'::uuid, :color_merge_deck, 272, 45000) r),
+  'a legal Color Merge deck is recorded, and its loss is included in the slides'
+);
+select rls_test.ok(
+  (select verified_score = 272 from public.game_sessions where id = '99999999-2222-4222-8222-999999999999'),
+  'a player can read the verified score on their own Color Merge session'
+);
+select rls_test.ok(
+  (select rank = 1 and score = 272 from public.game_standing('fixture-color-merge', '11111111-1111-4111-8111-111111111111', null)),
+  'your Color Merge standing is your recorded best at its real rank'
 );
 
 -- Starting replaces your own open run, so a player cannot accumulate runs and

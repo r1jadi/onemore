@@ -36,7 +36,11 @@ const (
 	// and one restored board.
 	oneMoveRules = "one-move@1"
 	oneMoveRun   = "[7,0]"
-	testUserID   = "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f"
+	// Seed 1 opens with two shade-1 tiles side by side: sliding left merges them
+	// for four points, and the next slide deals another tile.
+	colorMergeRules = "color-merge@1"
+	colorMergeRun   = "[3,2]"
+	testUserID      = "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f"
 )
 
 // token signs a token the platform verifier accepts, with the given subject.
@@ -678,6 +682,63 @@ func TestCompleteSessionRejectsAOneMoveCellPastTheBoard(t *testing.T) {
 	// A twenty-sixth cell is malformed input, so it must never start a replay.
 	if backend.runCalls != 0 {
 		t.Fatal("a cell outside the board reached the verifier")
+	}
+}
+
+func TestCompleteSessionVerifiesAColorMergeRun(t *testing.T) {
+	backend := testBackend()
+	started := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
+	backend.result = supabaseplay.Result{
+		Outcome:      "recorded",
+		SessionID:    sessionID,
+		GameSlug:     "color-merge",
+		Score:        ptr(int64(4)),
+		TilesPlaced:  ptr(2),
+		DurationMS:   ptr(12000),
+		Ranked:       ptr(true),
+		RecordedAt:   &started,
+		PersonalBest: ptr(int64(4)),
+		Rank:         ptr(int64(1)),
+	}
+	server := testServer(t, backend)
+
+	status, body := post(t, server,
+		"/api/v1/sessions/"+sessionID+"/complete",
+		completeBodyRules(colorMergeRules, "4", "12000", colorMergeRun), "")
+
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%#v)", status, body)
+	}
+	if body["score"] != float64(4) || body["gameSlug"] != "color-merge" {
+		t.Fatalf("body = %#v, want the verified Color Merge run", body)
+	}
+	// The pinned version travels through untouched: it is what selects the
+	// verifier behind the handler.
+	if backend.lastRun.RulesVersion != colorMergeRules {
+		t.Fatalf("rules version = %q, want the run's pinned color-merge@1", backend.lastRun.RulesVersion)
+	}
+	if len(backend.lastRun.Actions) != 2 || backend.lastRun.Actions[0] != 3 {
+		t.Fatalf("actions = %v, want the submitted directions", backend.lastRun.Actions)
+	}
+}
+
+func TestCompleteSessionRejectsAColorMergeDirectionPastTheBoard(t *testing.T) {
+	backend := testBackend()
+	server := testServer(t, backend)
+
+	status, body := post(t, server,
+		"/api/v1/sessions/"+sessionID+"/complete",
+		completeBodyRules(colorMergeRules, "0", "45000", "[4]"), "")
+
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (%#v)", status, body)
+	}
+	if errorCode(t, body) != "bad_request" {
+		t.Fatalf("code = %s, want bad_request", errorCode(t, body))
+	}
+	// A fifth direction is malformed input, so it must never start a replay.
+	if backend.runCalls != 0 {
+		t.Fatal("a direction outside the board reached the verifier")
 	}
 }
 

@@ -256,6 +256,26 @@ func TestCompleteRunRoutesOneMoveRulesToOneMoveVerifier(t *testing.T) {
 	}
 }
 
+func TestCompleteRunRoutesColorMergeRulesToColorMergeVerifier(t *testing.T) {
+	rec := newRecorder(t, http.StatusOK, resultRow)
+
+	if _, err := rec.client(t).CompleteRun(context.Background(), CompleteRequest{
+		SessionID:    "cccccccc-1111-4111-8111-cccccccccccc",
+		RulesVersion: "color-merge@1",
+		Actions:      []int32{3, 2},
+		Score:        4,
+		DurationMS:   12000,
+	}); err != nil {
+		t.Fatalf("CompleteRun: %v", err)
+	}
+
+	// The pinned version selects the replay: a Color Merge run is verified by
+	// complete_color_merge_run, not by any of the other four.
+	if rec.path != "/rest/v1/rpc/complete_color_merge_run" {
+		t.Fatalf("path = %s, want the Color Merge verifier function", rec.path)
+	}
+}
+
 func TestCompleteRunKeepsStack10RulesOnStackVerifier(t *testing.T) {
 	rec := newRecorder(t, http.StatusOK, resultRow)
 
