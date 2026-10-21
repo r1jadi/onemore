@@ -276,6 +276,26 @@ func TestCompleteRunRoutesColorMergeRulesToColorMergeVerifier(t *testing.T) {
 	}
 }
 
+func TestCompleteRunRoutesDontTouchRulesToDontTouchVerifier(t *testing.T) {
+	rec := newRecorder(t, http.StatusOK, resultRow)
+
+	if _, err := rec.client(t).CompleteRun(context.Background(), CompleteRequest{
+		SessionID:    "cccccccc-1111-4111-8111-cccccccccccc",
+		RulesVersion: "dont-touch@1",
+		Actions:      []int32{2, 0},
+		Score:        10,
+		DurationMS:   21000,
+	}); err != nil {
+		t.Fatalf("CompleteRun: %v", err)
+	}
+
+	// The pinned version selects the replay: a Don't Touch the Black run is
+	// verified by complete_dont_touch_run, not by any of the other five.
+	if rec.path != "/rest/v1/rpc/complete_dont_touch_run" {
+		t.Fatalf("path = %s, want the Don't Touch the Black verifier function", rec.path)
+	}
+}
+
 func TestCompleteRunKeepsStack10RulesOnStackVerifier(t *testing.T) {
 	rec := newRecorder(t, http.StatusOK, resultRow)
 

@@ -20,13 +20,16 @@ This is the least obvious thing about the service, so it is worth stating plainl
 
 The rules live in the database, in `public.complete_stack10_run`,
 `public.complete_chain_run`, `public.complete_memory_flash_run`,
-`public.complete_one_move_run` and `public.complete_color_merge_run`
+`public.complete_one_move_run`, `public.complete_color_merge_run` and
+`public.complete_dont_touch_run`
 ([migration](../../supabase/migrations/20261013120000_play_sessions.sql),
 [`20261014120000_chain_sessions.sql`](../../supabase/migrations/20261014120000_chain_sessions.sql),
 [`20261020120000_memory_flash_sessions.sql`](../../supabase/migrations/20261020120000_memory_flash_sessions.sql),
 [`20261021120000_one_move_sessions.sql`](../../supabase/migrations/20261021120000_one_move_sessions.sql)
 and
-[`20261022120000_color_merge_sessions.sql`](../../supabase/migrations/20261022120000_color_merge_sessions.sql)).
+[`20261022120000_color_merge_sessions.sql`](../../supabase/migrations/20261022120000_color_merge_sessions.sql)
+and
+[`20261023120000_dont_touch_sessions.sql`](../../supabase/migrations/20261023120000_dont_touch_sessions.sql)).
 The pinned rules version selects which one replays a submission. Each function
 replays the submitted action list from the session's seed, derives the
 score, compares it with the claim, and only then closes the session and writes
@@ -35,7 +38,7 @@ the score row. This service:
 - validates the request's _shape_ — a slug, a rules version, an action list within
   the board the rules version plays on (four positions for Stack 10, Chain and
   Color Merge's directions, sixteen cells for Memory Flash, twenty-five for One
-  Move), a positive duration —
+  Move, sixty for Don't Touch the Black), a positive duration —
   so a malformed request is a `400` that names the field rather than a `500` from a
   function;
 - calls the database **with the caller's own access token**, so `auth.uid()` inside

@@ -40,7 +40,11 @@ const (
 	// for four points, and the next slide deals another tile.
 	colorMergeRules = "color-merge@1"
 	colorMergeRun   = "[3,2]"
-	testUserID      = "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f"
+	// Seed 1's opening row is black, black, white: clearing the white and then
+	// touching the black scores ten and ends the run with both taps submitted.
+	dontTouchRules = "dont-touch@1"
+	dontTouchRun   = "[2,0]"
+	testUserID     = "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f"
 )
 
 // token signs a token the platform verifier accepts, with the given subject.
@@ -739,6 +743,63 @@ func TestCompleteSessionRejectsAColorMergeDirectionPastTheBoard(t *testing.T) {
 	// A fifth direction is malformed input, so it must never start a replay.
 	if backend.runCalls != 0 {
 		t.Fatal("a direction outside the board reached the verifier")
+	}
+}
+
+func TestCompleteSessionVerifiesADontTouchRun(t *testing.T) {
+	backend := testBackend()
+	started := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
+	backend.result = supabaseplay.Result{
+		Outcome:      "recorded",
+		SessionID:    sessionID,
+		GameSlug:     "dont-touch-the-black",
+		Score:        ptr(int64(10)),
+		TilesPlaced:  ptr(2),
+		DurationMS:   ptr(21000),
+		Ranked:       ptr(true),
+		RecordedAt:   &started,
+		PersonalBest: ptr(int64(10)),
+		Rank:         ptr(int64(1)),
+	}
+	server := testServer(t, backend)
+
+	status, body := post(t, server,
+		"/api/v1/sessions/"+sessionID+"/complete",
+		completeBodyRules(dontTouchRules, "10", "21000", dontTouchRun), "")
+
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%#v)", status, body)
+	}
+	if body["score"] != float64(10) || body["gameSlug"] != "dont-touch-the-black" {
+		t.Fatalf("body = %#v, want the verified Don't Touch the Black run", body)
+	}
+	// The pinned version travels through untouched: it is what selects the
+	// verifier behind the handler.
+	if backend.lastRun.RulesVersion != dontTouchRules {
+		t.Fatalf("rules version = %q, want the run's pinned dont-touch@1", backend.lastRun.RulesVersion)
+	}
+	if len(backend.lastRun.Actions) != 2 || backend.lastRun.Actions[1] != 0 {
+		t.Fatalf("actions = %v, want the submitted taps", backend.lastRun.Actions)
+	}
+}
+
+func TestCompleteSessionRejectsADontTouchCellPastTheDeck(t *testing.T) {
+	backend := testBackend()
+	server := testServer(t, backend)
+
+	status, body := post(t, server,
+		"/api/v1/sessions/"+sessionID+"/complete",
+		completeBodyRules(dontTouchRules, "0", "45000", "[60]"), "")
+
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (%#v)", status, body)
+	}
+	if errorCode(t, body) != "bad_request" {
+		t.Fatalf("code = %s, want bad_request", errorCode(t, body))
+	}
+	// A sixty-first cell is malformed input, so it must never start a replay.
+	if backend.runCalls != 0 {
+		t.Fatal("a cell outside the deck reached the verifier")
 	}
 }
 

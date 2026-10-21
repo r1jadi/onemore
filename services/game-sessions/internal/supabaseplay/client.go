@@ -230,9 +230,10 @@ func (c *Client) CompleteRun(ctx context.Context, request CompleteRequest) (Resu
 // completeFunction names the verifier for a pinned rules version. The version
 // selects the replay: a Chain run is verified by complete_chain_run, a Memory
 // Flash run by complete_memory_flash_run, a One Move run by
-// complete_one_move_run, a Color Merge run by complete_color_merge_run, and
-// anything else by complete_stack10_run — which answers wrong_rules for a version
-// it does not implement, so an unknown version is still a refusal, never a pass.
+// complete_one_move_run, a Color Merge run by complete_color_merge_run, a Don't
+// Touch the Black run by complete_dont_touch_run, and anything else by
+// complete_stack10_run — which answers wrong_rules for a version it does not
+// implement, so an unknown version is still a refusal, never a pass.
 func completeFunction(rulesVersion string) string {
 	switch {
 	case strings.HasPrefix(rulesVersion, "chain@"):
@@ -243,6 +244,8 @@ func completeFunction(rulesVersion string) string {
 		return "complete_one_move_run"
 	case strings.HasPrefix(rulesVersion, "color-merge@"):
 		return "complete_color_merge_run"
+	case strings.HasPrefix(rulesVersion, "dont-touch@"):
+		return "complete_dont_touch_run"
 	default:
 		return "complete_stack10_run"
 	}

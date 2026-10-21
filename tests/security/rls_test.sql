@@ -1298,6 +1298,11 @@ reset role;
 -- with 272 points; seed 15's line locks the board after forty-two slides for 184.
 \set color_merge_deck 'array[3,1,3,2,2,2,2,2,2,2,2,2,2,2,2,2,3,2,2,2,3,2,2,2,2,2,3,2,3,2,2,2,2,2,2,2,2,3,2,3,3,2,2,2,2,2,2,2]'
 \set color_merge_locked 'array[1,1,1,1,1,3,1,3,1,1,3,1,1,3,1,1,1,1,1,1,1,1,1,3,1,1,1,3,1,1,3,0,1,3,1,1,3,1,0,1,0,1]'
+-- Seed 1's Don't Touch the Black deck: the forty-one whites in board order, and
+-- the nine whites of rows one to five followed by the black tile at cell 15.
+-- The perfect line scores 410; the cautious line scores 90.
+\set dont_touch_perfect 'array[2,3,6,7,9,10,12,13,14,16,17,18,19,20,21,22,23,24,25,27,29,30,31,32,33,34,36,37,38,39,40,41,42,43,45,51,52,54,55,57,59]'
+\set dont_touch_loss 'array[2,3,6,7,9,10,12,13,14,15]'
 
 -- A published, playable game — the only kind a run can be started for — plus one
 -- that stays unpublished, so the refusal path has a subject. The sessions below
@@ -1337,6 +1342,12 @@ reset role;
 \set color_merge_guest_session  '99999999-4444-4444-8444-999999999999'
 \set color_merge_old_session    '99999999-5555-4555-8555-999999999999'
 \set color_merge_locked_session '99999999-6666-4666-8666-999999999999'
+\set dont_touch_game          'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+\set dont_touch_session       '77777777-1111-4111-8111-777777777777'
+\set dont_touch_loss_session  '77777777-2222-4222-8222-777777777777'
+\set dont_touch_guest_session '77777777-4444-4444-8444-777777777777'
+\set dont_touch_old_session   '77777777-5555-4555-8555-777777777777'
+\set dont_touch_empty_session '77777777-6666-4666-8666-777777777777'
 
 insert into public.games (id, owner_id, slug, title, status, published_at, runtime, playable, category_id) values
   (:'runnable_game', :'alice', 'fixture-runnable', 'Fixture Runnable', 'published', now(), 'stack-10', true,
@@ -1349,7 +1360,9 @@ insert into public.games (id, owner_id, slug, title, status, published_at, runti
   (:'one_move_game',  :'alice', 'fixture-one-move', 'Fixture One Move', 'published', now(), 'one-move', true,
    (select id from public.categories where slug = 'logic')),
   (:'color_merge_game', :'alice', 'fixture-color-merge', 'Fixture Color Merge', 'published', now(), 'color-merge', true,
-   (select id from public.categories where slug = 'puzzle'));
+   (select id from public.categories where slug = 'puzzle')),
+  (:'dont_touch_game', :'alice', 'fixture-dont-touch', 'Fixture Don''t Touch the Black', 'published', now(), 'dont-touch', true,
+   (select id from public.categories where slug = 'arcade'));
 
 -- Runs that have been open for five minutes, which is what makes a claimed
 -- 45-second duration credible: a run cannot have taken longer than the session
@@ -1385,7 +1398,15 @@ insert into public.game_sessions (id, game_id, user_id, seed, rules_version, sta
   (:'color_merge_loss_session',   :'color_merge_game', :'alice', 1,  'color-merge@1', now() - interval '5 minutes', now() + interval '2 hours', null),
   (:'color_merge_guest_session',  :'color_merge_game', null,     1,  'color-merge@1', now() - interval '5 minutes', now() + interval '2 hours', null),
   (:'color_merge_old_session',    :'color_merge_game', :'alice', 1,  'color-merge@0', now() - interval '5 minutes', now() + interval '2 hours', null),
-  (:'color_merge_locked_session', :'color_merge_game', :'alice', 15, 'color-merge@1', now() - interval '5 minutes', now() + interval '2 hours', null);
+  (:'color_merge_locked_session', :'color_merge_game', :'alice', 15, 'color-merge@1', now() - interval '5 minutes', now() + interval '2 hours', null),
+  -- Don't Touch the Black fixtures. Seed 1's deck opens black, black, white; its
+  -- forty-one whites are the perfect line, and cell 15 is the black tile that
+  -- ends the cautious one.
+  (:'dont_touch_session',       :'dont_touch_game', :'alice', 1, 'dont-touch@1', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'dont_touch_loss_session',  :'dont_touch_game', :'alice', 1, 'dont-touch@1', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'dont_touch_guest_session', :'dont_touch_game', null,     1, 'dont-touch@1', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'dont_touch_old_session',   :'dont_touch_game', :'alice', 1, 'dont-touch@0', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'dont_touch_empty_session', :'dont_touch_game', :'alice', 1, 'dont-touch@1', now() - interval '5 minutes', now() + interval '2 hours', null);
 
 -- The generator, asserted directly: seed 1's twelve winning cells are the ones
 -- the client engine computes and the ones the verifier replays. A drift here is
@@ -1430,6 +1451,37 @@ select rls_test.ok(
     = array[2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0]::integer[]
   and public.color_merge_gain(array[1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0]::integer[], 3) = 8,
   'each Color Merge tile merges once per slide, and the gain is the merge'
+);
+-- The Don't Touch the Black generator, asserted directly: the whole sixty-cell
+-- deck is the one the client engine computes and the verifier replays. A drift
+-- here is a drift in both copies, and every honest run would be refused.
+select rls_test.ok(
+  public.dont_touch_rows() = 20
+  and public.dont_touch_lanes() = 3
+  and public.dont_touch_cells() = 60
+  and public.dont_touch_tile_score() = 10,
+  'a Don''t Touch the Black deck is twenty rows of three lanes, ten points a white'
+);
+select rls_test.ok(
+  (select string_agg(case when public.dont_touch_black(1, cell) then 'B' else '.' end, '' order by cell)
+     from generate_series(0, public.dont_touch_cells() - 1) as cell)
+  = 'BB..BB..B..B...B..........B.B......B........B.BBBBB..B..B.B.',
+  'the generator colours seed 1''s sixty cells'
+);
+select rls_test.ok(
+  (select string_agg(case when public.dont_touch_black(9223372036854775807, cell) then 'B' else '.' end, '' order by cell)
+     from generate_series(0, public.dont_touch_cells() - 1) as cell)
+  = '.....B.B....BB.BB.......B..B..B..B................B......BB.',
+  'the generator colours a full-width seed exactly'
+);
+select rls_test.ok(
+  public.dont_touch_black(1, 0) and public.dont_touch_black(1, 15)
+  and not public.dont_touch_black(1, 2) and not public.dont_touch_black(1, 59),
+  'a cell is the colour the deck says, black and white both'
+);
+select rls_test.raises(
+  $$select public.dont_touch_black(1, 60)$$,
+  '22023', 'a sixty-first cell is not on the deck'
 );
 
 select set_config('request.jwt.claims', '{"role":"anon"}', true);
@@ -1496,11 +1548,11 @@ select rls_test.visible(
 );
 -- `fixture-%` are this suite's own playable games (the ones the refusal paths
 -- need), so the claim is about the catalogue: of the games this repository
--- ships, only the four with runtimes are playable.
+-- ships, only the six with runtimes are playable.
 select rls_test.visible(
   $$select 1 from public.games
-     where slug not in ('stack-10', 'dont-break-the-chain', 'memory-flash', 'one-move', 'color-merge') and slug not like 'fixture-%' and (playable or runtime is not null)$$,
-  0, 'no shipped game besides the four runtimes is marked playable'
+     where slug not in ('stack-10', 'dont-break-the-chain', 'memory-flash', 'one-move', 'color-merge', 'dont-touch-the-black') and slug not like 'fixture-%' and (playable or runtime is not null)$$,
+  0, 'no shipped game besides the six runtimes is marked playable'
 );
 select rls_test.says_field(
   $$public.start_game_session('stack-10', 'stack-10@1', 'test/1.0')$$,
@@ -1634,6 +1686,44 @@ select rls_test.says(
   $$public.start_game_session('fixture-runnable', 'color-merge@1', 'test/1.0')$$,
   'unsupported_runtime', 'a Stack 10 game cannot start a Color Merge run'
 );
+-- The shipped Don't Touch the Black game, same shape: playable, naming its
+-- runtime, issuing a run whose move count is the deck's cells.
+select rls_test.visible(
+  $$select 1 from public.games where slug = 'dont-touch-the-black' and playable and runtime = 'dont-touch'$$,
+  1, 'the shipped Don''t Touch the Black game is playable and names its runtime'
+);
+select rls_test.says_field(
+  $$public.start_game_session('dont-touch-the-black', 'dont-touch@1', 'test/1.0')$$,
+  'game_slug', 'dont-touch-the-black', 'the shipped Don''t Touch the Black game issues a run like any other'
+);
+select rls_test.says_field(
+  $$public.start_game_session('dont-touch-the-black', 'dont-touch@1', 'test/1.0')$$,
+  'tile_count', '60', 'a Don''t Touch the Black session counts the cells a run can hold'
+);
+-- The gate knows the sixth pair too, and refuses a game paired with another
+-- game's rules.
+select rls_test.says(
+  $$public.start_game_session('fixture-dont-touch', 'dont-touch@1', 'test/1.0')$$,
+  'started', 'a guest can start a Don''t Touch the Black run'
+);
+select rls_test.says(
+  $$public.start_game_session('fixture-dont-touch', 'color-merge@1', 'test/1.0')$$,
+  'unsupported_runtime', 'a Don''t Touch the Black game cannot start a Color Merge run'
+);
+select rls_test.says(
+  $$public.start_game_session('fixture-color-merge', 'dont-touch@1', 'test/1.0')$$,
+  'unsupported_runtime', 'a Color Merge game cannot start a Don''t Touch the Black run'
+);
+select rls_test.says(
+  $$public.start_game_session('fixture-runnable', 'dont-touch@1', 'test/1.0')$$,
+  'unsupported_runtime', 'a Stack 10 game cannot start a Don''t Touch the Black run'
+);
+-- The one catalogue game still waiting for its runtime stays unplayable: this
+-- flip ships one game, and the gate refuses the other by name.
+select rls_test.says(
+  $$public.start_game_session('7-second', 'dont-touch@1', 'test/1.0')$$,
+  'not_playable', '7 Second still cannot start a run: it has no runtime'
+);
 
 -- A guest run completes and is verified, and stays unranked: there is no score
 -- row for it, because `scores.user_id` is NOT NULL by design.
@@ -1700,6 +1790,20 @@ select rls_test.says(
 select rls_test.says_field(
   format($$public.complete_color_merge_run('99999999-4444-4444-8444-999999999999'::uuid, %s, 272, 45000)$$, :'color_merge_deck'),
   'ranked', 'false', 'a guest Color Merge run is never ranked'
+);
+-- A guest Don't Touch the Black run completes the same way: verified, recorded,
+-- unranked.
+select rls_test.says(
+  format($$public.complete_dont_touch_run('77777777-4444-4444-8444-777777777777'::uuid, %s, 410, 45000)$$, :'dont_touch_perfect'),
+  'recorded', 'a guest Don''t Touch the Black run is replayed and recorded'
+);
+select rls_test.says(
+  format($$public.complete_dont_touch_run('77777777-4444-4444-8444-777777777777'::uuid, %s, 410, 45000)$$, :'dont_touch_perfect'),
+  'duplicate', 'a repeated guest Don''t Touch the Black submission is recognised, not recorded again'
+);
+select rls_test.says_field(
+  format($$public.complete_dont_touch_run('77777777-4444-4444-8444-777777777777'::uuid, %s, 410, 45000)$$, :'dont_touch_perfect'),
+  'ranked', 'false', 'a guest Don''t Touch the Black run is never ranked'
 );
 
 reset role;
@@ -2098,6 +2202,85 @@ select rls_test.ok(
 select rls_test.ok(
   (select rank = 1 and score = 272 from public.game_standing('fixture-color-merge', '11111111-1111-4111-8111-111111111111', null)),
   'your Color Merge standing is your recorded best at its real rank'
+);
+
+-- ── Don't Touch the Black: the same properties, replayed against a deck ──
+--
+-- Seed 1's perfect line clears all forty-one whites for 410 points; the
+-- cautious line clears nine whites and then touches the black tile at cell 15
+-- for 90. The expected numbers are arithmetic from the seed, not values read
+-- back.
+select rls_test.ok(
+  (select r.outcome = 'recorded'
+      and r.score = 410
+      and r.cleared_columns = 41
+      and r.tiles_placed = 41
+     from public.complete_dont_touch_run(
+       '77777777-1111-4111-8111-777777777777'::uuid, :dont_touch_perfect, 410, 45000) r),
+  'a perfect Don''t Touch the Black deck is recorded: forty-one whites, 410 points'
+);
+select rls_test.says(
+  format($$public.complete_dont_touch_run('77777777-1111-4111-8111-777777777777'::uuid, %s, 410, 45000)$$, :'dont_touch_perfect'),
+  'duplicate', 'a retry of the same Don''t Touch the Black run is safe to repeat'
+);
+select rls_test.says(
+  $$public.complete_dont_touch_run('77777777-1111-4111-8111-777777777777'::uuid, array[2], 10, 45000)$$,
+  'closed', 'a closed Don''t Touch the Black session does not accept a different run'
+);
+-- Refusals, all leaving the loss fixture open for the run that follows.
+select rls_test.says(
+  format($$public.complete_dont_touch_run('77777777-2222-4222-8222-777777777777'::uuid, %s, 999, 45000)$$, :'dont_touch_loss'),
+  'score_mismatch', 'a Don''t Touch the Black score the replay does not produce is refused'
+);
+select rls_test.says_field(
+  format($$public.complete_dont_touch_run('77777777-2222-4222-8222-777777777777'::uuid, %s, 999, 45000)$$, :'dont_touch_loss'),
+  'score', '90', 'the Don''t Touch the Black replay is the score, and it is reported back'
+);
+select rls_test.says(
+  $$public.complete_dont_touch_run('77777777-2222-4222-8222-777777777777'::uuid, array[60], 0, 45000)$$,
+  'invalid_actions', 'a cell past the deck is impossible play'
+);
+select rls_test.says(
+  $$public.complete_dont_touch_run('77777777-2222-4222-8222-777777777777'::uuid, array[2,2], 20, 45000)$$,
+  'invalid_actions', 'a tile cleared twice is not two taps'
+);
+-- A black tile ends the run, so nothing may follow it in the same submission.
+select rls_test.says(
+  format($$public.complete_dont_touch_run('77777777-2222-4222-8222-777777777777'::uuid, %s || 16, 100, 45000)$$, :'dont_touch_loss'),
+  'invalid_actions', 'a Don''t Touch the Black run cannot continue after the black tile'
+);
+select rls_test.raises(
+  $$select public.complete_dont_touch_run('77777777-2222-4222-8222-777777777777'::uuid, array[null]::integer[], 0, 45000)$$,
+  '22023', 'a ragged Don''t Touch the Black action list is a request error, not a scored run'
+);
+select rls_test.says(
+  $$public.complete_dont_touch_run('77777777-5555-4555-8555-777777777777'::uuid, array[2], 0, 45000)$$,
+  'wrong_rules', 'a Don''t Touch the Black session pinned to other rules is refused by its own verifier'
+);
+-- The loss fixture is then played to its own end and recorded: nine whites are
+-- scored, the black tile is the ending, and both are submitted.
+select rls_test.ok(
+  (select r.outcome = 'recorded' and r.score = 90 and r.tiles_placed = 10
+     from public.complete_dont_touch_run(
+       '77777777-2222-4222-8222-777777777777'::uuid, :dont_touch_loss, 90, 45000) r),
+  'a legal Don''t Touch the Black run is recorded, and its black tap is included'
+);
+-- Missing every row is a real run: no black tile, no whites, zero points. The
+-- verifier records it rather than calling it partial, because whether the deck
+-- passed is the conveyor's fact, not the action list's.
+select rls_test.ok(
+  (select r.outcome = 'recorded' and r.score = 0 and r.tiles_placed = 0
+     from public.complete_dont_touch_run(
+       '77777777-6666-4666-8666-777777777777'::uuid, array[]::integer[], 0, 45000) r),
+  'a Don''t Touch the Black run with no taps is recorded at zero'
+);
+select rls_test.ok(
+  (select verified_score = 410 from public.game_sessions where id = '77777777-1111-4111-8111-777777777777'),
+  'a player can read the verified score on their own Don''t Touch the Black session'
+);
+select rls_test.ok(
+  (select rank = 1 and score = 410 from public.game_standing('fixture-dont-touch', '11111111-1111-4111-8111-111111111111', null)),
+  'your Don''t Touch the Black standing is your recorded best at its real rank'
 );
 
 -- Starting replaces your own open run, so a player cannot accumulate runs and

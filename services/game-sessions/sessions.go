@@ -7,7 +7,8 @@
 //     `public.start_game_session` picks the seed, and the verifier for the run's
 //     pinned rules (`complete_stack10_run`, `complete_chain_run`,
 //     `complete_memory_flash_run`, `complete_one_move_run`,
-//     `complete_color_merge_run`) replays the submitted actions, derives the
+//     `complete_color_merge_run`, `complete_dont_touch_run`) replays the
+//     submitted actions, derives the
 //     score and writes the ledger. This service validates
 //     the request shape, maps the verifier's outcome onto an HTTP answer, and
 //     never sees a score it can change. That is why there is no service_role key
@@ -53,19 +54,22 @@ const (
 	maxBodyBytes = 8 * 1024
 	// maxActions bounds the moves in a run: sixty tiles for Stack 10,
 	// fifty-five taps for a perfect Chain or Memory Flash run, twelve taps for a
-	// perfect One Move run, forty-eight slides for Color Merge. The verifier
-	// enforces its own game's count too; this only keeps an absurd body from
-	// reaching the database at all.
+	// perfect One Move run, forty-eight slides for Color Merge, and sixty cell
+	// taps for a complete Don't Touch the Black deck. The verifier enforces its
+	// own game's count too; this only keeps an absurd body from reaching the
+	// database at all.
 	maxActions = 60
 	// The bounds a move has to fit. Stack 10 addresses a column and Chain a pad,
 	// both 0 to 3; Color Merge addresses one of its four directions, also 0 to 3;
 	// Memory Flash addresses one of the sixteen cells of its 4×4 board; One Move
-	// addresses one of the twenty-five cells of its largest 5×5 board. The pinned
-	// rules version picks the bound, because the games live behind one endpoint.
+	// addresses one of the twenty-five cells of its largest 5×5 board; Don't
+	// Touch the Black addresses the sixty cells of its deck. The pinned rules
+	// version picks the bound, because the games live behind one endpoint.
 	stackChainPositions  = 4
 	colorMergeDirections = 4
 	memoryFlashCells     = 16
 	oneMoveCells         = 25
+	dontTouchCells       = 60
 )
 
 // Patterns mirror the database constraints, so a bad request is a 400 that names
@@ -377,6 +381,8 @@ func boardSize(rulesVersion string) int {
 		return oneMoveCells
 	case strings.HasPrefix(rulesVersion, "color-merge@"):
 		return colorMergeDirections
+	case strings.HasPrefix(rulesVersion, "dont-touch@"):
+		return dontTouchCells
 	default:
 		return stackChainPositions
 	}

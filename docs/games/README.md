@@ -3,10 +3,10 @@
 How OneMore's games work: the rules, who is allowed to decide a score, and how a
 game earns the right to be called playable.
 
-Five games are implemented today: **Stack 10**, **Chain** (Don't Break the
-Chain), **Memory Flash**, **One Move** and **Color Merge**. The other two
-catalogue records are published but not playable — `playable: false`,
-`runtime: null` — and no screen offers to start them.
+Six games are implemented today: **Stack 10**, **Chain** (Don't Break the
+Chain), **Memory Flash**, **One Move**, **Color Merge** and **Don't Touch the
+Black**. The one remaining catalogue record (7 Second) is published but not
+playable — `playable: false`, `runtime: null` — and no screen offers to start it.
 
 ## Stack 10
 
@@ -643,3 +643,124 @@ drifts, one of the two suites fails.
    This is the vector that pins the lock ending: the run stops before the deck is
    empty, and the verifier must record it rather than call it partial. Asserted in
    both suites.
+
+## Don't Touch the Black
+
+Rows of tiles rise to a line. Tap the white ones; touch a black one and the run is
+over. A run is one pass of a **twenty-row deck**, and every row is faster than the
+one before it.
+
+### The board
+
+| Thing   | Value                                                |
+| ------- | ---------------------------------------------------- |
+| Rows    | 20, each three lanes wide                            |
+| Cells   | 60 per deck — one tap per cell, at most              |
+| Tile    | White (safe, 10 points) or black (ends the run)      |
+| Rules   | `dont-touch@1`                                       |
+| Runtime | `dont-touch` (the catalogue's `games.runtime` value) |
+
+A cell is addressed by its index in the deck, in board order: row one's lanes are
+cells 0–2, row two's are 3–5, and so on. That index is the move — no column of the
+UI ever reaches the verifier.
+
+### The deck
+
+The colours are not random at play time: they are a function of the run's seed,
+which the **server** chooses when it issues the session. The client must deal
+exactly the same deck or its submission is refused, so the generator is written out
+in full:
+
+```
+state₀ = ((seed mod 2³²) + 2³²) mod 2³²        // the seed is a bigint, reduced to 32 bits
+if state₀ = 0 then state₀ = 2654435769         // 0x9E3779B9: a zero state would be degenerate
+stateₙ = (stateₙ₋₁ × 1664525 + 1013904223) mod 2³²
+
+// cell k, 0-based: advance k + 1 times
+black(k) = ((state >> 16) mod 4) = 0
+```
+
+The colour is read from bits 16–17 rather than the low bits on purpose: this LCG's
+low bits cycle with a period of two to the power of the bit width, so a colour read
+from them would repeat a fixed pattern regardless of the seed. The higher bits have
+the full period, so each seed colours its own deck.
+
+The seed travels as a **decimal string** for the same reason the other games' do:
+it is a `bigint` column, and parsing it as a double would colour a different deck
+and reject every honest run.
+
+### A tap
+
+A tap is a **cell number**. A white tile clears and scores ten points; a black tile
+ends the run, and the tap that touched it is part of the submission so the verifier
+replays the ending rather than being told about it. A cell can be touched once, a
+cell off the deck is not a cell, and a tap after the black tile is impossible play.
+
+The rules deliberately do not know about time. The conveyor decides _when_ a row is
+in reach — that is the screen's job — while the submitted list says only which
+cells were touched. A run that never touched a black tile is legal however many
+whites it cleared: whether the player saw the whole deck is a fact about the
+conveyor's clock, not about the action list, and refusing a short run would refuse
+every honest player who let a row pass.
+
+### Scoring and endings
+
+Each white tile is worth **10 points**; a black tile is worth nothing, because its
+cost is the run. A run ends on the first black tap, or when the last row has passed
+the line. Both endings leave the score exactly as the cleared whites earned it.
+
+### Verified scores
+
+**The database decides the score**, under the same rules as the other five: see
+`supabase/migrations/20261023120000_dont_touch_sessions.sql` for the code.
+
+- `public.dont_touch_black(seed, cell)` is the colour of one cell. It is an
+  internal: execute is not granted to a client, because a player already holds the
+  seed their own deck grows from, and the verifier is the only caller.
+- `public.start_game_session(slug, rules, client)` issues the run with the seed,
+  the pinned version and the expiry. Its gate is a pair — (`stack-10`,
+  `stack-10@1`), (`chain`, `chain@1`), (`memory-flash`, `memory-flash@1`),
+  (`one-move`, `one-move@1`), (`color-merge`, `color-merge@1`) or (`dont-touch`,
+  `dont-touch@1`) — and anything else is `unsupported_runtime`. A Don't Touch the
+  Black session's `tile_count` is 60: the field counts the moves a complete run can
+  hold, and its moves are cell taps.
+- `public.complete_dont_touch_run(session, actions, score, duration)` replays the
+  taps from the seed, derives the score, compares it with the claim, and only then
+  closes the session and records it. Its outcome vocabulary (`recorded`,
+  `duplicate`, `score_mismatch`, …) and its ledger behaviour are identical to the
+  other five verifiers, and the Go service maps them onto HTTP the same way —
+  routing at the verifier the pinned rules version names and accepting cells 0–59.
+
+A guest can play. Their run is verified and closed exactly like a signed-in
+player's, and it is never ranked.
+
+### Test vectors
+
+Each vector is asserted by both the SQL suite and the client engine; if either side
+drifts, one of the two suites fails.
+
+1. **Seed 1's deck** — sixty cells, `B` for black and `.` for white:
+
+   ```
+   BB..BB..B..B...B..........B.B......B........B.BBBBB..B..B.B.
+   ```
+
+   Nineteen of the sixty cells are black, so a careful run has 41 whites to clear.
+   Asserted in
+   [`tests/security/rls_test.sql`](../../tests/security/rls_test.sql) and in
+   [`src/lib/games/dont-touch.test.ts`](../../src/lib/games/dont-touch.test.ts).
+
+2. **Seed 1's perfect deck** — every white cell, in board order:
+   `2,3,6,7,9,10,12,13,14,16,…`, forty-one taps. It scores **410** and never
+   touches a black tile, which is the run that pins the deck ending. Asserted in
+   both suites.
+
+3. **Seed 1's cautious line** — the nine whites of rows one to five, then the black
+   tile at cell 15:
+
+   ```
+   2,3,6,7,9,10,12,13,14,15
+   ```
+
+   It scores **90**: the black tap is recorded as the ending rather than scored,
+   and the run is a complete submission. Asserted in both suites.
