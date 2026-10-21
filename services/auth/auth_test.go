@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -36,8 +37,14 @@ const testUserID = "3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f"
 type fakeBackend struct {
 	mu sync.Mutex
 
-	signUpResult     supabaseauth.Result
-	signUpErr        error
+	signUpResult      supabaseauth.Result
+	signUpErr         error
+	usernameAvailable bool
+	// usernameAnswers, when set, is consumed one answer per lookup, so a test
+	// can model a name that is available at the pre-flight check and taken by
+	// the time the insert runs.
+	usernameAnswers  []bool
+	usernameErr      error
 	signInResult     supabaseauth.Result
 	signInErr        error
 	refreshResult    supabaseauth.Result
@@ -49,19 +56,39 @@ type fakeBackend struct {
 	userErr          error
 	markOnboardedErr error
 
-	signInEmail   string
-	refreshTokens []string
-	signOutTokens []string
-	onboardedHits int
-	userHits      int
-	markHits      int
-	markedAt      []time.Time
+	signInEmail    string
+	signUpUsername string
+	signUpHits     int
+	usernameChecks []string
+	refreshTokens  []string
+	signOutTokens  []string
+	onboardedHits  int
+	userHits       int
+	markHits       int
+	markedAt       []time.Time
 }
 
-func (f *fakeBackend) SignUp(_ context.Context, _, _ string) (supabaseauth.Result, error) {
+func (f *fakeBackend) SignUp(_ context.Context, _, _, username string) (supabaseauth.Result, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.signUpHits++
+	f.signUpUsername = username
 	return f.signUpResult, f.signUpErr
+}
+
+func (f *fakeBackend) UsernameAvailable(_ context.Context, username string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.usernameChecks = append(f.usernameChecks, username)
+	if f.usernameErr != nil {
+		return false, f.usernameErr
+	}
+	if len(f.usernameAnswers) > 0 {
+		answer := f.usernameAnswers[0]
+		f.usernameAnswers = f.usernameAnswers[1:]
+		return answer, nil
+	}
+	return f.usernameAvailable, nil
 }
 
 func (f *fakeBackend) SignInWithPassword(_ context.Context, email, _ string) (supabaseauth.Result, error) {
@@ -118,6 +145,24 @@ func (f *fakeBackend) emailSeen() string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.signInEmail
+}
+
+func (f *fakeBackend) signupName() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.signUpUsername
+}
+
+func (f *fakeBackend) signupCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.signUpHits
+}
+
+func (f *fakeBackend) usernameLookups() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.usernameChecks...)
 }
 
 func (f *fakeBackend) refreshes() []string {
@@ -593,6 +638,218 @@ func TestSignUpMapsAnExistingAccountToConflict(t *testing.T) {
 		if message, _ := envelope["message"].(string); message != "An account with this email already exists. Please sign in instead." {
 			t.Errorf("%s: message = %q", supabaseCode, message)
 		}
+	}
+}
+
+// ── Sign-up usernames ───────────────────────────────────────────────────────
+
+func TestSignUpPersistsTheChosenUsername(t *testing.T) {
+	backend := &fakeBackend{
+		usernameAvailable: true,
+		signUpResult:      sessionResult("access-from-signup", "refresh-from-signup"),
+	}
+	h := newHarness(t, harnessOptions{backend: backend, withAuth: true})
+
+	response := h.do(t, http.MethodPost, SignUpPath,
+		`{"email":"player@example.com","password":"correct-horse-battery","username":"  Rijad  "}`, nil)
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", response.StatusCode)
+	}
+	response.Body.Close()
+
+	// Normalized once, in one place: the form, the API and the trigger all see
+	// the same lowercase spelling, which is what makes case-insensitive
+	// uniqueness real rather than a database detail the client can dodge.
+	if got := backend.signupName(); got != "rijad" {
+		t.Errorf("username sent to Supabase = %q, want rijad", got)
+	}
+	checks := backend.usernameLookups()
+	if len(checks) != 1 || checks[0] != "rijad" {
+		t.Errorf("availability lookups = %v, want one for rijad", checks)
+	}
+}
+
+func TestSignUpRejectsATakenUsernameBeforeCreatingAnAccount(t *testing.T) {
+	backend := &fakeBackend{usernameAvailable: false}
+	h := newHarness(t, harnessOptions{backend: backend, withAuth: true})
+
+	response := h.do(t, http.MethodPost, SignUpPath,
+		`{"email":"player@example.com","password":"correct-horse-battery","username":"rijad"}`, nil)
+	if response.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", response.StatusCode)
+	}
+
+	envelope := decode(t, response)["error"].(map[string]any)
+	if envelope["code"] != "conflict" {
+		t.Errorf("code = %v, want conflict", envelope["code"])
+	}
+	if envelope["message"] != "That username is taken. Choose another." {
+		t.Errorf("message = %v", envelope["message"])
+	}
+	details, _ := envelope["details"].([]any)
+	if len(details) == 0 {
+		t.Fatalf("the refusal names no field: %v", envelope)
+	}
+	detail := details[0].(map[string]any)
+	if detail["field"] != "username" || detail["rule"] != "taken" {
+		t.Errorf("detail = %v, want username/taken", detail)
+	}
+	// Nothing was created: the account insert is never attempted for a name the
+	// pre-flight check already refused.
+	if backend.signupCalls() != 0 {
+		t.Errorf("sign-up calls = %d, want none", backend.signupCalls())
+	}
+}
+
+func TestSignUpRejectsAnInvalidUsernameBeforeSupabase(t *testing.T) {
+	cases := map[string]struct {
+		username string
+		rule     string
+	}{
+		"too short":   {"ab", "length"},
+		"too long":    {"a234567890123456789012345", "length"},
+		"space":       {"rijad adil", "format"},
+		"hyphen":      {"rijad-adil", "format"},
+		"punctuation": {"rijad!", "format"},
+	}
+
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			backend := &fakeBackend{}
+			h := newHarness(t, harnessOptions{backend: backend, withAuth: true})
+
+			response := h.do(t, http.MethodPost, SignUpPath,
+				`{"email":"player@example.com","password":"correct-horse-battery","username":"`+testCase.username+`"}`, nil)
+			if response.StatusCode != http.StatusUnprocessableEntity {
+				t.Fatalf("status = %d, want 422", response.StatusCode)
+			}
+
+			envelope := decode(t, response)["error"].(map[string]any)
+			details, _ := envelope["details"].([]any)
+			if len(details) == 0 {
+				t.Fatalf("error has no details: %v", envelope)
+			}
+			detail := details[0].(map[string]any)
+			if detail["field"] != "username" || detail["rule"] != testCase.rule {
+				t.Errorf("detail = %v, want username/%s", detail, testCase.rule)
+			}
+			if len(backend.usernameLookups()) != 0 || backend.signupCalls() != 0 {
+				t.Error("an invalid username still reached Supabase")
+			}
+		})
+	}
+}
+
+func TestSignUpMapsALostUsernameRaceToAFieldConflict(t *testing.T) {
+	// The browser's check passed, then another registration claimed the name
+	// between that check and the insert. The database's unique index refuses the
+	// trigger's profile insert, which rolls the account back; the service
+	// re-reads the name and answers the same 409 the form already understands.
+	backend := &fakeBackend{
+		usernameAnswers: []bool{true, false},
+		signUpErr:       &supabaseauth.Error{Op: "sign-up", Status: http.StatusInternalServerError},
+	}
+	h := newHarness(t, harnessOptions{backend: backend, withAuth: true})
+
+	response := h.do(t, http.MethodPost, SignUpPath,
+		`{"email":"player@example.com","password":"correct-horse-battery","username":"rijad"}`, nil)
+	if response.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", response.StatusCode)
+	}
+	envelope := decode(t, response)["error"].(map[string]any)
+	if envelope["code"] != "conflict" {
+		t.Errorf("code = %v, want conflict", envelope["code"])
+	}
+	if backend.signupName() != "rijad" {
+		t.Errorf("username sent to Supabase = %q", backend.signupName())
+	}
+	if checks := backend.usernameLookups(); len(checks) != 2 {
+		t.Errorf("availability lookups = %v, want the pre-flight and the re-check", checks)
+	}
+}
+
+func TestSignUpDoesNotCreateAnAccountWhenAvailabilityCannotBeChecked(t *testing.T) {
+	backend := &fakeBackend{usernameErr: &supabaseauth.Error{Op: "username-available"}}
+	h := newHarness(t, harnessOptions{backend: backend, withAuth: true})
+
+	response := h.do(t, http.MethodPost, SignUpPath,
+		`{"email":"player@example.com","password":"correct-horse-battery","username":"rijad"}`, nil)
+	if response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", response.StatusCode)
+	}
+	envelope := decode(t, response)["error"].(map[string]any)
+	if envelope["message"] != "Couldn't check username availability. Try again." {
+		t.Errorf("message = %v", envelope["message"])
+	}
+	// Fail closed: an unanswered check is never permission to register.
+	if backend.signupCalls() != 0 {
+		t.Errorf("sign-up calls = %d, want none", backend.signupCalls())
+	}
+}
+
+func TestUsernameAvailabilityAnswersOnlyABoolean(t *testing.T) {
+	for _, available := range []bool{true, false} {
+		t.Run(map[bool]string{true: "available", false: "taken"}[available], func(t *testing.T) {
+			backend := &fakeBackend{usernameAvailable: available}
+			h := newHarness(t, harnessOptions{backend: backend, withAuth: true})
+
+			response := h.get(t, UsernameAvailablePath+"?username=Rijad", "")
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("status = %d, want 200", response.StatusCode)
+			}
+			if got := response.Header.Get("Cache-Control"); got != "no-store" {
+				t.Errorf("Cache-Control = %q, want no-store", got)
+			}
+			payload := decode(t, response)
+			if payload["username"] != "rijad" || payload["available"] != available {
+				t.Errorf("payload = %v, want the normalized name and %v", payload, available)
+			}
+			// Nothing beyond the answer: no id, display name or other profile row.
+			if len(payload) != 2 {
+				t.Errorf("payload carries more than availability: %v", payload)
+			}
+			checks := backend.usernameLookups()
+			if len(checks) != 1 || checks[0] != "rijad" {
+				t.Errorf("lookups = %v, want one normalized lookup", checks)
+			}
+		})
+	}
+}
+
+func TestUsernameAvailabilityRejectsAMalformedName(t *testing.T) {
+	cases := []string{"", "ab", "has space", "hyphen-name", strings.Repeat("a", 25)}
+	for _, username := range cases {
+		t.Run(username, func(t *testing.T) {
+			backend := &fakeBackend{usernameAvailable: true}
+			h := newHarness(t, harnessOptions{backend: backend, withAuth: true})
+
+			response := h.get(t, UsernameAvailablePath+"?username="+url.QueryEscape(username), "")
+			if response.StatusCode != http.StatusUnprocessableEntity {
+				t.Fatalf("status = %d, want 422", response.StatusCode)
+			}
+			envelope := decode(t, response)["error"].(map[string]any)
+			details, _ := envelope["details"].([]any)
+			if len(details) == 0 || details[0].(map[string]any)["field"] != "username" {
+				t.Errorf("the refusal does not name the username field: %v", envelope)
+			}
+			if len(backend.usernameLookups()) != 0 {
+				t.Error("a malformed username still reached Supabase")
+			}
+		})
+	}
+}
+
+func TestUsernameAvailabilityReportsAFailedLookupWithoutCallingItAvailable(t *testing.T) {
+	backend := &fakeBackend{usernameAvailable: true, usernameErr: &supabaseauth.Error{Op: "username-available"}}
+	h := newHarness(t, harnessOptions{backend: backend, withAuth: true})
+
+	response := h.get(t, UsernameAvailablePath+"?username=rijad", "")
+	if response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", response.StatusCode)
+	}
+	envelope := decode(t, response)["error"].(map[string]any)
+	if envelope["message"] != "Couldn't check username availability. Try again." {
+		t.Errorf("message = %v", envelope["message"])
 	}
 }
 

@@ -213,6 +213,47 @@ select rls_test.ok(
   'new auth users get the least-privileged role'
 );
 
+-- A username chosen at sign-up travels in the auth user's metadata. The trigger
+-- normalizes it once (trim + lowercase) and writes it with the profile in the
+-- account's own transaction, so it is the account's name from the start rather
+-- than something a later step replaces.
+insert into auth.users (id, email, raw_user_meta_data) values
+  ('77777777-7777-4777-8777-777777777777', 'frank@example.com', '{"username":"  Chosen_One  "}'::jsonb);
+select rls_test.ok(
+  rls_test.count_rows($$select 1 from public.profiles where id = '77777777-7777-4777-8777-777777777777' and username = 'chosen_one'$$) = 1,
+  'a chosen username is normalized and written by the trigger'
+);
+
+-- The unique index is the final authority: a second account cannot claim the
+-- same name, and the failed auth insert leaves no half-created account behind.
+select rls_test.rejected(
+  $$insert into auth.users (id, email, raw_user_meta_data) values ('88888888-8888-4888-8888-888888888888', 'grace@example.com', '{"username":"chosen_one"}'::jsonb)$$,
+  'a second account cannot claim the same username'
+);
+select rls_test.ok(
+  rls_test.count_rows($$select 1 from auth.users where id = '88888888-8888-4888-8888-888888888888'$$) = 0,
+  'a rejected registration leaves no auth user behind'
+);
+select rls_test.rejected(
+  $$insert into auth.users (id, email, raw_user_meta_data) values ('99999999-9999-4999-8999-999999999999', 'heidi@example.com', '{"username":"CHOSEN_ONE"}'::jsonb)$$,
+  'username uniqueness is case-insensitive'
+);
+
+-- Metadata that is not a valid username is never stored. OAuth providers keep
+-- working (their metadata has no such key), and an unusable value falls back to
+-- the generated form rather than persisting something the format rule rejects.
+insert into auth.users (id, email, raw_user_meta_data) values
+  ('aaaaaaaa-4444-4444-8444-aaaaaaaaaaaa', 'ivan@example.com', '{"username":"not valid!"}'::jsonb);
+select rls_test.ok(
+  rls_test.count_rows($$select 1 from public.profiles where id = 'aaaaaaaa-4444-4444-8444-aaaaaaaaaaaa' and username ~ '^user_[0-9a-f]{12}$'$$) = 1,
+  'invalid signup metadata falls back to a generated username'
+);
+
+-- These probe accounts were only for the trigger assertions above; removing them
+-- keeps the rest of the suite's profile counts describing the five fixtures.
+delete from auth.users
+ where id in ('77777777-7777-4777-8777-777777777777', 'aaaaaaaa-4444-4444-8444-aaaaaaaaaaaa');
+
 -- Roles are granted out of band (service_role today, a dashboard action later).
 update public.user_roles set role = 'moderator' where user_id = :'carol';
 update public.user_roles set role = 'admin' where user_id = :'dave';

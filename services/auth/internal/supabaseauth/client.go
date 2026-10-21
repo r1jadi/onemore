@@ -123,6 +123,13 @@ func New(cfg *config.Config) (*Client, error) {
 // call. When the project requires email confirmation the result carries a user
 // and no session.
 //
+// A non-empty username travels as GoTrue's `data` payload. Supabase stores it on
+// `auth.users.raw_user_meta_data`, which the `handle_new_user` trigger reads in
+// the same transaction that creates the account, so the chosen name is on the
+// profile before this call returns — including while email confirmation is
+// pending. The trigger's unique index, not this client, decides whether two
+// concurrent registrations may share a name.
+//
 // The confirmation link Supabase emails must land on the app's own callback
 // (`/auth/callback`), not on Supabase's default site URL: the callback
 // verifies the link, exchanges it for tokens, and establishes the app session
@@ -130,8 +137,11 @@ func New(cfg *config.Config) (*Client, error) {
 // from PUBLIC_SITE_URL (preferred), SITE_URL, then VITE_PUBLIC_SITE_URL, and
 // defaults to the production origin. An invalid value is ignored rather than
 // sent, so a misconfigured environment cannot produce a broken link.
-func (c *Client) SignUp(ctx context.Context, email, password string) (Result, error) {
+func (c *Client) SignUp(ctx context.Context, email, password, username string) (Result, error) {
 	payload := map[string]any{"email": email, "password": password}
+	if username != "" {
+		payload["data"] = map[string]string{"username": username}
+	}
 	if redirect := confirmationRedirect(); redirect != "" {
 		payload["options"] = map[string]string{"emailRedirectTo": redirect}
 	}

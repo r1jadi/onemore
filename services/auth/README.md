@@ -23,6 +23,7 @@ is authoritative and marks every one of these `x-status: available`.
 | Method | Path | Tier | Success | Calls Supabase |
 | --- | --- | --- | --- | --- |
 | `POST` | `/auth/sign-up` | public | `201` | `POST /auth/v1/signup` |
+| `GET` | `/auth/username-available` | public | `200` | `GET /rest/v1/profiles` (availability) |
 | `POST` | `/auth/sign-in` | public | `200` | `POST /auth/v1/token?grant_type=password` |
 | `POST` | `/auth/refresh` | public | `200` | `POST /auth/v1/token?grant_type=refresh_token` |
 | `POST` | `/auth/session` | public (verifies the token in the body) | `200` | `GET /rest/v1/profiles` (onboarding state) |
@@ -45,6 +46,12 @@ token.
   `Authorization`. Row Level Security decides what is visible, so the service
   needs no `service_role`/secret key and cannot read another user's profile.
   `onboarded_at` is readable by the `authenticated` role for exactly this reason.
+* **Username availability** — `GET /rest/v1/profiles?select=id&username=eq.<name>&limit=1`
+  with the publishable key only. The public profile columns are readable by
+  `anon`, so the answer needs no account and no secret; only the boolean leaves
+  the service. The case-insensitive unique index on `profiles.username` remains
+  the authority — the check is advisory, and the sign-up insert re-runs the same
+  uniqueness rule, so two concurrent registrations cannot both commit the name.
 * Every upstream failure is mapped to a platform error code
   (`unauthorized`, `forbidden`, `conflict`, `unprocessable_entity`,
   `rate_limited`, `service_unavailable`). Supabase's own message is never
@@ -112,8 +119,10 @@ cd services && gofmt -l . ../packages/go && go vet ./... && go test ./...
 ```
 
 `auth_test.go` runs the real HTTP stack (router, middleware, rate limiter, error
-envelope) against a fake Supabase, and covers: registration and sign-in,
-invalid credentials, an unverified account, refresh rotation, an expired, forged,
+envelope) against a fake Supabase, and covers: registration and sign-in, the
+chosen-username flow (normalization, pre-flight refusal, a lost race and a failed
+availability lookup), the anonymous availability endpoint, invalid credentials,
+an unverified account, refresh rotation, an expired, forged,
 `anon`-key or `service_role` token, unauthenticated reads, sign-out and its
 idempotent retry, malformed bodies, oversized bodies, the credential throttle, a
 Supabase outage, and the absence of passwords or tokens from log output.

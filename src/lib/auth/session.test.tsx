@@ -178,6 +178,31 @@ describe("signUp", () => {
     expect(getAuthState()).toEqual({ status: "anonymous" });
   });
 
+  it("sends the chosen username with the sign-up request", async () => {
+    const spy = mockFetch(() => jsonResponse(sessionPayload(), 201));
+
+    await signUp("player@example.com", "correct-horse-battery", "  Rijad  ");
+
+    expect(requestOf(spy).body).toEqual({
+      email: "player@example.com",
+      password: "correct-horse-battery",
+      // The server normalizes and validates it; the client only drops the
+      // accidental whitespace so the field and the request agree.
+      username: "Rijad",
+    });
+  });
+
+  it("omits the field when there is no username to send", async () => {
+    const spy = mockFetch(() => jsonResponse(sessionPayload(), 201));
+
+    await signUp("player@example.com", "correct-horse-battery");
+
+    expect(requestOf(spy).body).toEqual({
+      email: "player@example.com",
+      password: "correct-horse-battery",
+    });
+  });
+
   it("signs the caller in when Supabase returns a session", async () => {
     const spy = mockFetch(() => jsonResponse(sessionPayload(), 201));
 

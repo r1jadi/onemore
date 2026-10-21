@@ -157,6 +157,14 @@ paths:
         which applies the project's own password policy, sends the confirmation
         mail and creates the profile row through its `handle_new_user` trigger.
 
+        `username` is the name the account will own. It is trimmed and
+        lowercased, checked against the same format rule as the profile (3–24
+        letters, digits, underscores) and checked for availability before the
+        account is created; a taken name answers `409` with `field: username`.
+        The trigger then persists it in the same transaction, so the choice
+        survives email confirmation. Omitting the field is only for clients built
+        before it existed: the database generates a name for them.
+
         When the project requires email confirmation no session exists until the
         address is confirmed, so that response carries `user` and no `tokens`.
       security: []
@@ -172,6 +180,15 @@ paths:
               properties:
                 email: { type: string, format: email, minLength: 3, maxLength: 254 }
                 password: { type: string, minLength: 8, maxLength: 72 }
+                username:
+                  type: string
+                  minLength: 3
+                  maxLength: 24
+                  pattern: "^[A-Za-z0-9_]{3,24}$"
+                  description: |
+                    The username to own. Uppercase is normalized to lowercase;
+                    uniqueness is case-insensitive. Omit only for clients that
+                    predate the field — the database then generates a name.
       responses:
         "201":
           description: |
@@ -183,6 +200,49 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "409": { $ref: "#/components/responses/Conflict" }
         "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /auth/username-available:
+    get:
+      operationId: usernameAvailable
+      tags: [auth]
+      summary: Check whether a username is unclaimed
+      description: |
+        Answers while the sign-up form is being filled in. Public and anonymous:
+        the visitor does not have an account yet.
+
+        The response carries the normalized username and a boolean — never a
+        profile or any information about who currently holds the name. The read
+        goes through the Data API under RLS, so no secret key is involved.
+
+        A lookup that cannot be completed answers `503`; callers must treat that
+        as unknown, never as available.
+      security: []
+      x-status: available
+      parameters:
+        - name: username
+          in: query
+          required: true
+          description: The candidate username. Trimmed and lowercased before validation.
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 24
+            pattern: "^[A-Za-z0-9_]{3,24}$"
+      responses:
+        "200":
+          description: The normalized username and whether it is available.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [username, available]
+                properties:
+                  username: { type: string }
+                  available: { type: boolean }
         "422": { $ref: "#/components/responses/Unprocessable" }
         "429": { $ref: "#/components/responses/RateLimited" }
         "503": { $ref: "#/components/responses/Unavailable" }

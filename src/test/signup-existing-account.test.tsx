@@ -1,6 +1,6 @@
 import { QueryClient } from "@tanstack/react-query";
 import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { clearSession } from "@/lib/auth/session";
@@ -49,6 +49,11 @@ async function fillSignup(email: string, password: string) {
   fireEvent.change(await screen.findByLabelText("Display name"), {
     target: { value: "Returning Player" },
   });
+  fireEvent.change(screen.getByLabelText("Username"), {
+    target: { value: "returning_player" },
+  });
+  // The username step now waits for a real availability answer.
+  await waitFor(() => expect(screen.getByText("Username is available")).toBeInTheDocument());
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
   const boxes = await screen.findAllByRole("checkbox");
@@ -68,8 +73,11 @@ afterEach(() => {
 
 describe("registering an email that already has an account", () => {
   it("shows the sign-in message and offers the sign-in route", async () => {
-    const spy = mockFetch(() =>
-      jsonResponse(
+    const spy = mockFetch((url) => {
+      if (url.includes("/api/v1/auth/username-available")) {
+        return jsonResponse({ username: "returning_player", available: true });
+      }
+      return jsonResponse(
         {
           error: {
             code: "conflict",
@@ -77,8 +85,8 @@ describe("registering an email that already has an account", () => {
           },
         },
         409,
-      ),
-    );
+      );
+    });
 
     await renderApp("/signup");
     await fillSignup("taken@example.com", "correct-horse");

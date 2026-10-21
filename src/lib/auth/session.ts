@@ -629,11 +629,20 @@ export function authErrorMessage(error: unknown): string {
   return error instanceof ApiError ? error.message : "Something went wrong. Please try again.";
 }
 
-/** Creates an account. Resolves with no tokens while confirmation is pending. */
-export function signUp(email: string, password: string): Promise<AuthSession> {
+/**
+ * Creates an account. Resolves with no tokens while confirmation is pending.
+ *
+ * `username` is the name chosen on the sign-up screen. The server validates and
+ * checks it again, and the database trigger persists it on the profile when the
+ * account is created — including while confirmation is pending. It is omitted
+ * only when there is no choice to send (a resumed OAuth registration, whose
+ * account already exists).
+ */
+export function signUp(email: string, password: string, username?: string): Promise<AuthSession> {
+  const chosen = username?.trim();
   return apiFetch<AuthSession>(Routes.signUp, {
     method: "POST",
-    body: { email, password },
+    body: { email, password, ...(chosen ? { username: chosen } : {}) },
   }).then(adopt);
 }
 

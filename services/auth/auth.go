@@ -26,8 +26,10 @@ import (
 	"log/slog"
 	"net/http"
 	"net/mail"
+	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/r1jadi/onemore/packages/go/platform/apierr"
 	"github.com/r1jadi/onemore/packages/go/platform/authn"
@@ -50,6 +52,9 @@ const (
 	RefreshPath = "/api/v1/auth/refresh"
 	SessionPath = "/api/v1/auth/session"
 	SignOutPath = "/api/v1/auth/sign-out"
+	// UsernameAvailablePath is the anonymous availability read the sign-up form
+	// calls while the visitor is choosing a username.
+	UsernameAvailablePath = "/api/v1/auth/username-available"
 )
 
 const (
@@ -90,8 +95,14 @@ var signupCompletionCutoff = time.Date(2026, 10, 17, 17, 11, 9, 0, time.UTC)
 // serve probes and answer 503 on this handful of endpoints instead of crashing
 // in a restart loop.
 type Backend interface {
-	SignUp(ctx context.Context, email, password string) (supabaseauth.Result, error)
+	// SignUp creates the account. username may be empty for a legacy client, in
+	// which case the database trigger generates one; when it is set, the
+	// trigger persists exactly that name or fails the whole registration.
+	SignUp(ctx context.Context, email, password, username string) (supabaseauth.Result, error)
 	SignInWithPassword(ctx context.Context, email, password string) (supabaseauth.Result, error)
+	// UsernameAvailable answers whether a normalized username is unclaimed. It
+	// runs anonymously and reads only the public profile row.
+	UsernameAvailable(ctx context.Context, username string) (bool, error)
 	RefreshSession(ctx context.Context, refreshToken string) (supabaseauth.Result, error)
 	SignOut(ctx context.Context, accessToken string) error
 	// Onboarding reads the caller's own profile row with the caller's token.
@@ -147,9 +158,23 @@ type authSession struct {
 }
 
 // credentialsRequest is the body of sign-up and sign-in.
+//
+// `username` is only meaningful for sign-up. It is optional so a client built
+// before the field existed can still register (the database trigger then uses a
+// generated name), but whenever it is present it is validated, checked for
+// availability and persisted as the account's username.
 type credentialsRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+	Username string `json:"username"`
+}
+
+// usernameAvailabilityView is the answer to GET /auth/username-available. It
+// deliberately carries no profile data: the caller learns whether the name is
+// free and nothing about who holds it.
+type usernameAvailabilityView struct {
+	Username  string `json:"username"`
+	Available bool   `json:"available"`
 }
 
 // refreshRequest is the body of the refresh endpoint. A refresh token is a
@@ -201,6 +226,8 @@ func newService(backend Backend, verifier *authn.Verifier, logger *slog.Logger, 
 // handler runs.
 func (s *service) register(router *httpx.Router) {
 	router.PublicFunc("POST "+SignUpPath, s.signUp)
+	// Public by design: the visitor checking availability has no account yet.
+	router.PublicFunc("GET "+UsernameAvailablePath, s.usernameAvailable)
 	router.PublicFunc("POST "+SignInPath, s.signIn)
 	router.PublicFunc("POST "+RefreshPath, s.refresh)
 	// Public by design: the caller presents a Supabase token in the body rather
@@ -220,6 +247,17 @@ func (s *service) signUp(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+
+	// An absent username is a legacy client: the trigger keeps its generated
+	// fallback. A supplied one is normalized and validated here, before any
+	// account exists, and then persisted verbatim by the trigger.
+	username := ""
+	if strings.TrimSpace(request.Username) != "" {
+		if username, ok = normalizedUsername(w, r, request.Username); !ok {
+			return
+		}
+	}
+
 	if s.throttled(w, r, limitKey{"ip", httpx.ClientKey(r)}, limitKey{"account", supabaseauth.EscapeEmail(email)}) {
 		return
 	}
@@ -228,14 +266,71 @@ func (s *service) signUp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := s.backend.SignUp(r.Context(), email, request.Password)
+	// The form already checked, but the browser is not an authority and the name
+	// may have been taken since. Refusing here avoids creating an account whose
+	// profile insert is guaranteed to fail.
+	if username != "" {
+		available, err := s.backend.UsernameAvailable(r.Context(), username)
+		if err != nil {
+			s.usernameCheckFailure(w, r, "sign-up username check", err)
+			return
+		}
+		if !available {
+			writeUsernameTaken(w, r)
+			return
+		}
+	}
+
+	result, err := s.backend.SignUp(r.Context(), email, request.Password, username)
 	if err != nil {
+		// The gap between the check above and the insert is real: another
+		// registration can claim the name first. The database's unique index
+		// refuses that insert (and rolls back the account), so re-read the name
+		// to turn Supabase's opaque database error into the same 409 the form
+		// understands. A failed re-read falls through to the normal mapping.
+		if username != "" {
+			if available, checkErr := s.backend.UsernameAvailable(r.Context(), username); checkErr == nil && !available {
+				s.logger.InfoContext(r.Context(), "sign-up lost a username race",
+					slog.String("username", username))
+				writeUsernameTaken(w, r)
+				return
+			}
+		}
 		s.supabaseFailure(w, r, "sign-up", err)
 		return
 	}
 	// 201: a user was created. When the project requires email confirmation the
 	// payload carries the user and no tokens, which is a success, not a failure.
 	httpx.WriteJSON(w, r, http.StatusCreated, s.newAuthSession(r.Context(), result))
+}
+
+// usernameAvailable answers whether a username can still be registered.
+//
+// It is public and anonymous: the visitor has no account yet. The query reads
+// the public profile row by username under RLS and returns only a boolean, so it
+// is not a profile lookup. A failure is never reported as "available" — the
+// client must not be given permission to proceed on an answer the server could
+// not produce.
+func (s *service) usernameAvailable(w http.ResponseWriter, r *http.Request) {
+	username, ok := normalizedUsername(w, r, r.URL.Query().Get("username"))
+	if !ok {
+		return
+	}
+	if s.backend == nil {
+		s.notConfigured(w, r, "check username availability")
+		return
+	}
+
+	available, err := s.backend.UsernameAvailable(r.Context(), username)
+	if err != nil {
+		s.usernameCheckFailure(w, r, "username availability", err)
+		return
+	}
+
+	// A cached "available" would be stale the moment somebody registers the
+	// name, and the form treats that answer as permission to continue.
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.WriteJSON(w, r, http.StatusOK, usernameAvailabilityView{Username: username, Available: available})
 }
 
 func (s *service) signIn(w http.ResponseWriter, r *http.Request) {
@@ -475,6 +570,57 @@ func timePointer(value time.Time) *time.Time {
 	}
 	utc := value.UTC()
 	return &utc
+}
+
+// ── Username rules ─────────────────────────────────────────────────────────
+
+// usernamePattern mirrors `profiles_username_format`: 3–24 lowercase letters,
+// digits and underscores. It is applied after normalization, so the rule is the
+// same one the database check constraint enforces.
+var usernamePattern = regexp.MustCompile(`^[a-z0-9_]{3,24}$`)
+
+// normalizedUsername trims and lowercases a username — the normalization the
+// sign-up form and the `handle_new_user` trigger apply — then validates the
+// shape. Uppercase is therefore not an error: `Rijad`, `rijad` and `RIJAD` all
+// become `rijad`, which the case-insensitive unique index then treats as one
+// name.
+func normalizedUsername(w http.ResponseWriter, r *http.Request, raw string) (string, bool) {
+	username := strings.ToLower(strings.TrimSpace(raw))
+	switch {
+	case username == "":
+		return "", rejectUsername(w, r, "required", "Choose a username.")
+	case utf8.RuneCountInString(username) < 3 || utf8.RuneCountInString(username) > 24:
+		return "", rejectUsername(w, r, "length", "Use 3–24 characters for your username.")
+	case !usernamePattern.MatchString(username):
+		return "", rejectUsername(w, r, "format", "Use only letters, numbers and underscores.")
+	}
+	return username, true
+}
+
+func rejectUsername(w http.ResponseWriter, r *http.Request, rule, message string) bool {
+	httpx.WriteError(w, r, httpx.NewError(httpx.CodeUnprocessable, message,
+		apierr.Detail{Field: "username", Rule: rule}))
+	return false
+}
+
+// writeUsernameTaken is the one answer for "somebody else has this name": used
+// by the pre-flight check and by the post-failure re-check, so both paths give
+// the form a field-attributed 409 it can act on.
+func writeUsernameTaken(w http.ResponseWriter, r *http.Request) {
+	httpx.WriteError(w, r, httpx.NewError(httpx.CodeConflict,
+		"That username is taken. Choose another.",
+		apierr.Detail{Field: "username", Rule: "taken"}))
+}
+
+// usernameCheckFailure answers a lookup that could not be made. It is a 503 and
+// never an available answer: an unknown result must not let a registration
+// proceed.
+func (s *service) usernameCheckFailure(w http.ResponseWriter, r *http.Request, operation string, err error) {
+	s.logger.ErrorContext(r.Context(), "username availability check failed",
+		slog.String("operation", operation), slog.Any("error", err))
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.WriteError(w, r, httpx.NewError(httpx.CodeUnavailable,
+		"Couldn't check username availability. Try again."))
 }
 
 // ── Request handling ────────────────────────────────────────────────────────

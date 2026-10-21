@@ -147,7 +147,7 @@ func TestSignUpDecodesAConfirmationPendingResponse(t *testing.T) {
 		}`)
 	})
 
-	result, err := client.SignUp(context.Background(), "player@example.com", "correct-horse-battery")
+	result, err := client.SignUp(context.Background(), "player@example.com", "correct-horse-battery", "")
 	if err != nil {
 		t.Fatalf("sign-up failed: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestSignUpDetectsAnAlreadyRegisteredAddress(t *testing.T) {
 		}`)
 	})
 
-	result, err := client.SignUp(context.Background(), "player@example.com", "correct-horse-battery")
+	result, err := client.SignUp(context.Background(), "player@example.com", "correct-horse-battery", "")
 
 	var apiErr *Error
 	if !errors.As(err, &apiErr) {
@@ -208,7 +208,7 @@ func TestSignUpDoesNotReadAMissingIdentityListAsARefusal(t *testing.T) {
 		writeJSON(t, w, 200, `{"id":"u1","email":"player@example.com","created_at":"2026-10-01T00:00:00Z"}`)
 	})
 
-	result, err := client.SignUp(context.Background(), "player@example.com", "correct-horse-battery")
+	result, err := client.SignUp(context.Background(), "player@example.com", "correct-horse-battery", "")
 	if err != nil {
 		t.Fatalf("sign-up failed: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestSignUpKeepsAResentConfirmationAPendingSuccess(t *testing.T) {
 		}`)
 	})
 
-	result, err := client.SignUp(context.Background(), "waiting@example.com", "correct-horse-battery")
+	result, err := client.SignUp(context.Background(), "waiting@example.com", "correct-horse-battery", "")
 	if err != nil {
 		t.Fatalf("sign-up failed: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestSignUpProposesTheAppCallback(t *testing.T) {
 		writeJSON(t, w, 200, `{"id":"u1","email":"player@example.com","created_at":"2026-10-01T00:00:00Z"}`)
 	})
 
-	if _, err := client.SignUp(context.Background(), "player@example.com", "correct-horse-battery"); err != nil {
+	if _, err := client.SignUp(context.Background(), "player@example.com", "correct-horse-battery", ""); err != nil {
 		t.Fatalf("sign-up failed: %v", err)
 	}
 	options, ok := (*requests)[0].body["options"].(map[string]any)
@@ -258,6 +258,102 @@ func TestSignUpProposesTheAppCallback(t *testing.T) {
 	}
 	if options["emailRedirectTo"] != "https://example.com/auth/callback" {
 		t.Errorf("emailRedirectTo = %v, want the app callback", options["emailRedirectTo"])
+	}
+}
+
+func TestSignUpSendsTheChosenUsernameAsMetadata(t *testing.T) {
+	t.Setenv("PUBLIC_SITE_URL", "https://example.com")
+
+	client, requests := stubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, 200, `{"id":"u1","email":"player@example.com","created_at":"2026-10-01T00:00:00Z",
+			"identities":[{"id":"i1","provider":"email","user_id":"u1"}]}`)
+	})
+
+	if _, err := client.SignUp(context.Background(), "player@example.com", "correct-horse-battery", "rijad"); err != nil {
+		t.Fatalf("sign-up failed: %v", err)
+	}
+
+	body := (*requests)[0].body
+	data, ok := body["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("body has no data payload: %v", body)
+	}
+	// This is what `handle_new_user` reads from raw_user_meta_data. It has to
+	// travel with the signup itself so the profile row is created with the
+	// chosen name in the same transaction.
+	if data["username"] != "rijad" {
+		t.Errorf("data.username = %v, want rijad", data["username"])
+	}
+}
+
+func TestSignUpOmitsTheMetadataWhenNoUsernameWasChosen(t *testing.T) {
+	client, requests := stubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, 200, `{"id":"u1","email":"player@example.com","created_at":"2026-10-01T00:00:00Z"}`)
+	})
+
+	if _, err := client.SignUp(context.Background(), "player@example.com", "correct-horse-battery", ""); err != nil {
+		t.Fatalf("sign-up failed: %v", err)
+	}
+	if _, present := (*requests)[0].body["data"]; present {
+		t.Errorf("a username was sent although none was chosen: %v", (*requests)[0].body)
+	}
+}
+
+func TestUsernameAvailableReadsThePublicProfileAnonymously(t *testing.T) {
+	cases := map[string]struct {
+		body string
+		want bool
+	}{
+		"no row means available": {body: `[]`, want: true},
+		"a row means taken":      {body: `[{"id":"3f7c2b1e-4d5a-4c9b-8e2f-1a2b3c4d5e6f"}]`, want: false},
+	}
+
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			client, requests := stubServer(t, func(w http.ResponseWriter, r *http.Request) {
+				writeJSON(t, w, 200, testCase.body)
+			})
+
+			available, err := client.UsernameAvailable(context.Background(), "rijad")
+			if err != nil {
+				t.Fatalf("availability read failed: %v", err)
+			}
+			if available != testCase.want {
+				t.Errorf("available = %v, want %v", available, testCase.want)
+			}
+
+			sent := (*requests)[0]
+			if sent.method != http.MethodGet || sent.path != "/rest/v1/profiles" {
+				t.Errorf("request was %s %s, want GET /rest/v1/profiles", sent.method, sent.path)
+			}
+			for _, expected := range []string{"select=id", "username=eq.rijad", "limit=1"} {
+				if !strings.Contains(sent.query, expected) {
+					t.Errorf("query %q is missing %q", sent.query, expected)
+				}
+			}
+			// Anonymous by design: the visitor has no account yet. The publishable
+			// key identifies the project; no bearer token is attached.
+			if got := sent.header.Get("apikey"); got != testPublishableKey {
+				t.Errorf("apikey = %q, want the publishable key", got)
+			}
+			if got := sent.header.Get("Authorization"); got != "" {
+				t.Errorf("Authorization = %q on an anonymous availability read", got)
+			}
+		})
+	}
+}
+
+func TestUsernameAvailableReportsAFailedReadAsAnError(t *testing.T) {
+	client, _ := stubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, 503, `{"code":"unavailable"}`)
+	})
+
+	available, err := client.UsernameAvailable(context.Background(), "rijad")
+	if err == nil {
+		t.Fatal("a failed read was reported as an answer")
+	}
+	if available {
+		t.Error("a failed read was reported as available")
 	}
 }
 

@@ -1,9 +1,20 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { Check, FileText, Shield, Mail } from "lucide-react";
+import {
+  AlertCircle,
+  Check,
+  CheckCircle2,
+  FileText,
+  Loader2,
+  Mail,
+  Shield,
+  XCircle,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { AuthLayout, Field, SocialButtons } from "@/components/auth/AuthLayout";
 import { LegalBody, privacy, terms } from "@/components/legal";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Sheet,
   SheetContent,
@@ -13,7 +24,14 @@ import {
 } from "@/components/ui/sheet";
 import { ApiError } from "@/lib/api/client";
 import { authErrorMessage, loadSession, signOut, signUp, useAuth } from "@/lib/auth/session";
+import { useProfile } from "@/lib/users/profile";
 import { completeRegistration } from "@/lib/users/registration";
+import {
+  normalizeUsername,
+  useUsernameAvailability,
+  usernameStatusMessage,
+  usernameValidationMessage,
+} from "@/lib/users/username";
 import { seo } from "@/lib/seo";
 import { cn } from "@/lib/utils";
 
@@ -59,6 +77,30 @@ function forgetPendingDisplayName(): void {
   }
 }
 
+/** The icon that matches the availability line under the username input. */
+function UsernameStatusIcon({
+  status,
+  hasError,
+}: {
+  status: ReturnType<typeof useUsernameAvailability>["status"];
+  hasError: boolean;
+}) {
+  if (hasError || status.state === "taken") {
+    return <XCircle className="size-3.5 shrink-0" aria-hidden />;
+  }
+  switch (status.state) {
+    case "available":
+      return <CheckCircle2 className="size-3.5 shrink-0" aria-hidden />;
+    case "checking":
+      return <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden />;
+    case "invalid":
+    case "error":
+      return <AlertCircle className="size-3.5 shrink-0" aria-hidden />;
+    case "empty":
+      return null;
+  }
+}
+
 function Signup() {
   const nav = useNavigate();
   const auth = useAuth();
@@ -67,6 +109,13 @@ function Signup() {
   const [doc, setDoc] = useState<"terms" | "privacy" | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [nameError, setNameError] = useState<string>();
+  const [username, setUsername] = useState("");
+  const [usernameError, setUsernameError] = useState<string>();
+  // Bumped after the server refuses a name, so the availability hook looks it
+  // up again even though the input did not change.
+  const [usernameCheck, setUsernameCheck] = useState(0);
+  const { status: usernameStatus } = useUsernameAvailability(username, usernameCheck);
+  const profileState = useProfile();
   const [creds, setCreds] = useState<{ email: string; password: string }>();
   const [credError, setCredError] = useState<string>();
   const [err, setErr] = useState<string>();
@@ -79,6 +128,25 @@ function Signup() {
   // The database decides (`onboarded_at` through the session), never a local
   // guess, so a reload mid-way lands back on the same step.
   const completing = auth.status === "authenticated" && auth.session.onboarded === false;
+  // On the completion path the account (and its profile row) already exists, so
+  // there is nothing to choose: the username was written by the sign-up trigger
+  // before the confirmation email was sent. It is shown, not editable.
+  const storedUsername =
+    completing && profileState.status === "ready" ? profileState.profile.username : undefined;
+  const chosenUsername = normalizeUsername(username);
+  const usernameUsable =
+    completing ||
+    (usernameStatus.state === "available" && usernameStatus.username === chosenUsername);
+  const usernameMessage = usernameError ?? usernameStatusMessage(usernameStatus);
+  const usernameTone =
+    usernameError !== undefined ||
+    usernameStatus.state === "taken" ||
+    usernameStatus.state === "invalid" ||
+    usernameStatus.state === "error"
+      ? "text-destructive"
+      : usernameStatus.state === "available"
+        ? "text-primary"
+        : "text-muted-foreground";
   // Signing in to an account that already exists must never lead back into the
   // registration form: there is nothing to create, and asking for a password
   // for an email that already has an account is exactly how a duplicate
@@ -93,13 +161,19 @@ function Signup() {
     setDisplayName((current) => (current === "" ? storedPendingDisplayName() : current));
   }, [completing]);
 
+  // A fresh "taken" answer is more precise than the server's refusal text that
+  // sent the visitor back here; keep the field in sync with what the check now
+  // knows.
+  useEffect(() => {
+    if (usernameStatus.state === "taken") setUsernameError(undefined);
+  }, [usernameStatus.state]);
+
   // The credential is collected in step 1 and held until the account is created
   // in step 3, because the account itself is only made once the terms are
   // accepted. It is forwarded to Supabase by the auth service and never stored.
-  // The username is intentionally not collected here: it is not writable
-  // through the profile API (see ProfileForm), so asking for one would be a
-  // promise this screen cannot keep. The account gets a generated username;
-  // the display name below is applied to the profile when a session exists.
+  // The username is chosen in step 2 and travels with the sign-up request: the
+  // auth service validates it again, then Supabase stores it on the auth user so
+  // the profile trigger writes it in the same transaction as the account.
   async function createAccount() {
     if (completing) {
       // The Supabase account (and its profile row, created by the database
@@ -108,10 +182,18 @@ function Signup() {
       return;
     }
     if (!creds) return setErr("Enter your email and password to start again.");
+    if (!usernameUsable) {
+      // The button is disabled in this state, so this is a safety net for a
+      // stale render: never create an account with a name that was not cleared.
+      setUsernameCheck((value) => value + 1);
+      setUsernameError(usernameStatusMessage(usernameStatus));
+      setStep(1);
+      return;
+    }
     setErr(undefined);
     setBusy(true);
     try {
-      const result = await signUp(creds.email, creds.password);
+      const result = await signUp(creds.email, creds.password, chosenUsername);
       const name = displayName.trim();
       // When Supabase issued a session immediately, the registration is
       // finished below. While confirmation is pending there is no token, so the
@@ -123,6 +205,22 @@ function Signup() {
         nav({ to: "/verify-email", search: { email: creds.email } });
       }
     } catch (error) {
+      // A field-attributed username failure means the name was claimed between
+      // the availability check and this request (or the server rejected it).
+      // Nothing was created — the trigger fails the whole registration — so the
+      // visitor goes back to the name step with a fresh check, never to a form
+      // that silently registers a different username.
+      const usernameProblem =
+        error instanceof ApiError && error.details.some((detail) => detail.field === "username");
+      if (usernameProblem) {
+        setErr(undefined);
+        setErrCode(undefined);
+        setUsernameError(error.message);
+        setUsernameCheck((value) => value + 1);
+        setStep(1);
+        return;
+      }
+
       // The API answers a duplicate registration with 409 `conflict`. Its
       // message is the one the screen shows, and the link below turns it into
       // the next step rather than a dead end. The check is on the status and
@@ -311,6 +409,24 @@ function Signup() {
               return;
             }
             setNameError(undefined);
+
+            if (!completing) {
+              // The same rule the API and the database apply. Format problems
+              // are reported here; a name the check has not cleared (or has
+              // cleared for a different value) never moves the form forward.
+              const format = usernameValidationMessage(chosenUsername);
+              if (format) {
+                setUsernameError(format);
+                return;
+              }
+              if (!usernameUsable) {
+                setUsernameError(usernameStatusMessage(usernameStatus));
+                return;
+              }
+              // Show exactly what will be stored: normalized once, here.
+              setUsername(chosenUsername);
+            }
+            setUsernameError(undefined);
             setStep(2);
           }}
         >
@@ -325,12 +441,76 @@ function Signup() {
               onChange={(e) => setDisplayName(e.target.value)}
               error={nameError}
             />
+
+            {completing ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="username">Username</Label>
+                <Input
+                  id="username"
+                  value={storedUsername ?? ""}
+                  readOnly
+                  disabled
+                  aria-describedby="username-saved"
+                  className="h-12 rounded-lg bg-surface text-base md:text-sm"
+                  placeholder={storedUsername ? undefined : "Loading your username…"}
+                />
+                <p id="username-saved" className="text-xs text-muted-foreground">
+                  Your username is already saved on your profile — it was applied when this account
+                  was created, even while the confirmation email was pending.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Label htmlFor="username">Username</Label>
+                <Input
+                  id="username"
+                  name="username"
+                  required
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  value={username}
+                  onChange={(e) => {
+                    // Normalization while typing keeps what is on screen equal
+                    // to what would be stored (and what the check asked about).
+                    setUsername(e.target.value.toLowerCase());
+                    setUsernameError(undefined);
+                  }}
+                  aria-invalid={
+                    usernameError !== undefined ||
+                    usernameStatus.state === "invalid" ||
+                    usernameStatus.state === "taken" ||
+                    usernameStatus.state === "error"
+                  }
+                  aria-describedby="username-status"
+                  className="h-12 rounded-lg bg-surface text-base md:text-sm"
+                />
+                <p
+                  id="username-status"
+                  role="status"
+                  aria-live="polite"
+                  className={cn("flex items-center gap-1.5 text-xs", usernameTone)}
+                >
+                  <UsernameStatusIcon
+                    status={usernameStatus}
+                    hasError={usernameError !== undefined}
+                  />
+                  {usernameMessage}
+                </p>
+              </div>
+            )}
             <p className="text-xs text-muted-foreground">
-              Your username is generated automatically and shown in your profile. You can change it
-              later in Settings.
+              Three to 24 letters, numbers or underscores. This is how others find you; it is
+              unique, so capitals are stored in lowercase.
             </p>
           </div>
-          <Button type="submit" variant="play" size="xl" className="mt-auto w-full lg:mt-6">
+          <Button
+            type="submit"
+            variant="play"
+            size="xl"
+            className="mt-auto w-full lg:mt-6"
+            disabled={!usernameUsable}
+          >
             Continue
           </Button>
         </form>

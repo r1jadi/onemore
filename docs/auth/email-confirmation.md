@@ -12,6 +12,11 @@ steps that code cannot perform.
   `PUBLIC_SITE_URL`, `SITE_URL`, then `VITE_PUBLIC_SITE_URL`, defaulting to
   `https://onemorestartup.vercel.app`. An invalid value is omitted rather than
   sent.
+- The username chosen on the same form travels in that request's `data`
+  payload (`data.username`). Supabase stores it on the auth user before the
+  trigger runs, and `handle_new_user` writes it to the profile in the account's
+  own transaction. It is therefore already the account's username while
+  confirmation is pending; opening the link does not set or replace it.
 - The pending screen is `/verify-email` (link instructions, resend via
   Supabase `/auth/v1/resend`, continue to login). It never asks for a code.
 - The callback is `/auth/callback` (`src/routes/auth.callback.tsx`):
