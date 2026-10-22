@@ -4,10 +4,12 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
+  useLocation,
 } from "@tanstack/react-router";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { Avatar } from "@/components/common";
 import { FeedItem } from "@/components/game/FeedItem";
 import { CommentsSheet, ShareSheet } from "@/components/social/Sheets";
 import { ApiError } from "@/lib/api/client";
@@ -134,7 +136,15 @@ function createSupabaseDouble() {
     comments: [] as CommentRow[],
     profiles: [
       { id: ME, username: "rija", display_name: "Rija", bio: null, avatar_path: null },
-      { id: OTHER, username: "nora", display_name: "Nora", bio: null, avatar_path: null },
+      // Another account's picture: the comment thread has to build its URL from
+      // this row, not from the caller's profile.
+      {
+        id: OTHER,
+        username: "nora",
+        display_name: "Nora",
+        bio: null,
+        avatar_path: "9c1f0b2a/nora.png",
+      },
     ],
     commentSeq: 1,
   };
@@ -705,6 +715,18 @@ describe("feed item engagement", () => {
 describe("comments sheet", () => {
   function renderSheet() {
     const root = createRootRoute();
+    // The comment thread links to `/u/$username`, so the test router has that
+    // route: clicking a link must land on the author's profile, not nowhere.
+    const profileRoute = createRoute({
+      getParentRoute: () => root,
+      path: "/u/$username",
+      component: function ProfileStub() {
+        // The test router is not the generated tree, so the param is read from
+        // the location rather than typed through `useParams`.
+        const username = useLocation().pathname.split("/").pop();
+        return <p>{username}&apos;s profile</p>;
+      },
+    });
     const router = createRouter({
       routeTree: root.addChildren([
         createRoute({
@@ -721,6 +743,7 @@ describe("comments sheet", () => {
           ),
         }),
         createRoute({ getParentRoute: () => root, path: "/login", component: () => <p>Login</p> }),
+        profileRoute,
       ]),
       history: createMemoryHistory({ initialEntries: ["/"] }),
     });
@@ -750,6 +773,90 @@ describe("comments sheet", () => {
     expect(screen.getByText("1 comment")).toBeInTheDocument();
     // No delete control on another player's row.
     expect(screen.queryByRole("button", { name: "Delete comment" })).not.toBeInTheDocument();
+  });
+
+  it("shows another account's picture, built from that account's stored path", async () => {
+    const { handler, db } = createSupabaseDouble();
+    db.comments.push({
+      id: "cccccccc-1111-4111-8111-cccccccccccc",
+      game_id: GAME_ID,
+      author_id: OTHER,
+      body: "Nora's take",
+      created_at: "2026-10-14T11:00:00.000Z",
+      updated_at: "2026-10-14T11:00:00.000Z",
+    });
+    stubApiAndSupabase(handler);
+    await signInAsPlayer();
+
+    await renderSheet();
+    await waitFor(() => expect(screen.getByText("Nora's take")).toBeInTheDocument());
+
+    // The caller has no picture of their own, so the only image on the sheet is
+    // the commenter's — and it is theirs, not the signed-in player's.
+    const image = document.querySelector("img");
+    expect(image).not.toBeNull();
+    expect(image?.getAttribute("src")).toBe(
+      `${supabaseBase}/storage/v1/object/public/avatars/9c1f0b2a/nora.png`,
+    );
+  });
+
+  it("links a commenter's username and avatar to that author's profile", async () => {
+    const { handler, db } = createSupabaseDouble();
+    db.comments.push({
+      id: "cccccccc-1111-4111-8111-cccccccccccc",
+      game_id: GAME_ID,
+      author_id: OTHER,
+      body: "Nora's take",
+      created_at: "2026-10-14T11:00:00.000Z",
+      updated_at: "2026-10-14T11:00:00.000Z",
+    });
+    stubApiAndSupabase(handler);
+    await signInAsPlayer();
+
+    await renderSheet();
+    await waitFor(() => expect(screen.getByText("Nora's take")).toBeInTheDocument());
+
+    expect(screen.getByRole("link", { name: "@nora" })).toHaveAttribute("href", "/u/nora");
+    expect(screen.getByRole("link", { name: "View @nora's profile" })).toHaveAttribute(
+      "href",
+      "/u/nora",
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "@nora" }));
+    await waitFor(() => expect(screen.getByText("nora's profile")).toBeInTheDocument());
+  });
+
+  it("opens the same profile from the commenter's avatar", async () => {
+    const { handler, db } = createSupabaseDouble();
+    db.comments.push({
+      id: "cccccccc-1111-4111-8111-cccccccccccc",
+      game_id: GAME_ID,
+      author_id: OTHER,
+      body: "Nora's take",
+      created_at: "2026-10-14T11:00:00.000Z",
+      updated_at: "2026-10-14T11:00:00.000Z",
+    });
+    stubApiAndSupabase(handler);
+    await signInAsPlayer();
+
+    await renderSheet();
+    await waitFor(() => expect(screen.getByText("Nora's take")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("link", { name: "View @nora's profile" }));
+    await waitFor(() => expect(screen.getByText("nora's profile")).toBeInTheDocument());
+  });
+
+  it("falls back to initials when a picture cannot load", () => {
+    // A stored path can outlive its object, or the bucket can answer an error.
+    // The avatar then shows the same initials a profile without a picture does.
+    render(
+      <Avatar name="Nora" src={`${supabaseBase}/storage/v1/object/public/avatars/gone.png`} />,
+    );
+
+    fireEvent.error(document.querySelector("img") as HTMLImageElement);
+
+    expect(document.querySelector("img")).toBeNull();
+    expect(screen.getByText("NO")).toBeInTheDocument();
   });
 
   it("offers delete on an own comment and removes it", async () => {

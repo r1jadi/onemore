@@ -17,7 +17,7 @@ import { ApiError } from "@/lib/api/client";
 import { fmt, fmtDate } from "@/lib/format";
 import { absoluteUrl } from "@/lib/seo";
 import { MAX_COMMENT_LENGTH, useComments, type GameComment } from "@/lib/social/engagement";
-import { avatarUrl, getProfileState } from "@/lib/users/profile";
+import { avatarUrl, avatarUrlFromPath, getProfileState } from "@/lib/users/profile";
 
 /**
  * The comment thread for one game.
@@ -184,15 +184,40 @@ function CommentRow({
   const [busy, setBusy] = useState(false);
   const date = fmtDate(comment.createdAt);
   const edited = comment.editedAt && comment.editedAt !== comment.createdAt;
+  // The author arrives attached to the comment by `fetchComments`, with the
+  // same `avatar_path` field the profile page reads. A comment whose author row
+  // could not be read keeps its row and falls back to the initials avatar rather
+  // than disappearing.
+  const author = comment.author;
+  const avatar = avatarUrlFromPath(author?.avatar_path);
 
   return (
     <li className="flex gap-3">
-      <Avatar name={comment.author?.username ?? ""} size="sm" />
+      {author ? (
+        <Link
+          to="/u/$username"
+          params={{ username: author.username }}
+          aria-label={`View @${author.username}'s profile`}
+          className="shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Avatar name={author.username} src={avatar} size="sm" />
+        </Link>
+      ) : (
+        <Avatar name="" size="sm" />
+      )}
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2">
-          <span className="text-sm font-medium">
-            {comment.author ? `@${comment.author.username}` : "A player"}
-          </span>
+          {author ? (
+            <Link
+              to="/u/$username"
+              params={{ username: author.username }}
+              className="text-sm font-medium hover:underline hover:underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              @{author.username}
+            </Link>
+          ) : (
+            <span className="text-sm font-medium">A player</span>
+          )}
           {date && <span className="text-xs text-muted-foreground">{date}</span>}
           {edited && <span className="text-xs text-muted-foreground">· edited</span>}
         </div>

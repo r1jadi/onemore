@@ -56,7 +56,9 @@ export function Page({ children, className }: { children: ReactNode; className?:
  *
  * `src` is the public URL of the stored picture (see `avatarUrl`); a profile
  * without one renders exactly the initials circle it always has, so the box the
- * avatar occupies never changes size.
+ * avatar occupies never changes size. A URL that fails to load — the object was
+ * removed while the path stayed behind — falls back to the same initials rather
+ * than leaving a broken image, and a new `src` gets a fresh try.
  */
 export function Avatar({
   name,
@@ -69,18 +71,23 @@ export function Avatar({
   size?: "sm" | "md" | "lg" | "xl";
   className?: string;
 }) {
+  const [broken, setBroken] = useState(false);
+  useEffect(() => {
+    setBroken(false);
+  }, [src]);
   const s = {
     sm: "size-8 text-xs",
     md: "size-10 text-sm",
     lg: "size-14 text-base",
     xl: "size-24 text-2xl",
   }[size];
-  if (src) {
+  if (src && !broken) {
     return (
       <img
         src={src}
         alt=""
         aria-hidden
+        onError={() => setBroken(true)}
         className={cn(
           "inline-block shrink-0 rounded-full bg-surface-2 object-cover ring-1 ring-glass-border",
           s,

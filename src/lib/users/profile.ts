@@ -353,18 +353,26 @@ export async function changeAvatar(file: File): Promise<Profile> {
 }
 
 /**
- * The public URL for a profile picture, or `undefined` when there is none — in
- * which case the avatar renders the account's initials, as it always has.
+ * The public URL for a stored profile picture, or `undefined` when there is no
+ * path — in which case the avatar renders the account's initials, as it always
+ * has.
  *
  * The bucket is public by design (a profile picture is public on the web), so
- * this is a plain object URL and not a signed one.
+ * this is a plain object URL and not a signed one. It takes the storage path
+ * rather than a whole `Profile` because other accounts arrive as
+ * `PublicProfile` rows from the Data API, whose field is `avatar_path`; both
+ * shapes hold the same object path and must build the same URL.
  */
-export function avatarUrl(profile: Profile | undefined): string | undefined {
-  const path = profile?.avatarPath;
+export function avatarUrlFromPath(path: string | null | undefined): string | undefined {
   if (!path) return undefined;
   const baseUrl = publicConfig.supabase.url.replace(/\/+$/, "");
   if (baseUrl === "") return undefined;
   return `${baseUrl}/storage/v1/object/public/${AVATAR_BUCKET}/${path}`;
+}
+
+/** The public URL for the signed-in caller's profile picture. */
+export function avatarUrl(profile: Profile | undefined): string | undefined {
+  return avatarUrlFromPath(profile?.avatarPath);
 }
 
 /**
