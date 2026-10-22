@@ -25,10 +25,11 @@ import (
 const testSecret = "test-secret-used-only-in-unit-tests-0123456789"
 
 const (
-	sessionID    = "cccccccc-1111-4111-8111-cccccccccccc"
-	theSeed      = "9223372036854775807"
-	greedyRun    = "[0,0,1,0,0,0,2,2,2,3,0,0,0,0]"
-	rulesVersion = "stack-10@1"
+	sessionID           = "cccccccc-1111-4111-8111-cccccccccccc"
+	theSeed             = "9223372036854775807"
+	greedyRun           = "[0,0,1,0,0,0,2,2,2,3,0,0,0,0]"
+	rulesVersion        = "stack-10@1"
+	stack10EndlessRules = "stack-10@2"
 	// Seed 1's first pattern is one cell, then two: a rebuilt pattern and a
 	// losing tap, for ten points and one cleared round.
 	memoryFlashRules = "memory-flash@1"
@@ -295,7 +296,7 @@ func TestStartSessionRefusesRulesItCannotVerify(t *testing.T) {
 	backend.start = supabaseplay.Start{Outcome: "unsupported_runtime"}
 	server := testServer(t, backend)
 
-	status, body := post(t, server, "/api/v1/sessions", startBody("stack-10", "stack-10@2"), "")
+	status, body := post(t, server, "/api/v1/sessions", startBody("stack-10", "stack-10@3"), "")
 
 	if status != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", status)
@@ -568,6 +569,61 @@ func TestCompleteSessionForwardsARunPastTheOldMoveCeiling(t *testing.T) {
 	}
 	if backend.lastRun.RulesVersion != "chain@2" {
 		t.Fatalf("rules version = %q, want chain@2", backend.lastRun.RulesVersion)
+	}
+}
+
+// TestCompleteSessionAcceptsAStack10RunPastTheRetiredDeck is the endless Stack
+// 10 guard: the retired deck's sixty tiles used to be the transport's ceiling, so
+// a run that kept playing would have been refused before the verifier saw it.
+func TestCompleteSessionAcceptsAStack10RunPastTheRetiredDeck(t *testing.T) {
+	backend := testBackend()
+	server := testServer(t, backend)
+
+	// Two hundred columns is far past the sixty-tile deck and is ordinary play on
+	// the endless board.
+	actions := make([]string, 0, 200)
+	for index := 0; index < 200; index += 1 {
+		actions = append(actions, fmt.Sprint(index%4))
+	}
+	status, body := post(t, server,
+		"/api/v1/sessions/"+sessionID+"/complete",
+		completeBodyRules(stack10EndlessRules, "120", "12000",
+			"["+strings.Join(actions, ",")+"]"), "")
+
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%#v)", status, body)
+	}
+	if len(backend.lastRun.Actions) != 200 {
+		t.Fatalf("actions = %d, want the 200 submitted tiles", len(backend.lastRun.Actions))
+	}
+	if backend.lastRun.RulesVersion != stack10EndlessRules {
+		t.Fatalf("rules version = %q, want stack-10@2", backend.lastRun.RulesVersion)
+	}
+}
+
+func TestCompleteSessionRejectsAStack10RunPastTheLegacyDeck(t *testing.T) {
+	backend := testBackend()
+	server := testServer(t, backend)
+
+	// A legacy stack-10@1 run keeps the ordinary sixty-move request bound: the
+	// endless ceiling is raised by the rules version, not for everyone.
+	actions := make([]string, 0, 61)
+	for index := 0; index < 61; index += 1 {
+		actions = append(actions, fmt.Sprint(index%4))
+	}
+	status, body := post(t, server,
+		"/api/v1/sessions/"+sessionID+"/complete",
+		completeBodyRules(rulesVersion, "0", "45000",
+			"["+strings.Join(actions, ",")+"]"), "")
+
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (%#v)", status, body)
+	}
+	if errorCode(t, body) != "bad_request" {
+		t.Fatalf("code = %s, want bad_request", errorCode(t, body))
+	}
+	if backend.runCalls != 0 {
+		t.Fatal("a run past the legacy deck reached the verifier")
 	}
 }
 

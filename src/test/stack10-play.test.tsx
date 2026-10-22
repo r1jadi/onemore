@@ -30,13 +30,20 @@ import { clearSession, signIn } from "@/lib/auth/session";
 
 const SEED_ONE_GREEDY = [0, 0, 1, 0, 0, 0, 2, 2, 2, 3, 0, 0, 0, 0];
 
+/** The retired perfect line, then seven more tiles: past the old deck, into the ramp. */
+const SEED_ONE_ENDLESS = [
+  0, 0, 1, 0, 0, 0, 2, 2, 2, 3, 0, 0, 2, 0, 2, 2, 0, 0, 2, 0, 2, 2, 3, 2, 2, 2, 2, 3, 0, 1, 0, 0, 0,
+  0, 0, 2, 1, 2, 1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 3, 1, 1, 2, 1, 1, 0, 0, 2, 3, 0, 1, 0,
+  1,
+];
+
 function sessionPayload(overrides: Record<string, unknown> = {}) {
   return {
     id: "cccccccc-1111-4111-8111-cccccccccccc",
     gameSlug: "stack-10",
-    rulesVersion: "stack-10@1",
+    rulesVersion: "stack-10@2",
     seed: "1",
-    tileCount: 60,
+    tileCount: 4096,
     startedAt: "2026-10-13T12:00:00.000Z",
     expiresAt: "2026-10-13T14:00:00.000Z",
     ranked: true,
@@ -156,7 +163,9 @@ describe("starting a run", () => {
     // Seed 1's first tile, and four columns to put it in.
     expect(screen.getByText("1")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /^Column \d,/ })).toHaveLength(4);
-    expect(screen.getByText("Tile 1/60")).toBeInTheDocument();
+    expect(screen.getByText("Tile 1")).toBeInTheDocument();
+    // The opening sixty are the retired deck, so the ramp has not started yet.
+    expect(screen.getByText(/opening sixty tiles are the retired deck/)).toBeInTheDocument();
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
@@ -198,7 +207,7 @@ describe("playing the board", () => {
     // Column 2 holds the 1, column 1 is untouched, and the run has moved on.
     expect(screen.getByRole("button", { name: /^Column 2, total 1/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Column 1, total 0/ })).toBeInTheDocument();
-    expect(screen.getByText("Tile 2/60")).toBeInTheDocument();
+    expect(screen.getByText("Tile 2")).toBeInTheDocument();
     // The next tile is 7, and every column is still playable.
     expect(screen.getByText("7")).toBeInTheDocument();
   });
@@ -252,7 +261,31 @@ describe("playing the board", () => {
     fireEvent.keyDown(window, { key: "3" });
 
     expect(screen.getByRole("button", { name: /^Column 3, total 1/ })).toBeInTheDocument();
-    expect(screen.getByText("Tile 2/60")).toBeInTheDocument();
+    expect(screen.getByText("Tile 2")).toBeInTheDocument();
+  });
+
+  it("keeps playing past the retired deck and reports the ramp starting", async () => {
+    const spy = mockPlayback();
+    await renderRuntime();
+    await screen.findByText("Next tile");
+
+    // The retired perfect line: sixty tiles, and the run is still live.
+    await act(async () => {
+      SEED_ONE_ENDLESS.slice(0, 60).forEach(pressColumn);
+    });
+
+    expect(screen.getByText("Tile 61")).toBeInTheDocument();
+    expect(screen.getByText(/the ramp starts on the next tile/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /play again/i })).not.toBeInTheDocument();
+
+    await act(async () => {
+      SEED_ONE_ENDLESS.slice(60, 64).forEach(pressColumn);
+    });
+
+    // Four tiles into the ramp the chance is real, and the board says so.
+    expect(screen.getByText("Tile 65")).toBeInTheDocument();
+    expect(screen.getByText(/Pressure 1% · promoted tiles arrive \+1/)).toBeInTheDocument();
+    expect(spy.mock.calls.some((call) => String(call[0]).includes("/complete"))).toBe(false);
   });
 
   it("shows the run's own score as it plays, which is not a claim that anything was saved", async () => {
@@ -289,13 +322,35 @@ describe("finishing a run", () => {
     expect(screen.getByText("Run over")).toBeInTheDocument();
     // The verified 60, not the 55 the board had accumulated.
     expect(screen.getByText("60")).toBeInTheDocument();
-    expect(screen.getByText("14 tiles placed, 3 columns cleared.")).toBeInTheDocument();
+    expect(
+      screen.getByText("A column passed ten after 14 tiles; 3 columns cleared."),
+    ).toBeInTheDocument();
     expect(screen.getByText("88")).toBeInTheDocument(); // personal best
     expect(screen.getByText("#4")).toBeInTheDocument(); // rank
     expect(screen.getByText(/Verified by replaying your moves on the server/)).toBeInTheDocument();
 
     const completions = spy.mock.calls.filter((call) => String(call[0]).includes("/complete"));
     expect(completions).toHaveLength(1);
+  });
+
+  it("submits the tiles past the old deck, not a cleared run", async () => {
+    const spy = mockPlayback();
+    await renderRuntime();
+    await screen.findByText("Next tile");
+
+    await act(async () => {
+      SEED_ONE_ENDLESS.forEach(pressColumn);
+    });
+
+    await screen.findByRole("button", { name: /play again/i });
+    expect(screen.getByText("Run over")).toBeInTheDocument();
+
+    const completion = spy.mock.calls.find((call) => String(call[0]).includes("/complete"));
+    const body = JSON.parse(String(completion?.[1]?.body ?? "{}"));
+    expect(body.progress.rulesVersion).toBe("stack-10@2");
+    expect(body.progress.actions).toHaveLength(67);
+    expect(body.progress.actions).toEqual(SEED_ONE_ENDLESS);
+    expect(body.score).toBe(435);
   });
 
   it("starts a fresh run from the end-of-run screen", async () => {
@@ -311,7 +366,7 @@ describe("finishing a run", () => {
     fireEvent.click(screen.getByRole("button", { name: /play again/i }));
 
     await screen.findByText("Next tile");
-    expect(screen.getByText("Tile 1/60")).toBeInTheDocument();
+    expect(screen.getByText("Tile 1")).toBeInTheDocument();
     const sessions = spy.mock.calls.filter((call) => String(call[0]).endsWith("/api/v1/sessions"));
     expect(sessions).toHaveLength(2);
   });

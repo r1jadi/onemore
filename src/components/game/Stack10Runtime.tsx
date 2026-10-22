@@ -11,7 +11,13 @@ import {
   type PlaySession,
   type RunResult,
 } from "@/lib/games/sessions";
-import { canPlace, progress, STACK10_COLUMNS, type Stack10Run } from "@/lib/games/stack10";
+import {
+  canPlace,
+  progress,
+  STACK10_COLUMNS,
+  STACK10_TILES,
+  type Stack10Run,
+} from "@/lib/games/stack10";
 
 /**
  * Stack 10, playing for real.
@@ -150,7 +156,8 @@ function Board({
   onPlace: (column: number) => void;
 }) {
   const tile = run.nextTile;
-  const { placed, total } = progress(run);
+  const readout = progress(run);
+  const placed = readout.placed;
 
   return (
     <div className="flex flex-1 flex-col px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
@@ -160,9 +167,7 @@ function Board({
           <dd className="text-2xl font-semibold tabular">{run.score}</dd>
         </dl>
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <span className="tabular">
-            Tile {Math.min(placed + 1, total)}/{total}
-          </span>
+          <span className="tabular">Tile {placed + 1}</span>
           {session.ranked ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-surface-2 px-2 py-1">
               <ShieldCheck className="size-3.5" />
@@ -174,14 +179,23 @@ function Board({
         </div>
       </div>
 
-      <div className="flex items-center justify-center gap-3 py-3">
-        <span className="text-xs text-muted-foreground">Next tile</span>
-        <span
-          aria-live="polite"
-          className="flex size-12 items-center justify-center rounded-xl bg-foreground text-xl font-semibold tabular text-background"
-        >
-          {tile ?? "—"}
-        </span>
+      <div className="flex flex-col items-center gap-1 py-3">
+        <div className="flex items-center justify-center gap-3">
+          <span className="text-xs text-muted-foreground">Next tile</span>
+          <span
+            aria-live="polite"
+            className="flex size-12 items-center justify-center rounded-xl bg-foreground text-xl font-semibold tabular text-background"
+          >
+            {tile ?? "—"}
+          </span>
+        </div>
+        <p className="text-center text-xs text-muted-foreground tabular" aria-live="polite">
+          {readout.pressurePercent === 0
+            ? placed < STACK10_TILES
+              ? "The opening sixty tiles are the retired deck"
+              : "Pressure 0% — the ramp starts on the next tile"
+            : `Pressure ${readout.pressurePercent}% · promoted tiles arrive +${readout.heavyBonus}`}
+        </p>
       </div>
 
       <div className="flex flex-1 items-stretch justify-center gap-2">
@@ -237,7 +251,7 @@ function Board({
       <p className="pt-3 text-center text-xs text-muted-foreground" aria-live="polite">
         {verifying
           ? "Verifying your run with the server…"
-          : "Add up to exactly ten to clear a column. Past ten ends the run."}
+          : "Add up to exactly ten to clear a column. Past ten ends the run. There is no final tile."}
       </p>
     </div>
   );
@@ -294,13 +308,13 @@ function Finished({
           )}
         </div>
         <p className="text-sm text-muted-foreground">
-          {run.outcome === "cleared" ? "Board cleared" : "Run over"}
+          {run.endReason === "limit" ? "Submission limit reached" : "Run over"}
         </p>
         <p className="text-5xl font-semibold tabular">{result.score}</p>
         <p className="text-sm text-muted-foreground">
-          {run.outcome === "cleared"
-            ? `Every one of ${result.tilesPlaced} tiles placed.`
-            : `${result.tilesPlaced} tiles placed, ${result.clearedColumns} columns cleared.`}
+          {run.endReason === "limit"
+            ? `${result.tilesPlaced} tiles placed, ${result.clearedColumns} columns cleared.`
+            : `A column passed ten after ${result.tilesPlaced} tiles; ${result.clearedColumns} columns cleared.`}
         </p>
       </div>
 

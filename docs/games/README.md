@@ -5,27 +5,32 @@ game earns the right to be called playable.
 
 Seven games are implemented today: **Stack 10**, **Chain** (Don't Break the
 Chain), **Memory Flash**, **One Move**, **Color Merge**, **Don't Touch the Black**
-and **7 Second**. Two of them — Chain and Don't Touch the Black — are endless, with
-no final round or row. Every catalogue record is playable, and each one names the
-runtime that plays it; the "no runtime yet" screen remains for any future entry
-that is published before its runtime ships.
+and **7 Second**. Four of them — Stack 10, Chain, Color Merge and Don't Touch the
+Black — are endless, with no final tile, round, slide or row. Every catalogue
+record is playable, and each one names the runtime that plays it; the "no runtime
+yet" screen remains for any future entry that is published before its runtime
+ships.
 
 ## Stack 10
 
 Place the numbered tiles the game deals into four columns. A column that adds up to
 **exactly ten** clears and scores. A column that goes **past ten** ends the run.
+**There is no final tile**: the first sixty are the retired deck, and from there
+the tiles arrive heavier and heavier until the board, not a deck, ends the run.
 
 ### The board
 
-| Thing     | Value                                                             |
-| --------- | ----------------------------------------------------------------- |
-| Columns   | 4                                                                 |
-| Tiles     | 60 per run — the run always ends, so two scores measure one thing |
-| Tile face | 1–9                                                               |
-| Rules     | `stack-10@1`                                                      |
-| Runtime   | `stack-10` (the catalogue's `games.runtime` value)                |
+| Thing     | Value                                                                     |
+| --------- | ------------------------------------------------------------------------- |
+| Columns   | 4                                                                         |
+| Tile face | 1–9                                                                       |
+| Opening   | The retired sixty-tile deck, unchanged                                    |
+| Run       | Endless in principle — no deck, no final tile                             |
+| Limits    | 4096 tiles per submission; that is a request ceiling, not an ending        |
+| Rules     | `stack-10@2` (endless); `stack-10@1` (the retired sixty-tile game)        |
+| Runtime   | `stack-10` (the catalogue's `games.runtime` value)                        |
 
-### The deck
+### The deck and the pressure ramp
 
 The tiles are not random at play time: they are a function of the run's seed, which
 the **server** chooses when it issues the session. The client must produce exactly
@@ -36,12 +41,58 @@ full rather than described:
 state₀ = ((seed mod 2³²) + 2³²) mod 2³²        // the seed is a bigint, reduced to 32 bits
 if state₀ = 0 then state₀ = 2654435769         // 0x9E3779B9: a zero state would be degenerate
 stateₙ = (stateₙ₋₁ × 1664525 + 1013904223) mod 2³²
-tileₙ  = (stateₙ mod 9) + 1                    // 1..9
+base(n)    = (stateₙ mod 9) + 1                // 1..9, the retired deck's draw
+roll(n)    = (stateₙ >> 16) mod 100            // the promotion roll
+percent(n) = 0                                 if n < 60
+           = min(60, floor((n − 60) / 4))      otherwise
+weight(n)  = 1 + floor(n / 240)                // no cap
+tileₙ     = min(9, base(n) + weight(n))        if roll(n) < percent(n)
+          = base(n)                            otherwise
 ```
 
-The tile a move places depends only on how many tiles have been placed, never on
-which column they went into. That is why the board can show the next tile before the
-player chooses — and why `tileAt(seed, n)` in the client is a pure function.
+`n` is the number of tiles already placed, so tile sixty-one is the first the ramp
+can promote. The tile a move places depends only on `n`, never on which column it
+goes into. That is why the board can show the next tile before the player chooses —
+and why `tileAt(seed, n)` in the client is a pure function. The roll is read from
+bits 16 and above, not the low bits, for the same reason the other games do: this
+generator's low bits cycle with a period of two to the power of their width, so a
+roll read from them would repeat whatever the seed.
+
+### Difficulty
+
+The ramp is two curves, both functions of the tile index alone, so every player
+meets the same difficulty at the same point and the verifier does not simulate
+anything to know how hard a board was.
+
+**Promotion chance** — how often a draw arrives heavier:
+
+| Tile | Chance |
+| ---- | ------ |
+| 1–60 | 0%     |
+| 64   | 1%     |
+| 100  | 10%    |
+| 200  | 35%    |
+| 240  | 45%    |
+| 300+ | 60%    |
+
+**Promoted weight** — what a promoted tile gains:
+
+| Tile          | Weight |
+| ------------- | ------ |
+| 0–239         | +1     |
+| 240–479       | +2     |
+| 480–719       | +3     |
+| …             | +1 every 240 tiles, no cap |
+
+The chance ceiling is not where difficulty stops. Once most draws are promoted,
+the weight keeps climbing, so the board keeps receiving the heaviest tiles it can
+hold: a 1–9 face clamps at nine, and a board fed nines needs exact ones to clear.
+The first sixty tiles are never promoted at all, so the opening of an endless run
+is exactly the game that shipped — the former endpoint is where the pressure
+begins, not where the run ends.
+
+A run therefore ends by the player's own columns filling up, not by a counter:
+there is no tile number at which the rules stop dealing.
 
 The seed is a `bigint` column: the database's default draws from the full 2⁶³ range.
 It therefore travels as a **decimal string** and is reduced with integer arithmetic on
@@ -84,14 +135,16 @@ has at least one move.
 
 ### How a run ends
 
-| Outcome   | When                                                                                              |
-| --------- | ------------------------------------------------------------------------------------------------- |
-| `over`    | A column passed ten. The ordinary ending.                                                         |
-| `cleared` | All sixty tiles were placed. A perfect run, and a real one: seed 1 admits at least one such line. |
+| Outcome | Reason     | When                                                                       |
+| ------- | ---------- | -------------------------------------------------------------------------- |
+| `over`  | `overflow` | A column passed ten. The only ending the game has.                         |
+| `over`  | `limit`    | The 4096-tile submission bound was reached. A request ceiling, not a level. |
 
-The score already earned is kept. Every tile of the run must be submitted: a
-submission that stops early is refused, so a player cannot discard the move that
-ended their run.
+The old `cleared` outcome belongs to `stack-10@1` and is never produced under
+`stack-10@2`: a run that places the retired deck's sixty tiles simply keeps
+playing. The score already earned is kept, and every tile of the run must be
+submitted: a submission that stops while the board can still take a tile is
+refused, so a player cannot discard the move that ended their run.
 
 ### Verified scores
 
@@ -105,8 +158,17 @@ never trusted — see
   token — never from an argument. It refuses an unpublished, unplayable or
   unknown game identically (`not_playable`).
 - `public.complete_stack10_run(session, actions, score, duration)` replays the action
-  list from the session's seed, derives the score, compares it with the claim, and
-  only then closes the session and records it.
+  list from the session's seed under the version the session pinned — `stack-10@1`
+  with its sixty-tile deck, or `stack-10@2` with the pressure ramp — derives the
+  score, compares it with the claim, and only then closes the session and records
+  it. `stack10_rules_version()`, `stack10_pressure_percent(n)`,
+  `stack10_heavy_bonus(n)` and `stack10_max_tiles()` are the ramp as data, so the
+  client, the verifier and this document can be compared without replaying a game.
+- A submission carries at most 4096 tiles (`stack10_max_tiles()`). That bound caps
+  a request, not a run.
+- Only a finished board can be submitted under `stack-10@2`. A short submission is
+  `invalid_actions`, not a partial run: without a deck there is nothing that makes
+  a prefix of a run complete.
 
 Outcomes the API maps onto HTTP:
 
@@ -126,37 +188,55 @@ for it to become. The same run cannot later be claimed by a signed-in caller.
 
 ### Test vectors
 
-Three vectors pin the rules to the database's own arithmetic. The first two are
-asserted by the SQL suite and by the client engine; if either side drifts, one of the
-two suites fails.
+Five vectors pin the rules to the database's own arithmetic; each is asserted by
+both the SQL suite and the client engine, so if either side drifts one of the two
+fails.
 
 1. **Seed 1's deck** — `1, 7, 9, 2, 2, 5, 4, 6, 7, 8, 3, 4, 3, 5, …`
 2. **Seed 1, the greedy line** `0,0,1,0,0,0,2,2,2,3,0,0,0,0` — 14 tiles, three clears
    (`1+7+2` = 20, `4+6` = 15, `3+4+3` = 20), **55 points**, and a run that ends when
-   the fourteenth tile (a 5) takes a column holding 7 to 12. Asserted in
-   [`tests/security/rls_test.sql`](../../tests/security/rls_test.sql) and in
-   [`src/lib/games/stack10.test.ts`](../../src/lib/games/stack10.test.ts).
-3. **Seed 1, a perfect line** — the sixty tiles in the order above, for **420
-   points**: twenty-five clears, none deeper than three tiles, and one tile left on
-   the board at the end. It is the best that deck allows, which a search over its
-   reachable states confirms. Asserted by the client engine and used as the
-   play-screen test's full run.
-4. **A full-width seed** — `9223372036854775807` deals `6, 2, 9, 4, 5, 3, 6, 1, …`,
-   which is what catches a client that rounded the seed to a double.
+   the fourteenth tile (a 5) takes a column holding 7 to 12.
+3. **Seed 1, the retired deck** — the same sixty tiles, for **420 points**:
+   twenty-five clears, none deeper than three tiles, and one tile left on the board.
+   It was the perfect `stack-10@1` run. Under `stack-10@2` the same line leaves the
+   run **open at sixty tiles**, with a 9 as the next tile: there is no final tile to
+   reach, and a submission that stops there is refused as partial. Under the legacy
+   version the database still ends it as `cleared`, which is how the two rulesets are
+   compared.
+4. **Seed 1, past the old ending** — the retired deck plus `0,2,3,0,1,0,1`: 67 tiles,
+   one more clear worth 15, **435 points**, ending on the game's own ending — a
+   column past ten. The client engine and the SQL suite both replay this line, and
+   the SQL suite submits it.
+5. **Seed 1, one tile past the deck** — the retired line plus a single move on
+   column two: 61 tiles, **420 points**, ended by that tile overflowing the column.
+   It is recorded, which is the proof that the sixty-tile deck no longer ends
+   anything: the shortest run past the old endpoint is a real, verifiable run.
+
+6. **The ramp** — promotion chance is 0% for
+the first sixty tiles, 1% at tile 64, 10% at 100, 35% at 200 and 60% from 300 on,
+while the weight of a promoted tile is +1 for the first 240 tiles, +2 from 240, +3
+from 480 and so on without cap. The client and the SQL helpers are asserted against
+the same table.
+
+7. **A full-width seed** — `9223372036854775807` deals `6, 2, 9, 4, 5, 3, 6, 1, …`,
+which is what catches a client that rounded the seed to a double.
 
 ### Changing the rules
 
 The rules version is data, not a comment. A session pins the version it was issued
 under, and the verifier only replays versions it implements, so:
 
-1. add a new rules version string (`stack-10@2`),
+1. add a new rules version string (`stack-10@3`),
 2. add the new verifier function rather than editing `complete_stack10_run`,
 3. update the client engine, the vectors above and this document,
-4. sessions pinned to `stack-10@1` keep being verified by the function that
-   implements it.
+4. sessions pinned to `stack-10@1` or `stack-10@2` keep being verified by the branch
+   that implements them.
 
-Editing `stack-10@1` in place would silently re-grade every open session and every
-stored score.
+That is how the endless game shipped: `20261029120000_endless_stack10.sql` added
+`stack-10@2` and its ramp, and left `stack-10@1` exactly as it was, so every open
+session and every stored score from the sixty-tile game still replays to the number
+it was graded with. Editing `stack-10@1` in place would instead have silently
+re-graded all of them.
 
 ## Chain
 

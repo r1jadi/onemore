@@ -1324,6 +1324,13 @@ reset role;
 -- ─────────────────────────────────────────────────────────────────────────────
 
 \set greedy_run 'array[0,0,1,0,0,0,2,2,2,3,0,0,0,0]'
+-- Seed 1's endless Stack 10 line: the retired perfect line (sixty tiles, 420
+-- points, twenty-five clears) plus seven more into the pressure ramp, where the
+-- last tile overflows: sixty-seven tiles, 435 points, twenty-six clears. The
+-- shortest run past the old deck is the same line plus one tile: sixty-one
+-- tiles for 420. See the Stack 10 section of docs/games/README.md.
+\set stack10_endless 'array[0,0,1,0,0,0,2,2,2,3,0,0,2,0,2,2,0,0,2,0,2,2,3,2,2,2,2,3,0,1,0,0,0,0,0,2,1,2,1,0,0,2,0,0,0,0,0,0,1,1,1,1,2,3,1,1,2,1,1,0,0,2,3,0,1,0,1]'
+\set stack10_past_deck 'array[0,0,1,0,0,0,2,2,2,3,0,0,2,0,2,2,0,0,2,0,2,2,3,2,2,2,2,3,0,1,0,0,0,0,0,2,1,2,1,0,0,2,0,0,0,0,0,0,1,1,1,1,2,3,1,1,2,1,1,0,1]'
 -- Seed 1's Chain line: symbols 0,0,2,3,0,0,2,2,0,1 dealt into ten rounds, 55
 -- taps, ten clears, 55 points. See the Chain section of docs/games/README.md.
 \set chain_perfect 'array[0,0,0,0,0,2,0,0,2,3,0,0,2,3,0,0,0,2,3,0,0,0,0,2,3,0,0,2,0,0,2,3,0,0,2,2,0,0,2,3,0,0,2,2,0,0,0,2,3,0,0,2,2,0,1]'
@@ -1376,12 +1383,16 @@ reset role;
 \set secret_game   'aaaaaaaa-5555-4555-8555-aaaaaaaaaaaa'
 \set chain_game    'aaaaaaaa-6666-4666-8666-aaaaaaaaaaaa'
 \set chain_endless_game 'aaaaaaaa-dddd-4ddd-8ddd-aaaaaaaaaaaa'
+\set stack10_endless_game 'aaaaaaaa-eeee-4eee-8eee-aaaaaaaaaaaa'
 \set memory_game   'aaaaaaaa-7777-4777-8777-aaaaaaaaaaaa'
 \set one_move_game 'aaaaaaaa-8888-4888-8888-aaaaaaaaaaaa'
 \set pending_session   'cccccccc-1111-4111-8111-cccccccccccc'
 \set expired_session   'cccccccc-2222-4222-8222-cccccccccccc'
 \set abandoned_session 'cccccccc-3333-4333-8333-cccccccccccc'
 \set guest_session     'cccccccc-4444-4444-8444-cccccccccccc'
+\set stack10_endless_session       'cccccccc-7777-4777-8777-cccccccccccc'
+\set stack10_endless_two_session   'cccccccc-8888-4888-8888-cccccccccccc'
+\set stack10_endless_guest_session 'cccccccc-9999-4999-8999-cccccccccccc'
 \set old_rules_session 'cccccccc-5555-4555-8555-cccccccccccc'
 \set bob_session       'cccccccc-6666-4666-8666-cccccccccccc'
 \set chain_session       'dddddddd-1111-4111-8111-dddddddddddd'
@@ -1433,6 +1444,8 @@ insert into public.games (id, owner_id, slug, title, status, published_at, runti
    (select id from public.categories where slug = 'reaction')),
   (:'chain_endless_game', :'alice', 'fixture-chain-endless', 'Fixture Chain Endless', 'published', now(), 'chain', true,
    (select id from public.categories where slug = 'reaction')),
+  (:'stack10_endless_game', :'alice', 'fixture-stack-endless', 'Fixture Stack 10 Endless', 'published', now(), 'stack-10', true,
+   (select id from public.categories where slug = 'puzzle')),
   (:'memory_game',    :'alice', 'fixture-memory',   'Fixture Memory',   'published', now(), 'memory-flash', true,
    (select id from public.categories where slug = 'memory')),
   (:'one_move_game',  :'alice', 'fixture-one-move', 'Fixture One Move', 'published', now(), 'one-move', true,
@@ -1454,6 +1467,12 @@ insert into public.game_sessions (id, game_id, user_id, seed, rules_version, sta
   (:'guest_session',     :'runnable_game', null,     1, 'stack-10@1', now() - interval '5 minutes', now() + interval '2 hours', null),
   (:'old_rules_session', :'runnable_game', :'alice', 1, 'stack-10@0', now() - interval '5 minutes', now() + interval '2 hours', null),
   (:'bob_session',       :'runnable_game', :'bob',   1, 'stack-10@1', now() - interval '5 minutes', now() + interval '2 hours', null),
+  -- Endless Stack 10 fixtures. Alice plays seed 1 through the retired sixty-tile
+  -- deck and into the ramp; the second session holds the shortest run past it,
+  -- and a guest plays the full endless line.
+  (:'stack10_endless_session',       :'stack10_endless_game', :'alice', 1, 'stack-10@2', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'stack10_endless_two_session',   :'stack10_endless_game', :'alice', 1, 'stack-10@2', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'stack10_endless_guest_session', :'stack10_endless_game', null,     1, 'stack-10@2', now() - interval '5 minutes', now() + interval '2 hours', null),
   -- Chain fixtures under the same rules. Seed 1 deals symbols 0,0,2,3,0,0,2,2,0,1:
   -- round 1 is [0], round 2 [0,0], round 3 [0,0,2], and so on to ten rounds.
   (:'chain_session',       :'chain_game', :'alice', 1, 'chain@1', now() - interval '5 minutes', now() + interval '2 hours', null),
@@ -1619,6 +1638,62 @@ select rls_test.raises(
   $$select public.color_merge_spawn_percent(0)$$,
   '22023', 'a spawn before the first has no promotion chance'
 );
+-- The Stack 10 generator and its pressure ramp, asserted directly. The first
+-- sixty tiles are the retired deck; from tile sixty-one a draw can arrive
+-- promoted, heavier by a chance and a weight that both climb. A drift here is a
+-- drift in both copies, and every honest endless run would be refused.
+select rls_test.ok(
+  public.stack10_rules_version() = 'stack-10@2'
+  and public.stack10_tiles() = 60
+  and public.stack10_max_tiles() = 4096,
+  'the endless rules: no deck, a 4096-tile submission bound, and the legacy 60 kept for stack-10@1'
+);
+select rls_test.ok(
+  public.stack10_pressure_percent(59) = 0
+  and public.stack10_pressure_percent(60) = 0
+  and public.stack10_pressure_percent(63) = 0
+  and public.stack10_pressure_percent(64) = 1
+  and public.stack10_pressure_percent(100) = 10
+  and public.stack10_pressure_percent(200) = 35
+  and public.stack10_pressure_percent(240) = 45
+  and public.stack10_pressure_percent(300) = 60
+  and public.stack10_pressure_percent(100000) = 60,
+  'the Stack 10 pressure chance starts after the retired deck and stops at 60%'
+);
+select rls_test.ok(
+  public.stack10_heavy_bonus(0) = 1
+  and public.stack10_heavy_bonus(239) = 1
+  and public.stack10_heavy_bonus(240) = 2
+  and public.stack10_heavy_bonus(480) = 3
+  and public.stack10_heavy_bonus(1920) = 9
+  and public.stack10_heavy_bonus(100000) = 417,
+  'the Stack 10 promoted weight climbs every 240 tiles, without cap'
+);
+select rls_test.ok(
+  (select array_agg(public.stack10_tile(1, placed) order by placed)
+     from generate_series(0, 13) as placed)
+    = array[1,7,9,2,2,5,4,6,7,8,3,4,3,5]::integer[],
+  'the generator deals seed 1''s retired deck before the ramp'
+);
+select rls_test.ok(
+  public.stack10_tile(1, 60) = 9
+  and public.stack10_tile(1, 64) = 4
+  and public.stack10_tile(1, 100) = 4
+  and public.stack10_tile(1, 240) = 9
+  and public.stack10_tile(1, 300) = 1
+  and public.stack10_tile(1, 480) = 9,
+  'the generator draws the ramped tiles the client engine computes'
+);
+select rls_test.ok(
+  (select array_agg(public.stack10_tile(9223372036854775807, placed) order by placed)
+     from generate_series(0, 7) as placed)
+    = array[6,2,9,4,5,3,6,1]::integer[],
+  'the generator replays a full-width seed exactly'
+);
+select rls_test.raises(
+  $$select public.stack10_tile(1, -1)$$,
+  '22023', 'a tile index is zero or more'
+);
 -- The Don't Touch the Black generator, asserted directly: the whole sixty-cell
 -- deck is the one the client engine computes and the verifier replays. A drift
 -- here is a drift in both copies, and every honest run would be refused.
@@ -1773,6 +1848,10 @@ select rls_test.raises(
 );
 select rls_test.says(
   $$public.start_game_session('fixture-runnable', 'stack-10@2', 'test')$$,
+  'started', 'an endless Stack 10 run can be started'
+);
+select rls_test.says(
+  $$public.start_game_session('fixture-runnable', 'stack-10@3', 'test')$$,
   'unsupported_runtime', 'rules the verifier does not implement are refused at the door'
 );
 -- The shipped game itself, not a fixture: after every migration has been applied,
@@ -1794,6 +1873,18 @@ select rls_test.visible(
 select rls_test.says_field(
   $$public.start_game_session('stack-10', 'stack-10@1', 'test/1.0')$$,
   'game_slug', 'stack-10', 'the shipped game issues a run like any other'
+);
+select rls_test.says_field(
+  $$public.start_game_session('stack-10', 'stack-10@2', 'test/1.0')$$,
+  'rules_version', 'stack-10@2', 'the shipped Stack 10 game issues the endless rules'
+);
+select rls_test.says_field(
+  $$public.start_game_session('stack-10', 'stack-10@2', 'test/1.0')$$,
+  'tile_count', '4096', 'an endless Stack 10 session reports the submission bound, not a final tile'
+);
+select rls_test.says_field(
+  $$public.start_game_session('stack-10', 'stack-10@1', 'test/1.0')$$,
+  'tile_count', '60', 'a legacy Stack 10 session still counts its sixty tiles'
 );
 -- The shipped Chain game, same shape: playable, naming its runtime, issuing a
 -- run whose move count is taps rather than tiles.
@@ -2056,6 +2147,16 @@ select rls_test.says_field(
   format($$public.complete_stack10_run('cccccccc-4444-4444-8444-cccccccccccc'::uuid, %s, 55, 45000)$$, :'greedy_run'),
   'ranked', 'false', 'a guest run is never ranked'
 );
+-- A guest endless run takes the same path: verified, recorded on its session,
+-- and never ranked, because a guest has no score to set.
+select rls_test.says(
+  format($$public.complete_stack10_run('cccccccc-9999-4999-8999-cccccccccccc'::uuid, %s, 435, 45000)$$, :'stack10_endless'),
+  'recorded', 'a guest endless Stack 10 run is replayed and recorded'
+);
+select rls_test.says_field(
+  format($$public.complete_stack10_run('cccccccc-9999-4999-8999-cccccccccccc'::uuid, %s, 435, 45000)$$, :'stack10_endless'),
+  'ranked', 'false', 'a guest endless Stack 10 run is never ranked'
+);
 -- A guest Chain run completes the same way: verified, recorded, unranked.
 select rls_test.says(
   format($$public.complete_chain_run('dddddddd-4444-4444-8444-dddddddddddd'::uuid, %s, 55, 45000)$$, :'chain_perfect'),
@@ -2255,6 +2356,55 @@ select rls_test.ok(
 select rls_test.ok(
   (select rank = 1 and score = 55 from public.game_standing('fixture-runnable', '11111111-1111-4111-8111-111111111111', null)),
   'your standing on the board is your recorded best at its real rank'
+);
+-- ── Endless Stack 10: past the retired deck, and only the board ends a run ──
+--
+-- Seed 1's retired perfect line is sixty tiles for 420; the endless rules keep
+-- playing, and seven more tiles end it at sixty-seven for 435. The retired line
+-- on its own is now a *partial* run, which is the proof the deck no longer ends
+-- anything.
+select rls_test.ok(
+  (select r.outcome = 'recorded'
+      and r.score = 435
+      and r.tiles_placed = 67
+      and r.cleared_columns = 26
+     from public.complete_stack10_run(
+       'cccccccc-7777-4777-8777-cccccccccccc'::uuid, :stack10_endless, 435, 45000) r),
+  'an endless Stack 10 run is recorded: sixty-seven tiles, 435 points'
+);
+select rls_test.says(
+  format($$public.complete_stack10_run('cccccccc-7777-4777-8777-cccccccccccc'::uuid, %s, 435, 45000)$$, :'stack10_endless'),
+  'duplicate', 'a retry of the same endless Stack 10 run is safe to repeat'
+);
+select rls_test.says(
+  $$public.complete_stack10_run('cccccccc-7777-4777-8777-cccccccccccc'::uuid, array[0], 0, 45000)$$,
+  'closed', 'a closed endless Stack 10 session does not accept a different run'
+);
+select rls_test.ok(
+  (select rank = 1 and score = 435 from public.game_standing('fixture-stack-endless', '11111111-1111-4111-8111-111111111111', null)),
+  'an endless Stack 10 score becomes the standing on its own board'
+);
+-- The retired perfect line, submitted to an endless session, stops at tile 60
+-- with the board still able to take a tile: a partial run, not a complete one.
+select rls_test.says(
+  format($$public.complete_stack10_run('cccccccc-8888-4888-8888-cccccccccccc'::uuid, (%s)[1:60], 420, 45000)$$, :'stack10_endless'),
+  'invalid_actions', 'the retired sixty-tile line is a partial endless run'
+);
+select rls_test.says_field(
+  format($$public.complete_stack10_run('cccccccc-8888-4888-8888-cccccccccccc'::uuid, %s, 999, 45000)$$, :'stack10_endless'),
+  'score', '435', 'the endless Stack 10 replay is the score, and it is reported back'
+);
+select rls_test.says(
+  format($$public.complete_stack10_run('cccccccc-8888-4888-8888-cccccccccccc'::uuid, %s || 0, 435, 45000)$$, :'stack10_endless'),
+  'invalid_actions', 'a tile after the endless board ended is impossible play'
+);
+-- The shortest run past the old deck: the retired line plus one tile, which
+-- overflows. It is recorded where the sixty-tile line was refused.
+select rls_test.ok(
+  (select r.outcome = 'recorded' and r.score = 420 and r.tiles_placed = 61
+     from public.complete_stack10_run(
+       'cccccccc-8888-4888-8888-cccccccccccc'::uuid, :stack10_past_deck, 420, 45000) r),
+  'a run one tile past the retired deck is recorded: sixty-one tiles, 420 points'
 );
 
 -- ── Chain: the same properties, replayed against a growing sequence ──

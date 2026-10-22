@@ -33,11 +33,12 @@ function sessionPayload(overrides: Partial<PlaySession> = {}): PlaySession {
   return {
     id: "cccccccc-1111-4111-8111-cccccccccccc",
     gameSlug: "stack-10",
-    rulesVersion: "stack-10@1",
+    rulesVersion: "stack-10@2",
     // A decimal string, and deliberately one bigger than a JS safe integer: the
     // client must not round it.
     seed: "9223372036854775807",
-    tileCount: 60,
+    // The submission bound, not a run's length: an endless Stack 10 run has none.
+    tileCount: 4096,
     startedAt: "2026-10-13T12:00:00.000Z",
     expiresAt: "2026-10-13T14:00:00.000Z",
     ranked: true,
@@ -153,7 +154,7 @@ describe("startSession", () => {
     const body = requestBody(spy);
     expect(body).toEqual({
       gameSlug: "stack-10",
-      rulesVersion: "stack-10@1",
+      rulesVersion: "stack-10@2",
       client: "web/1.0",
     });
     // No user id, and no seed: both are the server's to choose.
@@ -197,7 +198,7 @@ describe("startSession", () => {
 
     await startSession("stack-10");
 
-    expect(requestBody(spy).rulesVersion).toBe("stack-10@1");
+    expect(requestBody(spy).rulesVersion).toBe("stack-10@2");
   });
 });
 
@@ -480,14 +481,14 @@ describe("useStack10Run", () => {
     expect(hook.result.result.personalBest).toBeNull();
   });
 
-  it("submits a run that ended by clearing every tile", async () => {
+  it("does not end a run at the retired sixty-tile deck", async () => {
     const perfect = [
       0, 0, 1, 0, 0, 0, 2, 2, 2, 3, 0, 0, 2, 0, 2, 2, 0, 0, 2, 0, 2, 2, 3, 2, 2, 2, 2, 3, 0, 1, 0,
       0, 0, 0, 0, 2, 1, 2, 1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 3, 1, 1, 2, 1, 1, 0,
     ];
     const spy = mockFetch((url) =>
       url.includes("/complete")
-        ? jsonResponse(resultPayload({ score: 420, tilesPlaced: 60 }))
+        ? jsonResponse(resultPayload({ score: 435, tilesPlaced: 67 }))
         : jsonResponse(sessionPayload({ seed: "1" }), 201),
     );
 
@@ -498,14 +499,31 @@ describe("useStack10Run", () => {
       perfect.forEach((column) => hook.result.place(column));
     });
 
-    await waitFor(() => expect(hook.result.status).toBe("finished"));
-    if (hook.result.status !== "finished") throw new Error("run was not verified");
+    // Sixty tiles used to be a complete run and a `cleared` outcome. It is not one
+    // any more: the board can still take a tile, so nothing is submitted and the
+    // run keeps playing.
+    const live = hook.result;
+    expect(live.status).toBe("playing");
+    if (live.status !== "playing") throw new Error("the old deck ended the run");
+    expect(live.run.actions).toHaveLength(60);
+    expect(live.run.outcome).toBe("playing");
+    expect(live.run.nextTile).toBe(9);
+    expect(spy.mock.calls.filter((call) => String(call[0]).includes("/complete"))).toHaveLength(0);
 
-    expect(hook.result.run.outcome).toBe("cleared");
-    expect(hook.result.result.tilesPlaced).toBe(60);
+    // Seven more tiles, the last of which passes ten.
+    act(() => {
+      [0, 2, 3, 0, 1, 0, 1].forEach((column) => hook.result.place(column));
+    });
+
+    await waitFor(() => expect(hook.result.status).toBe("finished"));
+    const done = hook.result;
+    if (done.status !== "finished") throw new Error("run was not verified");
+
+    expect(done.run.endReason).toBe("overflow");
+    expect(done.result.tilesPlaced).toBe(67);
 
     const index = spy.mock.calls.findIndex((call) => String(call[0]).includes("/complete"));
-    expect(requestBody(spy, index).progress.actions).toEqual(perfect);
+    expect(requestBody(spy, index).progress.actions).toEqual([...perfect, 0, 2, 3, 0, 1, 0, 1]);
   });
 
   it("submits the run derived by the engine, not a number a caller supplied", async () => {
@@ -528,7 +546,7 @@ describe("useStack10Run", () => {
     if (hook.result.status !== "finished") throw new Error("run was not verified");
 
     expect(submission(hook.result.run)).toEqual({
-      rulesVersion: "stack-10@1",
+      rulesVersion: "stack-10@2",
       actions: GREEDY_LINE,
       score: 55,
       tilesPlaced: 14,

@@ -61,10 +61,11 @@ const (
 	// 7 Second. The verifier enforces its own game's bound too; this only keeps an
 	// absurd body from reaching the database at all.
 	maxActions = 60
-	// The endless games' submission bounds. These are request ceilings rather
-	// than complete-run lengths: chain@2 and color-merge@2 carry at most 4096
-	// moves, and dont-touch@2 at most 4095 cell taps (a cell can be tapped once).
-	// Every other runtime keeps the bound its own verifier owns.
+	// The endless games' submission bounds. These are request ceilings rather than
+	// complete-run lengths: stack-10@2, chain@2 and color-merge@2 carry at most
+	// 4096 moves, and dont-touch@2 at most 4095 cell taps (a cell can be tapped
+	// once). Every other runtime keeps the bound its own verifier owns.
+	stack10MaxActions    = 4096
 	chainMaxActions      = 4096
 	colorMergeMaxActions = 4096
 	dontTouchMaxActions  = 4095
@@ -313,6 +314,8 @@ func (s *service) completeSession(w http.ResponseWriter, r *http.Request) {
 	actions := body.Progress.Actions
 	limit := maxActions
 	switch {
+	case rules == "stack-10@2":
+		limit = stack10MaxActions
 	case rules == "chain@2":
 		limit = chainMaxActions
 	case rules == "color-merge@2":

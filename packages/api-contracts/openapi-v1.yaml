@@ -918,13 +918,18 @@ paths:
                         answer button for 7 Second. This is what is replayed; the
                         rules for how a move is generated and what it does belong
                         to the game (see `docs/games`). The bound is a submission's
-                        move ceiling, not a complete run: finite runs are at most
-                        the retired Don't Touch the Black deck's sixty cells (One
-                        Move addresses twenty-five, Memory Flash sixteen, Stack 10
-                        and Color Merge 0–3, and 7 Second 0–2), while the endless
-                        games carry up to 4096 Chain taps, 4096 Color Merge slides
-                        and 4095 Don't Touch the Black cell taps. Each verifier
-                        refuses anything past its own bound.
+                        move ceiling, not a complete run: the finite games' lengths
+                        are the moves they hold (sixty tiles for the retired Stack
+                        10 deck, sixty cells for the retired Don't Touch the Black
+                        deck, twenty-five for One Move, sixteen for Memory Flash,
+                        forty-eight slides for the retired Color Merge deck), while
+                        the endless games carry up to 4096 Stack 10 tiles, 4096
+                        Chain taps, 4096 Color Merge slides and 4095 Don't Touch
+                        the Black cell taps. A position is a column for Stack 10
+                        (0–3), a pad for Chain, a cell for Memory Flash, One Move
+                        and Don't Touch the Black, a direction for Color Merge
+                        (0–3) and an answer button for 7 Second (0–2). Each
+                        verifier refuses anything past its own bound.
                       maxItems: 4096
                       # The highest position any shipped version addresses: a cell
                       # on Don't Touch the Black's endless conveyor (0–4094).
@@ -2143,7 +2148,7 @@ components:
         tileCount:
           type: integer
           minimum: 1
-          description: "How many moves a run holds: tiles for Stack 10, taps for Memory Flash and One Move, slides for Color Merge, cell taps for Don't Touch the Black, and answers for 7 Second. The endless games report their submission bound instead of a complete length, because they have none: 4096 taps for Chain, 4096 slides for Color Merge and 4095 cell taps for Don't Touch the Black. The client does not choose it."
+          description: "How many moves a run holds: tiles for Stack 10, taps for Memory Flash and One Move, slides for Color Merge, cell taps for Don't Touch the Black, and answers for 7 Second. The endless games report their submission bound instead of a complete length, because they have none: 4096 tiles for Stack 10, 4096 taps for Chain, 4096 slides for Color Merge and 4095 cell taps for Don't Touch the Black. The client does not choose it."
         startedAt: { type: string, format: date-time }
         expiresAt:
           type: string
