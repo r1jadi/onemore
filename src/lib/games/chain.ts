@@ -3,25 +3,36 @@
  *
  * This module is the *client's* copy of the rules. The authority is the database:
  * `public.complete_chain_run` in
- * `supabase/migrations/20261014120000_chain_sessions.sql` replays the submitted
+ * `supabase/migrations/20261026130000_endless_chain.sql` replays the submitted
  * tap list against the session's sequence and derives the score itself. Two copies
  * of one ruleset is a real risk, so the copy is pinned in three ways:
  *
  *   - **The rules version is data.** A session carries the version it was started
- *     under (`chain@1`), the server refuses to verify a version it does not
+ *     under (`chain@2`), the server refuses to verify a version it does not
  *     implement, and this module declares the same string. A change to the rules
- *     is a change to the version, not an edit in place.
+ *     is a change to the version, not an edit in place. The server still verifies
+ *     the finite `chain@1` runs that sessions were pinned to before endless play.
  *   - **The state machine is total and pure.** `tap` takes a run and a pad and
  *     returns a run — no clock, no randomness, no I/O — so the same inputs
- *     produce the same run on both sides.
+ *     produce the same run on both sides. The tempo lives in `chainTempo`, which
+ *     is also pure: time decides how long a symbol is shown, never what a tap is
+ *     worth.
  *   - **It is tested against the database's own numbers.** The vectors in
  *     `chain.test.ts` are the ones `tests/security/rls_test.sql` asserts (seed 1,
- *     the perfect 55-tap line, the broken chain). See `docs/games/README.md`.
+ *     the rounds before the old tenth, the broken chain, the run that continues
+ *     past ten). See `docs/games/README.md`.
  *
  * The client cannot invent a score even if this file is wrong: a wrong replay
  * produces a number the server's replay disagrees with, and the submission is
  * refused with `score_mismatch`. What the module must get right is *agreement*, and
  * the failure mode of disagreement is a rejected run rather than a wrong one.
+ *
+ * Endless rule: there is no final round. Round r shows the sequence's first r
+ * symbols and the player repeats all r of them; a correct tap scores one point and
+ * a wrong tap ends the run. The sequence is infinite, so the game is: the only
+ * ceiling is the player's memory, and every round the beat gets a little tighter
+ * until it reaches a fair floor — after which the growing sequence is the whole of
+ * the difficulty.
  *
  * Storage rule: nothing here is persisted. A run lives in React state for as long
  * as the screen is open; losing it costs the player one run and never a score,
@@ -32,12 +43,17 @@
 export const CHAIN_RUNTIME = "chain";
 
 /** The rules the server can verify. Sent with every run and pinned to a session. */
-export const CHAIN_RULES_VERSION = "chain@1";
+export const CHAIN_RULES_VERSION = "chain@2";
 
-/** The board: four pads, ten rounds, fifty-five taps in a perfect run. */
+/** The board: four pads. There is no round count — the sequence never ends. */
 export const CHAIN_PADS = 4;
-export const CHAIN_ROUNDS = 10;
-export const CHAIN_TAPS = 55;
+
+/**
+ * The most taps a submission may carry. This is a transport and replay bound, not
+ * a game rule: a run that reached it would have been played for hours, far past
+ * the point where a session is still open. The server enforces the same number.
+ */
+export const CHAIN_MAX_TAPS = 4096;
 
 // The generator, state for state as `complete_chain_run` advances it: the same
 // 32-bit LCG Stack 10's deck uses (see `src/lib/games/stack10.ts`), with the
@@ -58,13 +74,50 @@ const LCG_INCREMENT = 1013904223n;
 const ZERO_STATE_FALLBACK = 2654435769n;
 const SYMBOL_SHIFT = 16n;
 
+// The tempo curve. Round one is unhurried; each round shortens both the lit step
+// and the gap, until each reaches its floor. The floors are where a step stops
+// being readable — tightening further would make a round unfair rather than
+// harder — and they are deliberately *not* the end of progression: the sequence
+// keeps growing by one every round, so difficulty never becomes static.
+const TEMPO_START_LIT_MS = 440;
+const TEMPO_LIT_STEP_MS = 18;
+const TEMPO_MIN_LIT_MS = 220;
+const TEMPO_START_GAP_MS = 200;
+const TEMPO_GAP_STEP_MS = 10;
+const TEMPO_MIN_GAP_MS = 100;
+
+/** The beat a round is shown at: how long each symbol lights, and the gap between. */
+export type ChainTempo = {
+  readonly litMs: number;
+  readonly gapMs: number;
+};
+
+/**
+ * The tempo for a round, 1-based.
+ *
+ * Both values decrease linearly and then hold at a floor, so the curve is
+ * deterministic, measurable, and testable without a clock. `litMs` reaches its
+ * floor at round 13 and `gapMs` at round 11; from there the growing sequence is
+ * the challenge. The result is a plain object so a caller cannot mutate the curve.
+ */
+export function chainTempo(round: number): ChainTempo {
+  if (!Number.isInteger(round) || round < 1) {
+    throw new RangeError("a Chain round must be a whole number of one or more");
+  }
+  const steps = round - 1;
+  return {
+    litMs: Math.max(TEMPO_MIN_LIT_MS, TEMPO_START_LIT_MS - steps * TEMPO_LIT_STEP_MS),
+    gapMs: Math.max(TEMPO_MIN_GAP_MS, TEMPO_START_GAP_MS - steps * TEMPO_GAP_STEP_MS),
+  };
+}
+
 /**
  * How a run ended.
  *
- * `over` — a tap broke the chain, which is the ordinary ending.
- * `cleared` — all ten rounds were reproduced, all fifty-five taps.
+ * `over` — a tap broke the chain, which is the only ending. A run never "clears":
+ * there is always another round, so the score is how far the player got.
  */
-export type ChainOutcome = "playing" | "over" | "cleared";
+export type ChainOutcome = "playing" | "over";
 
 /** One run, as this module knows it. */
 export type ChainRun = {
@@ -82,9 +135,9 @@ export type ChainRun = {
    * one point per correct tap.
    */
   readonly score: number;
-  /** Rounds fully reproduced so far. */
+  /** Rounds fully reproduced so far. Unbounded. */
   readonly roundsCleared: number;
-  /** The round being played, 1-based. */
+  /** The round being played, 1-based. Unbounded. */
   readonly round: number;
   readonly outcome: ChainOutcome;
 };
@@ -123,7 +176,13 @@ function draw(state: bigint): { state: bigint; symbol: number } {
   return { state: next, symbol: Number((next >> SYMBOL_SHIFT) % 4n) };
 }
 
-/** The `index`-th symbol of a run's sequence (0-based). */
+/**
+ * The `index`-th symbol of a run's sequence (0-based).
+ *
+ * The generator is advanced from the seed on each call rather than cached, so
+ * this stays a pure function of its inputs; the screen asks for the symbols of
+ * one round at a time, and round r is at most r draws.
+ */
 export function symbolAt(seed: string | number | bigint, index: number): number {
   if (!Number.isInteger(index) || index < 0) {
     throw new RangeError("a symbol index must be a whole number of zero or more");
@@ -143,7 +202,12 @@ export function tapsInRound(round: number): number {
   return round;
 }
 
-/** Taps a perfect run holds through `round` (1-based): 1 + 2 + … + round. */
+/**
+ * Taps a run holds through `round` (1-based): 1 + 2 + … + round.
+ *
+ * This is what lets a tap be checked against its position *within* its round in
+ * constant time, however many rounds have been played.
+ */
 export function totalTapsThrough(round: number): number {
   return (round * (round + 1)) / 2;
 }
@@ -163,16 +227,15 @@ export function createRun(seed: string | number | bigint): ChainRun {
 }
 
 /**
- * Whether a tap is playable: the run is live, there are rounds left, and the
- * pad exists.
+ * Whether a tap is playable: the run is live and the pad exists.
  *
  * The board calls this to decide whether a pad is pressable, so an impossible
  * tap is never offered in the first place — and `tap` checks it again, because
- * a keyboard or programmatic path must not be able to make one either.
+ * a keyboard or programmatic path must not be able to make one either. There is
+ * no round limit to check: a live run always has a next round.
  */
 export function canTap(run: ChainRun, pad: number): boolean {
   if (run.outcome !== "playing") return false;
-  if (run.taps.length >= CHAIN_TAPS) return false;
   return Number.isInteger(pad) && pad >= 0 && pad < CHAIN_PADS;
 }
 
@@ -183,8 +246,8 @@ export function canTap(run: ChainRun, pad: number): boolean {
  * the symbol at its position *within its round*, not at its absolute position:
  * the third tap of round three must equal the sequence's third symbol, the way
  * the verifier replays it. A wrong tap ends the run with a loss and is still
- * part of it — a loss is submitted, not hidden — and completing the tenth
- * round clears the run.
+ * part of it — a loss is submitted, not hidden. A correct tap that completes a
+ * round starts the next one, one symbol longer, for as long as the player lasts.
  *
  * An impossible tap is not a tap: the run comes back unchanged. That is
  * deliberate rather than an exception — a tap that arrives one frame after the
@@ -203,15 +266,13 @@ export function tap(run: ChainRun, pad: number): ChainRun {
   }
 
   const roundDone = taken + 1 >= run.round;
-  const roundsCleared = roundDone ? run.roundsCleared + 1 : run.roundsCleared;
-  const outcome: ChainOutcome = taps.length >= CHAIN_TAPS ? "cleared" : "playing";
   return {
     ...run,
     taps,
     score: run.score + 1,
-    roundsCleared,
-    round: outcome === "cleared" ? CHAIN_ROUNDS : roundDone ? run.round + 1 : run.round,
-    outcome,
+    roundsCleared: roundDone ? run.roundsCleared + 1 : run.roundsCleared,
+    round: roundDone ? run.round + 1 : run.round,
+    outcome: "playing",
   };
 }
 
@@ -239,12 +300,14 @@ export function submission(run: ChainRun): ChainSubmission {
   };
 }
 
-/** How far through the run the player is, for the progress readout. */
+/**
+ * The progression readout. There is no `total` because there is no final round:
+ * the meaningful numbers are how far the player got and how many taps it took.
+ */
 export function progress(run: ChainRun): {
   taps: number;
-  total: number;
   round: number;
-  rounds: number;
+  roundsCleared: number;
 } {
-  return { taps: run.taps.length, total: CHAIN_TAPS, round: run.round, rounds: CHAIN_ROUNDS };
+  return { taps: run.taps.length, round: run.round, roundsCleared: run.roundsCleared };
 }

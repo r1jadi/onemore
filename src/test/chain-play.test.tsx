@@ -10,6 +10,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChainRuntime } from "@/components/game/ChainRuntime";
 import { clearSession, signIn } from "@/lib/auth/session";
+import { symbolAt } from "@/lib/games/chain";
+
+// The board's beat is a real rule, asserted in chain.test.ts. Here it is
+// compressed so that playing a dozen rounds costs milliseconds rather than the
+// better part of a minute; the round's lead-in still runs on real timers.
+vi.mock("@/lib/games/chain", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/games/chain")>();
+  return { ...actual, chainTempo: () => ({ litMs: 1, gapMs: 0 }) };
+});
 
 /**
  * Chain on screen.
@@ -33,9 +42,9 @@ function sessionPayload(overrides: Record<string, unknown> = {}) {
   return {
     id: "cccccccc-1111-4111-8111-cccccccccccc",
     gameSlug: "dont-break-the-chain",
-    rulesVersion: "chain@1",
+    rulesVersion: "chain@2",
     seed: "1",
-    tileCount: 55,
+    tileCount: 4096,
     startedAt: "2026-10-13T12:00:00.000Z",
     expiresAt: "2026-10-13T14:00:00.000Z",
     ranked: true,
@@ -158,29 +167,29 @@ describe("starting a run", () => {
     await renderRuntime();
 
     expect(screen.getByText("Starting a run…")).toBeInTheDocument();
-    expect(screen.queryByText(/Watch the sequence/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Round \d+: watch/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Pad 1\./ })).not.toBeInTheDocument();
 
     await act(async () => {
       release?.();
     });
 
-    await screen.findByText(/Watch the sequence/);
+    await screen.findByText(/Round \d+: watch/);
     expect(screen.getByText("Ranked")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /^Pad \d\./ })).toHaveLength(4);
-    expect(screen.getByText("Round 1/10")).toBeInTheDocument();
+    expect(screen.getByText("Round 1")).toBeInTheDocument();
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
   it("asks for a Chain session, not a Stack 10 one", async () => {
     const spy = mockPlayback();
     await renderRuntime();
-    await screen.findByText(/Watch the sequence/);
+    await screen.findByText(/Round \d+: watch/);
 
     const start = spy.mock.calls.find((call) => String(call[0]).endsWith("/api/v1/sessions"));
     expect(JSON.parse(String(start?.[1]?.body ?? "{}"))).toEqual({
       gameSlug: "dont-break-the-chain",
-      rulesVersion: "chain@1",
+      rulesVersion: "chain@2",
       client: "web/1.0",
     });
   });
@@ -208,7 +217,7 @@ describe("starting a run", () => {
     expect(screen.getByText("Play sessions are not available right now.")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /retry/i }));
-    await screen.findByText(/Watch the sequence/);
+    await screen.findByText(/Round \d+: watch/);
   });
 });
 
@@ -216,7 +225,7 @@ describe("playing the board", () => {
   it("offers no tap while the sequence is showing", async () => {
     mockPlayback();
     await renderRuntime();
-    await screen.findByText(/Watch the sequence/);
+    await screen.findByText(/Round \d+: watch/);
 
     // Four pads, every one disabled, every one saying why.
     for (const pad of screen.getAllByRole("button", { name: /^Pad \d\./ })) {
@@ -239,14 +248,52 @@ describe("playing the board", () => {
     // Round one is [0]: the first pad.
     tapPad(0);
 
-    expect(screen.getByText("Round 2/10")).toBeInTheDocument();
-    await screen.findByText(/Watch the sequence/);
+    expect(screen.getByText("Round 2")).toBeInTheDocument();
+    await screen.findByText(/Round \d+: watch/);
     await waitForTurn(2);
 
     expect(
       screen.getByRole("button", { name: /^Pad 1\. Tap to repeat step 1 of 2\./ }),
     ).toBeInTheDocument();
   }, 15000);
+
+  it("plays beyond the old tenth round and keeps the run alive", async () => {
+    const spy = mockFetch((url) =>
+      url.includes("/complete")
+        ? jsonResponse(resultPayload({ score: 66, clearedColumns: 11, tilesPlaced: 67 }))
+        : jsonResponse(sessionPayload(), 201),
+    );
+    await renderRuntime();
+
+    // Eleven complete rounds: one more than the game used to allow. Every tap
+    // is the seed's symbol at that position in the round, so this is the same
+    // line the SQL suite verifies.
+    for (let round = 1; round <= 11; round += 1) {
+      await waitForTurn(round);
+      expect(screen.getByText(`Round ${round}`)).toBeInTheDocument();
+      for (let step = 0; step < round; step += 1) {
+        tapPad(symbolAt("1", step));
+      }
+    }
+
+    // Round twelve is live, and nothing has been submitted: the former tenth
+    // round is not an ending, a completion or a cap.
+    await waitForTurn(12);
+    expect(screen.getByText("Round 12")).toBeInTheDocument();
+    expect(spy.mock.calls.some((call) => String(call[0]).includes("/complete"))).toBe(false);
+
+    // One wrong tap ends it, and the whole line is submitted: 66 correct taps,
+    // the losing one, and eleven cleared rounds.
+    tapPad((symbolAt("1", 0) + 1) % 4);
+
+    await screen.findByRole("button", { name: /play again/i });
+    const completion = spy.mock.calls.find((call) => String(call[0]).includes("/complete"));
+    const body = JSON.parse(String(completion?.[1]?.body ?? "{}"));
+    expect(body.progress.actions).toHaveLength(67);
+    expect(body.score).toBe(66);
+    expect(screen.getByText("66")).toBeInTheDocument();
+    expect(screen.getByText("67 taps placed, 11 rounds cleared.")).toBeInTheDocument();
+  }, 20000);
 
   it("plays a pad from the keyboard", async () => {
     mockPlayback();
@@ -255,18 +302,18 @@ describe("playing the board", () => {
 
     fireEvent.keyDown(window, { key: "1" });
 
-    expect(screen.getByText("Round 2/10")).toBeInTheDocument();
+    expect(screen.getByText("Round 2")).toBeInTheDocument();
   });
 
   it("ignores the keyboard while the sequence is showing", async () => {
     mockPlayback();
     await renderRuntime();
-    await screen.findByText(/Watch the sequence/);
+    await screen.findByText(/Round \d+: watch/);
 
     fireEvent.keyDown(window, { key: "1" });
 
     // Still round one, still showing: the keypress must do nothing.
-    expect(screen.getByText("Round 1/10")).toBeInTheDocument();
+    expect(screen.getByText("Round 1")).toBeInTheDocument();
     expect(screen.queryByText(/Your turn/)).not.toBeInTheDocument();
   });
 
@@ -300,7 +347,7 @@ describe("finishing a run", () => {
     const completion = spy.mock.calls.find((call) => String(call[0]).includes("/complete"));
     const body = JSON.parse(String(completion?.[1]?.body ?? "{}"));
     expect(body.progress.actions).toEqual([1]);
-    expect(body.progress.rulesVersion).toBe("chain@1");
+    expect(body.progress.rulesVersion).toBe("chain@2");
     expect(body.score).toBe(0);
   });
 
@@ -343,8 +390,8 @@ describe("finishing a run", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /play again/i }));
 
-    await screen.findByText(/Watch the sequence/);
-    expect(screen.getByText("Round 1/10")).toBeInTheDocument();
+    await screen.findByText(/Round \d+: watch/);
+    expect(screen.getByText("Round 1")).toBeInTheDocument();
     const sessions = spy.mock.calls.filter((call) => String(call[0]).endsWith("/api/v1/sessions"));
     expect(sessions).toHaveLength(2);
   });

@@ -176,20 +176,20 @@ describe("startSession", () => {
   it("starts a Chain run under Chain rules when asked to", async () => {
     const spy = mockFetch(() =>
       jsonResponse(
-        sessionPayload({ gameSlug: "dont-break-the-chain", rulesVersion: "chain@1" }),
+        sessionPayload({ gameSlug: "dont-break-the-chain", rulesVersion: "chain@2" }),
         201,
       ),
     );
 
-    const session = await startSession("dont-break-the-chain", { rulesVersion: "chain@1" });
+    const session = await startSession("dont-break-the-chain", { rulesVersion: "chain@2" });
 
     const body = requestBody(spy);
     expect(body).toEqual({
       gameSlug: "dont-break-the-chain",
-      rulesVersion: "chain@1",
+      rulesVersion: "chain@2",
       client: "web/1.0",
     });
-    expect(session.rulesVersion).toBe("chain@1");
+    expect(session.rulesVersion).toBe("chain@2");
   });
 
   it("keeps Stack 10's rules when no version is passed", async () => {
@@ -547,9 +547,9 @@ function chainSessionPayload(overrides: Partial<PlaySession> = {}): PlaySession 
   return {
     id: "dddddddd-1111-4111-8111-dddddddddddd",
     gameSlug: "dont-break-the-chain",
-    rulesVersion: "chain@1",
+    rulesVersion: "chain@2",
     seed: "1",
-    tileCount: 55,
+    tileCount: 4096,
     startedAt: "2026-10-13T12:00:00.000Z",
     expiresAt: "2026-10-13T14:00:00.000Z",
     ranked: true,
@@ -587,7 +587,7 @@ describe("useChainRun", () => {
 
     // The session asked for Chain rules, and the board is the seed's sequence.
     const body = requestBody(spy);
-    expect(body.rulesVersion).toBe("chain@1");
+    expect(body.rulesVersion).toBe("chain@2");
     expect(hook.result.session.seed).toBe("1");
     expect(hook.result.run.round).toBe(1);
     expect(hook.result.run.score).toBe(0);
@@ -649,7 +649,7 @@ describe("useChainRun", () => {
       spy.mock.calls.findIndex((c) => String(c[0]).includes("/complete")),
     );
     expect(body.progress.actions).toEqual([0, 0, 0, 1]);
-    expect(body.progress.rulesVersion).toBe("chain@1");
+    expect(body.progress.rulesVersion).toBe("chain@2");
     expect(body.score).toBe(3);
     expect(body.durationMs).toBeGreaterThan(0);
   });

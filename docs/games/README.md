@@ -4,8 +4,8 @@ How Unbored's games work: the rules, who is allowed to decide a score, and how a
 game earns the right to be called playable.
 
 Seven games are implemented today: **Stack 10**, **Chain** (Don't Break the
-Chain), **Memory Flash**, **One Move**, **Color Merge**, **Don't Touch the Black**
-and **7 Second**. Every catalogue record is playable, and each one names the
+Chain, and the one endless game), **Memory Flash**, **One Move**, **Color Merge**,
+**Don't Touch the Black** and **7 Second**. Every catalogue record is playable, and each one names the
 runtime that plays it; the "no runtime yet" screen remains for any future entry
 that is published before its runtime ships.
 
@@ -161,16 +161,39 @@ stored score.
 
 Watch the flashing sequence, then tap the pads back in the same order. Each round
 shows one symbol more than the last; a wrong tap breaks the chain and ends the run.
+**There is no final round**: the sequence is infinite, so a run lasts as long as the
+player's memory does.
 
 ### The board
 
-| Thing   | Value                                                             |
-| ------- | ----------------------------------------------------------------- |
-| Pads    | 4                                                                 |
-| Rounds  | 10 per run — the run always ends, so two scores measure one thing |
-| Taps    | 55 in a perfect run (1 + 2 + … + 10)                              |
-| Rules   | `chain@1`                                                         |
-| Runtime | `chain` (the catalogue's `games.runtime` value)                   |
+| Thing   | Value                                                       |
+| ------- | ----------------------------------------------------------- |
+| Pads    | 4                                                           |
+| Rounds  | Endless — no final round, no complete run                   |
+| Taps    | Unbounded; the score is the correct taps a run earned       |
+| Rules   | `chain@2` (endless); `chain@1` (the retired ten-round game) |
+| Runtime | `chain` (the catalogue's `games.runtime` value)             |
+
+### Difficulty
+
+Difficulty is a function of the round alone, so it is deterministic and identical
+for every player at the same point:
+
+| Round | Step lit | Gap between steps |
+| ----- | -------- | ----------------- |
+| 1     | 440 ms   | 200 ms            |
+| 2     | 422 ms   | 190 ms            |
+| 10    | 278 ms   | 110 ms            |
+| 13    | 224 ms   | 100 ms            |
+| 14+   | 220 ms   | 100 ms            |
+
+Both values fall linearly — by 18 ms and 10 ms per round — and then hold at their
+floor: a step shorter than 220 ms stops being readable, so tightening further would
+make a round unfair rather than harder. The floors are not the end of progression.
+Round r always shows r symbols, so the sequence keeps growing by one tap a round for
+as long as the run lasts; once the beat reaches its floor, memory is the whole of the
+difficulty. The client's `chainTempo(round)` is the same curve the board's timers
+use, and `chain.test.ts` pins both the curve and its floors.
 
 ### The sequence
 
@@ -190,7 +213,8 @@ The state progression is the same LCG Stack 10's deck uses; only the digit read 
 of each state differs, and deliberately so: the low two bits of this generator
 advance by a constant, so reading them would deal every seed one of four rotations
 of the same pattern (`0,3,2,1,…`) and round five would teach nothing round one had
-not. The higher bits have the full period, so each seed deals its own sequence.
+not. The higher bits have the full period, so each seed deals its own sequence — and
+because the generator is infinite, so is the sequence.
 
 The seed travels as a **decimal string** for the same reason Stack 10's does: it is a
 `bigint` column, and parsing it as a double would round it, deal a different
@@ -204,42 +228,55 @@ its round_, not at its absolute position: the third tap of round three must equa
 sequence's third symbol, the way the verifier replays it. Exactly one of two things
 happens:
 
-1. **The tap matches** → the run continues. Completing a round clears it.
+1. **The tap matches** → the run continues. Completing a round clears it and starts
+   the next round, one symbol longer.
 2. **The tap does not match** → the chain is broken and the run is over. The losing
    tap is still part of the run and is still submitted; it is a legal tap that
    loses, not an invalid one.
 
 ### Scoring
 
-A correct tap scores **1 point**. The score of a run is its correct taps: 55 for a
-perfect run, 3 for a run that reproduces rounds one and two and then breaks the
-chain. Failing to tap anything is impossible — round one is a single pad — so every
-run has at least one move.
+A correct tap scores **1 point**. The score of a run is its correct taps, and there
+is no perfect score: 78 for a run that reproduces twelve rounds and then breaks the
+chain, 3 for a run that reproduces rounds one and two and then breaks it. Failing to
+tap anything is impossible — round one is a single pad — so every run has at least
+one move.
 
 ### How a run ends
 
-| Outcome   | When                                                  |
-| --------- | ----------------------------------------------------- |
-| `over`    | A tap broke the chain. The ordinary ending.           |
-| `cleared` | All ten rounds were reproduced — all fifty-five taps. |
+| Outcome | When                                                                      |
+| ------- | ------------------------------------------------------------------------- |
+| `over`  | A tap broke the chain. The only ending; the score is how far the run got. |
+
+The old `cleared` outcome belongs to `chain@1` and is never produced under
+`chain@2`: a run that reproduced all ten old rounds is simply a run that reached
+round eleven.
 
 The score already earned is kept. Every tap of the run must be submitted, losing tap
 included: a submission that stops early is refused, so a player cannot discard the
-tap that broke their chain.
+tap that broke their chain. Because an endless run has no complete length, a
+submission that never lost is refused as partial — the losing tap is what tells the
+verifier the run ended.
 
 ### Verified scores
 
 **The database decides the score**, under the same rules as Stack 10: see
-`supabase/migrations/20261014120000_chain_sessions.sql` for the code:
+`supabase/migrations/20261026130000_endless_chain.sql` for the endless branch and
+`supabase/migrations/20261014120000_chain_sessions.sql` for the original.
 
 - `public.start_game_session(slug, rules, client)` issues the run with the seed, the
-  pinned version and the expiry. Its gate is a pair — (`stack-10`, `stack-10@1`) or
-  (`chain`, `chain@1`) — and anything else is `unsupported_runtime`. A Chain
-  session's `tile_count` is 55: the field counts the moves a complete run holds, and
-  Chain's moves are taps rather than tiles.
-- `public.complete_chain_run(session, actions, score, duration)` draws the ten
-  symbols once, replays the tap list round by round, derives the score, compares it
-  with the claim, and only then closes the session and records it. Its outcome
+  pinned version and the expiry. Its gate accepts (`stack-10`, `stack-10@1`) or
+  (`chain`, `chain@1` or `chain@2`). A `chain@2` session's `tile_count` is 4096: the
+  most taps one submission may carry, not a complete-run length, because an endless
+  run has no complete length. A legacy `chain@1` session still reports 55. A
+  `chain@2` session lives twelve hours instead of two, so a marathon is not cut off
+  by the session clock.
+- `public.complete_chain_run(session, actions, score, duration)` picks its branch
+  from the pinned version. Both replay the same generator and score one point per
+  correct tap; `chain@1` draws the ten symbols up front and accepts the 55-tap clear,
+  while `chain@2` draws each round's symbols as the replay reaches it and requires
+  the run to end with a losing tap. The 4096-tap bound is a request ceiling, not a
+  level: it is far past any run a session could still be open for. Its outcome
   vocabulary (`recorded`, `duplicate`, `score_mismatch`, …) and its ledger behaviour
   are identical to Stack 10's, and the Go service maps them onto HTTP the same way —
   routing at the verifier the pinned rules version names.
@@ -249,19 +286,25 @@ player's, and it is never ranked.
 
 ### Test vectors
 
-Three vectors pin the rules to the database's own arithmetic. Each is asserted by
-the SQL suite and by the client engine; if either side drifts, one of the two
+Five vectors pin the rules to the database's own arithmetic. Each is asserted by the
+client engine, and every vector that produces a score is also replayed against the
+real verifier in `tests/security/rls_test.sql`; if either side drifts, one of the two
 suites fails.
 
-1. **Seed 1's sequence** — `0, 0, 2, 3, 0, 0, 2, 2, 0, 1`
-2. **Seed 1, the perfect line** — round 1 `[0]`, round 2 `[0,0]`, …, round 10 the
-   first ten symbols: 55 taps, ten clears, **55 points**. Asserted in
+1. **Seed 1's sequence** — `0, 0, 2, 3, 0, 0, 2, 2, 0, 1, 1, 0`
+2. **Seed 1, the retired ten-round line** — round 1 `[0]`, round 2 `[0,0]`, …, round
+   10 the first ten symbols: 55 taps, ten clears, **55 points**. Still accepted by
+   `chain@1`; under `chain@2` it is refused as a partial endless run, because it
+   never loses.
+3. **Seed 1, twelve rounds and a loss** — the same line continued through rounds
+   eleven and twelve, then one wrong pad: 78 correct taps, twelve clears, **78
+   points**, 79 taps submitted. Asserted in
    [`tests/security/rls_test.sql`](../../tests/security/rls_test.sql) and in
    [`src/lib/games/chain.test.ts`](../../src/lib/games/chain.test.ts).
-3. **Seed 1, the broken chain** — `0, 0, 0, 1`: rounds one and two reproduced, then
+4. **Seed 1, the broken chain** — `0, 0, 0, 1`: rounds one and two reproduced, then
    the wrong tap. **3 points**, 4 taps placed, 2 rounds cleared. Asserted in both
    suites.
-4. **A full-width seed** — `9223372036854775807` deals `1, 3, 3, 3, 1, 0, 1, 0, …`,
+5. **A full-width seed** — `9223372036854775807` deals `1, 3, 3, 3, 1, 0, 1, 0, …`,
    which is what catches a client that rounded the seed to a double.
 
 ## Memory Flash
@@ -351,7 +394,7 @@ single cell — so every run has at least one move.
   seed their own board draws from, and the verifier is the only caller.
 - `public.start_game_session(slug, rules, client)` issues the run with the seed, the
   pinned version and the expiry. Its gate is a pair — (`stack-10`, `stack-10@1`),
-  (`chain`, `chain@1`) or (`memory-flash`, `memory-flash@1`) — and anything else is
+  (`chain`, `chain@1` or `chain@2`) or (`memory-flash`, `memory-flash@1`) — and anything else is
   `unsupported_runtime`. A Memory Flash session's `tile_count` is 55: the field
   counts the moves a complete run holds, and its moves are cell taps.
 - `public.complete_memory_flash_run(session, actions, score, duration)` replays the
@@ -472,7 +515,7 @@ winning cell — so every run has at least one move.
   the seed their own boards draw from, and the verifier is the only caller.
 - `public.start_game_session(slug, rules, client)` issues the run with the seed,
   the pinned version and the expiry. Its gate is a pair — (`stack-10`,
-  `stack-10@1`), (`chain`, `chain@1`), (`memory-flash`, `memory-flash@1`) or
+  `stack-10@1`), (`chain`, `chain@1` or `chain@2`), (`memory-flash`, `memory-flash@1`) or
   (`one-move`, `one-move@1`) — and anything else is `unsupported_runtime`. A One
   Move session's `tile_count` is 12: the field counts the moves a complete run
   holds, and its moves are board taps.
@@ -597,7 +640,7 @@ slide that ended their run.
   equal neighbours.
 - `public.start_game_session(slug, rules, client)` issues the run with the seed,
   the pinned version and the expiry. Its gate is a pair — (`stack-10`,
-  `stack-10@1`), (`chain`, `chain@1`), (`memory-flash`, `memory-flash@1`),
+  `stack-10@1`), (`chain`, `chain@1` or `chain@2`), (`memory-flash`, `memory-flash@1`),
   (`one-move`, `one-move@1`) or (`color-merge`, `color-merge@1`) — and anything
   else is `unsupported_runtime`. A Color Merge session's `tile_count` is 48: the
   field counts the moves a complete run holds, and its moves are slides.
@@ -720,7 +763,7 @@ the line. Both endings leave the score exactly as the cleared whites earned it.
   seed their own deck grows from, and the verifier is the only caller.
 - `public.start_game_session(slug, rules, client)` issues the run with the seed,
   the pinned version and the expiry. Its gate is a pair — (`stack-10`,
-  `stack-10@1`), (`chain`, `chain@1`), (`memory-flash`, `memory-flash@1`),
+  `stack-10@1`), (`chain`, `chain@1` or `chain@2`), (`memory-flash`, `memory-flash@1`),
   (`one-move`, `one-move@1`), (`color-merge`, `color-merge@1`) or (`dont-touch`,
   `dont-touch@1`) — and anything else is `unsupported_runtime`. A Don't Touch the
   Black session's `tile_count` is 60: the field counts the moves a complete run can

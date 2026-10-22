@@ -1327,6 +1327,11 @@ reset role;
 -- Seed 1's Chain line: symbols 0,0,2,3,0,0,2,2,0,1 dealt into ten rounds, 55
 -- taps, ten clears, 55 points. See the Chain section of docs/games/README.md.
 \set chain_perfect 'array[0,0,0,0,0,2,0,0,2,3,0,0,2,3,0,0,0,2,3,0,0,0,0,2,3,0,0,2,0,0,2,3,0,0,2,2,0,0,2,3,0,0,2,2,0,0,0,2,3,0,0,2,2,0,1]'
+-- Seed 1's endless line: twelve complete rounds then the tap that breaks the
+-- chain. 78 correct taps, 78 points, twelve rounds cleared, 79 taps submitted.
+-- The thirteenth round would show the sequence's first thirteen symbols; the
+-- losing tap is a different pad. See the Chain section of docs/games/README.md.
+\set chain_endless_line 'array[0,0,0,0,0,2,0,0,2,3,0,0,2,3,0,0,0,2,3,0,0,0,0,2,3,0,0,2,0,0,2,3,0,0,2,2,0,0,2,3,0,0,2,2,0,0,0,2,3,0,0,2,2,0,1,0,0,2,3,0,0,2,2,0,1,1,0,0,2,3,0,0,2,2,0,1,1,0,1]'
 -- Seed 1's Memory Flash line: patterns [8], [8,6], [3,0,8], … rebuilt in draw
 -- order, 55 taps, ten clears, 100 points. See the Memory Flash section of
 -- docs/games/README.md.
@@ -1357,6 +1362,7 @@ reset role;
 \set runnable_game 'aaaaaaaa-4444-4444-8444-aaaaaaaaaaaa'
 \set secret_game   'aaaaaaaa-5555-4555-8555-aaaaaaaaaaaa'
 \set chain_game    'aaaaaaaa-6666-4666-8666-aaaaaaaaaaaa'
+\set chain_endless_game 'aaaaaaaa-dddd-4ddd-8ddd-aaaaaaaaaaaa'
 \set memory_game   'aaaaaaaa-7777-4777-8777-aaaaaaaaaaaa'
 \set one_move_game 'aaaaaaaa-8888-4888-8888-aaaaaaaaaaaa'
 \set pending_session   'cccccccc-1111-4111-8111-cccccccccccc'
@@ -1369,6 +1375,8 @@ reset role;
 \set chain_loss_session  'dddddddd-2222-4222-8222-dddddddddddd'
 \set chain_guest_session 'dddddddd-4444-4444-8444-dddddddddddd'
 \set chain_old_session   'dddddddd-5555-4555-8555-dddddddddddd'
+\set chain_endless_session      'dddddddd-3333-4333-8333-dddddddddddd'
+\set chain_endless_open_session 'dddddddd-6666-4666-8666-dddddddddddd'
 \set memory_session       'eeeeeeee-1111-4111-8111-eeeeeeeeeeee'
 \set memory_loss_session  'eeeeeeee-2222-4222-8222-eeeeeeeeeeee'
 \set memory_guest_session 'eeeeeeee-4444-4444-8444-eeeeeeeeeeee'
@@ -1403,7 +1411,10 @@ insert into public.games (id, owner_id, slug, title, status, published_at, runti
   (:'secret_game',   :'alice', 'fixture-secret',   'Fixture Secret',   'draft',     null, 'stack-10', true,
    (select id from public.categories where slug = 'puzzle')),
   (:'chain_game',    :'alice', 'fixture-chain',    'Fixture Chain',    'published', now(), 'chain', true,
-   (select id from public.categories where slug = 'reaction')),  (:'memory_game',    :'alice', 'fixture-memory',   'Fixture Memory',   'published', now(), 'memory-flash', true,
+   (select id from public.categories where slug = 'reaction')),
+  (:'chain_endless_game', :'alice', 'fixture-chain-endless', 'Fixture Chain Endless', 'published', now(), 'chain', true,
+   (select id from public.categories where slug = 'reaction')),
+  (:'memory_game',    :'alice', 'fixture-memory',   'Fixture Memory',   'published', now(), 'memory-flash', true,
    (select id from public.categories where slug = 'memory')),
   (:'one_move_game',  :'alice', 'fixture-one-move', 'Fixture One Move', 'published', now(), 'one-move', true,
    (select id from public.categories where slug = 'logic')),
@@ -1430,6 +1441,11 @@ insert into public.game_sessions (id, game_id, user_id, seed, rules_version, sta
   (:'chain_loss_session',  :'chain_game', :'alice', 1, 'chain@1', now() - interval '5 minutes', now() + interval '2 hours', null),
   (:'chain_guest_session', :'chain_game', null,     1, 'chain@1', now() - interval '5 minutes', now() + interval '2 hours', null),
   (:'chain_old_session',   :'chain_game', :'alice', 1, 'chain@0', now() - interval '5 minutes', now() + interval '2 hours', null),
+  -- Endless Chain fixtures. Bob records the twelve-round line; Alice's open
+  -- session is the subject of the refusals that leave a session open, and is
+  -- recorded at the end with the same line.
+  (:'chain_endless_session',      :'chain_endless_game', :'alice', 1, 'chain@2', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'chain_endless_open_session', :'chain_endless_game', :'alice', 1, 'chain@2', now() - interval '5 minutes', now() + interval '2 hours', null),
   -- Memory Flash fixtures. Seed 1 flashes [8], then [8,6], then [3,0,8]: round
   -- one is one cell, round two two cells, and so on to ten rounds.
   (:'memory_session',       :'memory_game', :'alice', 1, 'memory-flash@1', now() - interval '5 minutes', now() + interval '2 hours', null),
@@ -1671,7 +1687,27 @@ select rls_test.says_field(
 );
 select rls_test.says_field(
   $$public.start_game_session('dont-break-the-chain', 'chain@1', 'test/1.0')$$,
-  'tile_count', '55', 'a Chain session counts the taps of a perfect run'
+  'tile_count', '55', 'a legacy Chain session counts the taps of a perfect run'
+);
+-- Chain also accepts the endless version, and reports the submission bound
+-- instead of a complete-run length: an endless run has no complete length.
+select rls_test.says(
+  $$public.start_game_session('dont-break-the-chain', 'chain@2', 'test/1.0')$$,
+  'started', 'the shipped Chain game starts an endless run'
+);
+select rls_test.says_field(
+  $$public.start_game_session('dont-break-the-chain', 'chain@2', 'test/1.0')$$,
+  'tile_count', '4096', 'an endless Chain session reports the submission bound, not a final round'
+);
+select rls_test.says(
+  $$public.start_game_session('fixture-chain', 'chain@2', 'test/1.0')$$,
+  'started', 'a guest can start an endless Chain run'
+);
+-- The session clock is long enough for a marathon: twelve hours, not two.
+select rls_test.ok(
+  (select expires_at - started_at between interval '11 hours 59 minutes' and interval '12 hours 1 minute'
+     from public.start_game_session('dont-break-the-chain', 'chain@2', 'test/1.0')),
+  'an endless Chain session lives twelve hours so the clock does not end a run'
 );
 -- The shipped Memory Flash game, same shape: playable, naming its runtime,
 -- issuing a run whose move count is the taps of a perfect run.
@@ -2130,6 +2166,75 @@ select rls_test.ok(
 select rls_test.ok(
   (select rank = 1 and score = 55 from public.game_standing('fixture-chain', '11111111-1111-4111-8111-111111111111', null)),
   'your Chain standing is your recorded best at its real rank'
+);
+
+-- ── Chain: the endless game, past the old tenth round ──
+--
+-- The same seed and the same rules, with no final round. The twelve-round line
+-- is 78 correct taps and then a tap that breaks the chain: 78 points, twelve
+-- rounds cleared, 79 taps submitted. If the verifier still stopped at ten, this
+-- submission would be an impossible run rather than a recorded one.
+-- The first call records; the field is only on a recorded result, so a still
+-- ten-round verifier would fail here rather than quietly pass a duplicate.
+select rls_test.says_field(
+  format($$public.complete_chain_run('dddddddd-3333-4333-8333-dddddddddddd'::uuid, %s, 78, 45000)$$, :'chain_endless_line'),
+  'cleared_columns', '12', 'a run past the old tenth round records twelve cleared rounds'
+);
+select rls_test.says_field(
+  format($$public.complete_chain_run('dddddddd-3333-4333-8333-dddddddddddd'::uuid, %s, 78, 45000)$$, :'chain_endless_line'),
+  'score', '78', 'the endless replay counts all seventy-eight correct taps'
+);
+select rls_test.says(
+  format($$public.complete_chain_run('dddddddd-3333-4333-8333-dddddddddddd'::uuid, %s, 78, 45000)$$, :'chain_endless_line'),
+  'duplicate', 'a retry of the same endless run is safe to repeat'
+);
+select rls_test.says(
+  $$public.complete_chain_run('dddddddd-3333-4333-8333-dddddddddddd'::uuid, array[0], 78, 45000)$$,
+  'closed', 'a closed endless session does not accept a different run'
+);
+select rls_test.ok(
+  (select verified_score = 78 from public.game_sessions where id = 'dddddddd-3333-4333-8333-dddddddddddd'),
+  'the endless run closes with its verified score on the session'
+);
+select rls_test.ok(
+  (select rank = 1 and score = 78 from public.game_standing('fixture-chain-endless', :'alice'::uuid, null)),
+  'a run past ten rounds ranks on the endless board at its real score'
+);
+-- Refusals, each leaving the open session open for the next attempt. A
+-- submission that does not end with a loss is not a finished endless run, even
+-- when it is the old ten-round perfect line: there is no clear to reach any more.
+select rls_test.says(
+  format($$public.complete_chain_run('dddddddd-6666-4666-8666-dddddddddddd'::uuid, %s, 55, 45000)$$, :'chain_perfect'),
+  'invalid_actions', 'the old ten-round perfect line is a partial endless run, not a clear'
+);
+select rls_test.says(
+  $$public.complete_chain_run('dddddddd-6666-4666-8666-dddddddddddd'::uuid, array[0,0,0], 3, 45000)$$,
+  'invalid_actions', 'an endless run that stops mid-round is partial'
+);
+select rls_test.says(
+  format($$public.complete_chain_run('dddddddd-6666-4666-8666-dddddddddddd'::uuid, %s || 0, 78, 45000)$$, :'chain_endless_line'),
+  'invalid_actions', 'taps after the tap that broke an endless chain are impossible play'
+);
+select rls_test.says(
+  $$public.complete_chain_run('dddddddd-6666-4666-8666-dddddddddddd'::uuid, array[4], 0, 45000)$$,
+  'invalid_actions', 'a pad that does not exist is impossible play in the endless game too'
+);
+select rls_test.says(
+  format($$public.complete_chain_run('dddddddd-6666-4666-8666-dddddddddddd'::uuid, %s, 999, 45000)$$, :'chain_endless_line'),
+  'score_mismatch', 'an endless score the replay does not produce is refused'
+);
+select rls_test.says_field(
+  format($$public.complete_chain_run('dddddddd-6666-4666-8666-dddddddddddd'::uuid, %s, 999, 45000)$$, :'chain_endless_line'),
+  'score', '78', 'the endless replay is the score, and it is reported back'
+);
+-- And the same run, from the open session, is recorded exactly once.
+select rls_test.says(
+  format($$public.complete_chain_run('dddddddd-6666-4666-8666-dddddddddddd'::uuid, %s, 78, 45000)$$, :'chain_endless_line'),
+  'recorded', 'an endless run is recorded after the refused attempts leave the session open'
+);
+select rls_test.ok(
+  rls_test.count_rows($$select 1 from public.scores where session_id = 'dddddddd-6666-4666-8666-dddddddddddd'$$) = 1,
+  'an endless run leaves exactly one score for its session'
 );
 
 -- ── Memory Flash: the same properties, replayed against growing patterns ──

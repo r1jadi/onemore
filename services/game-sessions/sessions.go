@@ -50,15 +50,21 @@ import (
 const Name = "game-sessions"
 
 const (
-	// maxBodyBytes bounds a request body: a run is at most a few hundred bytes.
-	maxBodyBytes = 8 * 1024
-	// maxActions bounds the moves in a run: sixty tiles for Stack 10,
-	// fifty-five taps for a perfect Chain or Memory Flash run, twelve taps for a
-	// perfect One Move run, forty-eight slides for Color Merge, sixty cell taps
-	// for a complete Don't Touch the Black deck, and sixty answers for 7 Second.
-	// The verifier enforces its own game's count too; this only keeps an absurd
-	// body from reaching the database at all.
+	// maxBodyBytes bounds a request body: a finite run is a few hundred bytes, and
+	// the longest endless Chain run a submission may carry is 4096 moves — about
+	// 8 KiB of JSON — so the ceiling has room without inviting an absurd body.
+	maxBodyBytes = 64 * 1024
+	// maxActions bounds the moves in an ordinary run: sixty tiles for Stack 10,
+	// fifty-five taps for a perfect Memory Flash or legacy Chain run, twelve taps
+	// for a perfect One Move run, forty-eight slides for Color Merge, sixty cell
+	// taps for a complete Don't Touch the Black deck, and sixty answers for
+	// 7 Second. The verifier enforces its own game's bound too; this only keeps an
+	// absurd body from reaching the database at all.
 	maxActions = 60
+	// chainMaxActions is the endless Chain submission bound. It is a request
+	// ceiling rather than a complete-run length, and it is the only game that
+	// gets it: every other runtime keeps the bound its own verifier owns.
+	chainMaxActions = 4096
 	// The bounds a move has to fit. Stack 10 addresses a column and Chain a pad,
 	// both 0 to 3; Color Merge addresses one of its four directions, also 0 to 3;
 	// Memory Flash addresses one of the sixteen cells of its 4×4 board; One Move
@@ -298,9 +304,13 @@ func (s *service) completeSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	actions := body.Progress.Actions
-	if len(actions) > maxActions {
+	limit := maxActions
+	if rules == "chain@2" {
+		limit = chainMaxActions
+	}
+	if len(actions) > limit {
 		httpx.WriteError(w, r, httpx.NewError(httpx.CodeBadRequest,
-			"That run has more moves than the game has tiles.",
+			"That run has more moves than a submission can carry.",
 			apierr.Detail{Field: "progress.actions", Rule: "length"}))
 		return
 	}

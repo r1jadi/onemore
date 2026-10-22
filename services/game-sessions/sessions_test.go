@@ -473,8 +473,8 @@ func TestCompleteSessionRejectsAMalformedRequest(t *testing.T) {
 		"a negative score":               {"/api/v1/sessions/" + sessionID + "/complete", completeBody("-1", "45000", greedyRun)},
 		"no duration":                    {"/api/v1/sessions/" + sessionID + "/complete", completeBody("55", "0", greedyRun)},
 		"no progress at all":             {"/api/v1/sessions/" + sessionID + "/complete", `{"score":55,"durationMs":45000}`},
-		"more moves than tiles": {"/api/v1/sessions/" + sessionID + "/complete",
-			completeBody("55", "45000", "["+strings.Repeat("0,", 60)+"0]")},
+		"more moves than a submission can carry": {"/api/v1/sessions/" + sessionID + "/complete",
+			completeBody("55", "45000", "["+strings.Repeat("0,", 4096)+"0]")},
 		"a column that does not exist": {"/api/v1/sessions/" + sessionID + "/complete", completeBody("55", "45000", "[0,4]")},
 	}
 	for name, tc := range cases {
@@ -534,6 +534,37 @@ func TestCompleteSessionVerifiesAChainRun(t *testing.T) {
 	}
 	if len(backend.lastRun.Actions) != 4 {
 		t.Fatalf("actions = %v, want the submitted taps", backend.lastRun.Actions)
+	}
+}
+
+// TestCompleteSessionForwardsARunPastTheOldMoveCeiling is the regression guard
+// for endless Chain: a run of more than sixty moves used to be refused by the
+// transport before the verifier saw it, which would have made every run past the
+// former tenth round unsubmittable. The handler does not replay (the database
+// does), so this pins only that the body reaches it intact.
+func TestCompleteSessionForwardsARunPastTheOldMoveCeiling(t *testing.T) {
+	backend := testBackend()
+	server := testServer(t, backend)
+
+	// Sixty-six correct taps plus one losing tap: eleven rounds cleared, exactly
+	// the shape of a run that has passed the old tenth-round endpoint.
+	actions := make([]string, 67)
+	for i := range actions {
+		actions[i] = "0"
+	}
+
+	status, body := post(t, server,
+		"/api/v1/sessions/"+sessionID+"/complete",
+		completeBodyRules("chain@2", "66", "12000", "["+strings.Join(actions, ",")+"]"), "")
+
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%#v)", status, body)
+	}
+	if len(backend.lastRun.Actions) != 67 {
+		t.Fatalf("actions = %d, want all 67 forwarded", len(backend.lastRun.Actions))
+	}
+	if backend.lastRun.RulesVersion != "chain@2" {
+		t.Fatalf("rules version = %q, want chain@2", backend.lastRun.RulesVersion)
 	}
 }
 

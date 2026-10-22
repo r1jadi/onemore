@@ -13,7 +13,7 @@ import {
 } from "@/lib/games/sessions";
 import {
   CHAIN_PADS,
-  CHAIN_ROUNDS,
+  chainTempo,
   symbolAt,
   totalTapsThrough,
   type ChainRun,
@@ -110,15 +110,7 @@ export function ChainRuntime({ slug, title }: { slug: string; title: string }) {
   }
 
   if (state.status === "finished") {
-    return (
-      <Finished
-        slug={slug}
-        title={title}
-        run={state.run}
-        result={state.result}
-        onRestart={state.restart}
-      />
-    );
+    return <Finished slug={slug} title={title} result={state.result} onRestart={state.restart} />;
   }
 
   // The only remaining shape is an error with no run to show, which the branches
@@ -134,11 +126,6 @@ export function ChainRuntime({ slug, title }: { slug: string; title: string }) {
 /** One pad's colour, dimmed until it lights. */
 const PAD_STYLES = ["bg-game-1", "bg-game-2", "bg-game-4", "bg-game-5"] as const;
 
-/** How long a step stays lit while showing, quickening as the rounds grow. */
-function litMs(round: number): number {
-  return Math.max(260, 440 - round * 18);
-}
-const GAP_MS = 200;
 /** The beat before the first step, so the board settles before it starts. */
 const LEAD_IN_MS = 350;
 
@@ -166,14 +153,14 @@ function Board({
     setShowing(true);
     setLit(null);
     const steps = Array.from({ length: round }, (_, i) => symbolAt(seed, i));
-    const on = litMs(round);
+    const { litMs, gapMs } = chainTempo(round);
     const timers: ReturnType<typeof setTimeout>[] = [];
     steps.forEach((pad, i) => {
-      const at = LEAD_IN_MS + i * (on + GAP_MS);
+      const at = LEAD_IN_MS + i * (litMs + gapMs);
       timers.push(setTimeout(() => setLit(pad), at));
-      timers.push(setTimeout(() => setLit(null), at + on));
+      timers.push(setTimeout(() => setLit(null), at + litMs));
     });
-    timers.push(setTimeout(() => setShowing(false), LEAD_IN_MS + steps.length * (on + GAP_MS)));
+    timers.push(setTimeout(() => setShowing(false), LEAD_IN_MS + steps.length * (litMs + gapMs)));
     return () => {
       timers.forEach(clearTimeout);
       setLit(null);
@@ -208,9 +195,7 @@ function Board({
           <dd className="text-2xl font-semibold tabular">{run.score}</dd>
         </dl>
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <span className="tabular">
-            Round {Math.min(round, CHAIN_ROUNDS)}/{CHAIN_ROUNDS}
-          </span>
+          <span className="tabular">Round {round}</span>
           {session.ranked ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-surface-2 px-2 py-1">
               <ShieldCheck className="size-3.5" />
@@ -226,7 +211,7 @@ function Board({
         {verifying
           ? "Verifying your run with the server…"
           : showing
-            ? `Watch the sequence…`
+            ? `Round ${round}: watch ${round} ${round === 1 ? "tap" : "taps"}…`
             : `Your turn — repeat ${round} ${round === 1 ? "tap" : "taps"}.`}
       </p>
 
@@ -272,7 +257,7 @@ function Board({
       <p className="pt-1 text-center text-xs text-muted-foreground" aria-live="polite">
         {verifying
           ? "The taps so far are your score if the server agrees."
-          : "Watch, then repeat in order. A wrong tap breaks the chain."}
+          : "Every round adds a tap and tightens the beat. A wrong tap ends the run."}
       </p>
     </div>
   );
@@ -298,13 +283,11 @@ function padLabel(
 function Finished({
   slug,
   title,
-  run,
   result,
   onRestart,
 }: {
   slug: string;
   title: string;
-  run: ChainRun;
   result: RunResult;
   onRestart: () => void;
 }) {
@@ -318,14 +301,10 @@ function Finished({
             <ShieldCheck className="size-5 text-muted-foreground" />
           )}
         </div>
-        <p className="text-sm text-muted-foreground">
-          {run.outcome === "cleared" ? "Chain complete" : "Chain broken"}
-        </p>
+        <p className="text-sm text-muted-foreground">Chain broken</p>
         <p className="text-5xl font-semibold tabular">{result.score}</p>
         <p className="text-sm text-muted-foreground">
-          {run.outcome === "cleared"
-            ? `All ten rounds repeated — every one of ${result.tilesPlaced} taps.`
-            : `${result.tilesPlaced} taps placed, ${result.clearedColumns} rounds cleared.`}
+          {`${result.tilesPlaced} taps placed, ${result.clearedColumns} rounds cleared.`}
         </p>
       </div>
 
