@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/admin/notifications")({
   head: () => ({
-    meta: [{ title: "Notifications — admin onemore" }, { name: "robots", content: "noindex" }],
+    meta: [{ title: "Notifications — Unbored admin" }, { name: "robots", content: "noindex" }],
   }),
   component: NotificationsAdmin,
 });

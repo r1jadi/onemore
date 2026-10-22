@@ -27,18 +27,18 @@ export const Route = createFileRoute("/settings/$section")({
   head: ({ params }) => {
     const t = allSettings.find((s) => s.slug === params.section)?.title;
     // An unknown section has no name of its own; without the guard the title
-    // reads "Settings settings — onemore".
+    // reads "Settings settings — Unbored".
     return {
       meta: [
-        { title: t ? `${t} settings — onemore` : "Settings — onemore" },
+        { title: t ? `${t} settings — Unbored` : "Settings — Unbored" },
         {
           name: "description",
-          content: t ? `Manage ${t.toLowerCase()} on onemore.` : "Manage your onemore settings.",
+          content: t ? `Manage ${t.toLowerCase()} on Unbored.` : "Manage your Unbored settings.",
         },
-        { property: "og:title", content: t ? `${t} — onemore` : "Settings — onemore" },
+        { property: "og:title", content: t ? `${t} — Unbored` : "Settings — Unbored" },
         {
           property: "og:description",
-          content: t ? `Manage ${t.toLowerCase()} on onemore.` : "Manage your onemore settings.",
+          content: t ? `Manage ${t.toLowerCase()} on Unbored.` : "Manage your Unbored settings.",
         },
       ],
     };
@@ -410,7 +410,7 @@ function Body({ section }: { section: string }) {
               support channel for this deployment.
             </p>
             <Button asChild size="lg" className="mt-3 w-full md:w-auto">
-              <a href="https://github.com/r1jadi/onemore/issues" target="_blank" rel="noreferrer">
+              <a href="https://github.com/r1jadi/unbored/issues" target="_blank" rel="noreferrer">
                 Open an issue
               </a>
             </Button>
@@ -437,13 +437,13 @@ function Body({ section }: { section: string }) {
             label="Source"
             action={
               <Button asChild size="sm" variant="ghost">
-                <a href="https://github.com/r1jadi/onemore" target="_blank" rel="noreferrer">
+                <a href="https://github.com/r1jadi/unbored" target="_blank" rel="noreferrer">
                   View
                 </a>
               </Button>
             }
           />
-          <Row label="Website" value="onemore.app" />
+          <Row label="Website" value="unboredapp.vercel.app" />
         </Group>
       );
     default:

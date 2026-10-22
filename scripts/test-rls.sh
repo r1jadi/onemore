@@ -16,10 +16,10 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Unique per run, so two concurrent runs (or a leftover container) cannot
 # collide on the name and fail the suite for the wrong reason.
-CONTAINER_NAME="onemore-rls-test-$$"
+CONTAINER_NAME="unbored-rls-test-$$"
 PG_IMAGE="postgres:16-alpine"
 PG_PASSWORD="rls-test-password"
-PG_DATABASE="onemore_rls_test"
+PG_DATABASE="unbored_rls_test"
 
 log() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 

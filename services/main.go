@@ -26,13 +26,13 @@ package main
 import (
 	"log/slog"
 
-	"github.com/r1jadi/onemore/packages/go/platform/authn"
-	"github.com/r1jadi/onemore/packages/go/platform/config"
-	"github.com/r1jadi/onemore/packages/go/platform/httpx"
-	"github.com/r1jadi/onemore/services/admin"
-	"github.com/r1jadi/onemore/services/game-sessions"
-	"github.com/r1jadi/onemore/services/games"
-	"github.com/r1jadi/onemore/services/internal/servicekit"
+	"github.com/r1jadi/unbored/packages/go/platform/authn"
+	"github.com/r1jadi/unbored/packages/go/platform/config"
+	"github.com/r1jadi/unbored/packages/go/platform/httpx"
+	"github.com/r1jadi/unbored/services/admin"
+	"github.com/r1jadi/unbored/services/game-sessions"
+	"github.com/r1jadi/unbored/services/games"
+	"github.com/r1jadi/unbored/services/internal/servicekit"
 )
 
 func main() {

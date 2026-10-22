@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/r1jadi/onemore/packages/go/platform/adminallowlist"
+	"github.com/r1jadi/unbored/packages/go/platform/adminallowlist"
 )
 
 // Environment names the deployment stage a service runs in.

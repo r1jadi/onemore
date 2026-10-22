@@ -20,10 +20,10 @@ All paths are relative to the gateway's `/api/v1` base. The contract in
 [`packages/api-contracts/openapi-v1.yaml`](../../packages/api-contracts/openapi-v1.yaml)
 is authoritative and marks both `x-status: available`.
 
-| Method | Path | Tier | Success | Calls Supabase |
-| --- | --- | --- | --- | --- |
-| `GET` | `/users/me` | authenticated | `200` | `GET /rest/v1/profiles?select=…&id=eq.<token subject>&limit=1` |
-| `PATCH` | `/users/me` | authenticated | `200` | `PATCH /rest/v1/profiles?select=…&id=eq.<token subject>` |
+| Method  | Path        | Tier          | Success | Calls Supabase                                                 |
+| ------- | ----------- | ------------- | ------- | -------------------------------------------------------------- |
+| `GET`   | `/users/me` | authenticated | `200`   | `GET /rest/v1/profiles?select=…&id=eq.<token subject>&limit=1` |
+| `PATCH` | `/users/me` | authenticated | `200`   | `PATCH /rest/v1/profiles?select=…&id=eq.<token subject>`       |
 
 `GET` answers with the caller's profile, or `404` when the account has no row —
 which is a real state, not something to paper over with a placeholder identity.
@@ -50,13 +50,13 @@ that does not exist yet, and there is no route for it to be added by accident.
 }
 ```
 
-* `role` comes from the **verified token**, not from `user_roles`, so this payload
+- `role` comes from the **verified token**, not from `user_roles`, so this payload
   and `/api/v1/auth/session` can never disagree about the same token.
-* The view is assembled field by field, so a column added to `profiles` later
+- The view is assembled field by field, so a column added to `profiles` later
   cannot appear in a response without being named here. `is_suspended` is absent
   on purpose: the SELECT grant excludes it, so it is not readable through the Data
   API at all.
-* Bio and avatar are optional and omitted when null; `onboardedAt` distinguishes
+- Bio and avatar are optional and omitted when null; `onboardedAt` distinguishes
   "not onboarded" (`null`) from "unknown".
 
 ### Editing
@@ -69,13 +69,13 @@ the strict decoder answers `400` with `details[0] = {field, rule: "unknown"}`
 before the database is ever called. It is refused twice over on purpose — the
 message a client gets, and the grant that makes it true.
 
-| Field | Rule |
-| --- | --- |
-| `displayName` | Trimmed; required; at most 60 characters (`422` with `field: "displayName"`) |
-| `username` | 3–24 lowercase letters, digits, underscores, unique case-insensitively (`422` with `field: "username"`; a taken name is `409` with `field: "username"`) |
-| `bio` | At most 300 characters; `null` clears it; `""` also clears it |
-| `avatarPath` | `<account id>/<file>`; `null` (or `""`) removes the picture |
-| `expectedUpdatedAt` | Optional. The `updatedAt` the client read; the write applies only if the row still holds it |
+| Field               | Rule                                                                                                                                                    |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `displayName`       | Trimmed; required; at most 60 characters (`422` with `field: "displayName"`)                                                                            |
+| `username`          | 3–24 lowercase letters, digits, underscores, unique case-insensitively (`422` with `field: "username"`; a taken name is `409` with `field: "username"`) |
+| `bio`               | At most 300 characters; `null` clears it; `""` also clears it                                                                                           |
+| `avatarPath`        | `<account id>/<file>`; `null` (or `""`) removes the picture                                                                                             |
+| `expectedUpdatedAt` | Optional. The `updatedAt` the client read; the write applies only if the row still holds it                                                             |
 
 An edit naming no fields is refused (`422`), and a body that is not a single JSON
 object is refused (`400`) — malformed input never reaches Supabase.
@@ -88,25 +88,25 @@ rather than by a read-then-write in Go: the UPDATE is filtered on
 changes on every write. When the filter matches nothing the service reads the row
 back to tell two cases apart, because they need different answers:
 
-* the row exists → `409 conflict`, *"This profile changed since you loaded it. Reload and try again."* — nothing was overwritten;
-* the row is gone → `404 not_found`.
+- the row exists → `409 conflict`, _"This profile changed since you loaded it. Reload and try again."_ — nothing was overwritten;
+- the row is gone → `404 not_found`.
 
 Omitting it accepts last-write-wins, which is what the contract documents.
 
 ## How it talks to Supabase
 
-* **Data API** — `https://<project>.supabase.co/rest/v1/profiles`, with the
+- **Data API** — `https://<project>.supabase.co/rest/v1/profiles`, with the
   publishable key in `apikey` **and the caller's access token** in
   `Authorization`. Row Level Security decides what is visible, so the service
   needs no secret key.
-* **Every query names its projection.** `select=*` and a bare
+- **Every query names its projection.** `select=*` and a bare
   `Prefer: return=representation` both ask for every column, including
   `is_suspended`, which the SELECT grant deliberately withholds — PostgREST
   answers `403` for the whole request. A read therefore sends
   `select=id,username,display_name,bio,avatar_path,onboarded_at,created_at,updated_at`,
   and a write asks for the same list with `?select=`. Requesting the whole row
   here is not a style preference; it is a 403.
-* Upstream failures are mapped by SQLSTATE: `42501` → `403`, `23505` → `409`,
+- Upstream failures are mapped by SQLSTATE: `42501` → `403`, `23505` → `409`,
   `23514`/`23502`/`23503` → `422`, anything else → logged and answered `503`.
   PostgREST's `message` and `details` can echo caller input or describe the
   schema, so only the machine-readable code is kept — never the body, and never
@@ -136,11 +136,11 @@ URL. `PATCH /users/me` is what records the resulting path.
 
 ## Configuration
 
-| Variable | Required | Purpose |
-| --- | --- | --- |
-| `SUPABASE_URL` | yes | Project URL. The JWKS URL and issuer are derived from it |
-| `SUPABASE_PUBLISHABLE_KEY` | yes | Presented to the Data API to identify the project. Not a secret — the browser is given the same value |
-| `SUPABASE_JWT_AUDIENCE` | no | Defaults to `authenticated` |
+| Variable                   | Required | Purpose                                                                                               |
+| -------------------------- | -------- | ----------------------------------------------------------------------------------------------------- |
+| `SUPABASE_URL`             | yes      | Project URL. The JWKS URL and issuer are derived from it                                              |
+| `SUPABASE_PUBLISHABLE_KEY` | yes      | Presented to the Data API to identify the project. Not a secret — the browser is given the same value |
+| `SUPABASE_JWT_AUDIENCE`    | no       | Defaults to `authenticated`                                                                           |
 
 Not needed, and deliberately not read: `SUPABASE_SECRET_KEY`,
 `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`. Without the URL and the
@@ -168,10 +168,10 @@ There are three ways to start this service, and all three call the same
 `services/users`, and every entrypoint only names it, so there is no second
 implementation to drift.
 
-| Entrypoint | Used by |
-| --- | --- |
-| `services/users/cmd/users` | local shell (`go run ./users/cmd/users`) |
-| `services/cmd/api` | **the deployment** — Vercel's Go framework preset detects `main.go`, `cmd/api/main.go` or `cmd/server/main.go` at the service root; `cmd/server` is the auth service's, and the gateway deploys as a container image, so the Users service takes `cmd/api/main.go` |
+| Entrypoint                 | Used by                                                                                                                                                                                                                                                            |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `services/users/cmd/users` | local shell (`go run ./users/cmd/users`)                                                                                                                                                                                                                           |
+| `services/cmd/api`         | **the deployment** — Vercel's Go framework preset detects `main.go`, `cmd/api/main.go` or `cmd/server/main.go` at the service root; `cmd/server` is the auth service's, and the gateway deploys as a container image, so the Users service takes `cmd/api/main.go` |
 
 The name `cmd/api` is Vercel's, not a description: the gateway's own command is
 `services/gateway/cmd/gateway`, which the container image builds directly. See
@@ -185,7 +185,7 @@ cd services && gofmt -l . ../packages/go && go vet ./... && go test ./...
 
 `users_test.go` runs the real HTTP stack (router, middleware, rate limiter, error
 envelope) against a fake profile backend and covers: both verbs, a missing token,
-an invalid, forged or expired token, a token that names a *different* account
+an invalid, forged or expired token, a token that names a _different_ account
 (the subject in the token always wins — a query or body can never aim the read),
 a missing row, a backend that is not configured (`503`), trimming, clearing with
 `null`, unmentioned fields staying untouched, unknown fields (`role`,
@@ -213,13 +213,13 @@ service binding on `api`:
 
 Like the auth service it has no rewrite of its own, so it is never reached from
 the internet directly: the public entry stays
-`https://onemorestartup.vercel.app/api/v1/users/*` through the gateway. `users`
+`https://unboredapp.vercel.app/api/v1/users/*` through the gateway. `users`
 declares no binding itself and stays on the Go framework preset.
 
 Verification after a deployment:
 
 ```bash
-BASE=https://onemorestartup.vercel.app
+BASE=https://unboredapp.vercel.app
 curl -sS -o /dev/null -w '%{http_code}\n' "$BASE/api/v1/users/me"
 # 401 — the binding resolved and the Users service answered (a 503 means the
 #       gateway has no UPSTREAM_USERS_URL; check that the `users` service was

@@ -7,15 +7,15 @@ open and rank a game.
 
 ## Routes
 
-| Route                                | Auth     | What it does                                                                                                                                                                             |
-| ------------------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/v1/games`                  | public   | A page of published games, newest first. Filters: `category` (slug), `q` (substring over title, tagline and description), `sort` (only `latest`), `limit` (1–100, default 20), `cursor`. |
-| `GET /api/v1/games/{slug}`           | public   | One published game, by its stable slug (`stack-10`), with its real play count.                                                                                                           |
-| `GET /api/v1/games/{slug}/leaderboard` | optional | The game's persisted ranking. A token only adds the caller's own standing as `me`.                                                                                                        |
-| `GET /api/v1/categories`             | public   | Every category with its real published-game count.                                                                                                                                       |
-| `POST /api/v1/games`                 | authenticated | **Planned** — answers `501`. Creating a game is a separate feature.                                                                                                                  |
-| `PATCH /api/v1/games/{slug}`         | authenticated | **Planned** — answers `501`.                                                                                                                                                         |
-| `POST /api/v1/games/{slug}/publish`  | authenticated | **Planned** — answers `501`. Publishing is a moderation decision.                                                                                                                  |
+| Route                                  | Auth          | What it does                                                                                                                                                                             |
+| -------------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/games`                    | public        | A page of published games, newest first. Filters: `category` (slug), `q` (substring over title, tagline and description), `sort` (only `latest`), `limit` (1–100, default 20), `cursor`. |
+| `GET /api/v1/games/{slug}`             | public        | One published game, by its stable slug (`stack-10`), with its real play count.                                                                                                           |
+| `GET /api/v1/games/{slug}/leaderboard` | optional      | The game's persisted ranking. A token only adds the caller's own standing as `me`.                                                                                                       |
+| `GET /api/v1/categories`               | public        | Every category with its real published-game count.                                                                                                                                       |
+| `POST /api/v1/games`                   | authenticated | **Planned** — answers `501`. Creating a game is a separate feature.                                                                                                                      |
+| `PATCH /api/v1/games/{slug}`           | authenticated | **Planned** — answers `501`.                                                                                                                                                             |
+| `POST /api/v1/games/{slug}/publish`    | authenticated | **Planned** — answers `501`. Publishing is a moderation decision.                                                                                                                        |
 
 `x-status` in [`packages/api-contracts/openapi-v1.yaml`](../../packages/api-contracts/openapi-v1.yaml)
 is the authority for which of these are implemented; the planned three exist so
@@ -24,7 +24,7 @@ rather than an unexplained `404`.
 
 The play sessions and the submission that verifies a score are the
 [`game-sessions`](../game-sessions/README.md) package's routes. They are served by
-the same *deployment* (Vercel's Go preset has one entrypoint name left — see
+the same _deployment_ (Vercel's Go preset has one entrypoint name left — see
 [deployment/vercel.md](../../docs/deployment/vercel.md)) but not by this package:
 the route table names `/api/v1/sessions` under the service that answers it.
 
@@ -132,7 +132,7 @@ binary and the deployment cannot drift.
 
 The gateway reaches it over the `UPSTREAM_GAMES_URL` service binding declared on the
 `api` service, so the public path stays
-`https://onemorestartup.vercel.app/api/v1/games`. See
+`https://unboredapp.vercel.app/api/v1/games`. See
 [deployment/vercel.md](../../docs/deployment/vercel.md).
 
 ## Tests

@@ -5,8 +5,8 @@
 package main
 
 import (
-	"github.com/r1jadi/onemore/packages/go/platform/httpx"
-	"github.com/r1jadi/onemore/services/internal/servicekit"
+	"github.com/r1jadi/unbored/packages/go/platform/httpx"
+	"github.com/r1jadi/unbored/services/internal/servicekit"
 )
 
 const serviceName = "leaderboards"

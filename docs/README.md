@@ -1,4 +1,4 @@
-# onemore documentation
+# Unbored documentation
 
 This is the map. Every document below is written for a new contributor who has to
 change something safely, not to describe the project to a stranger.

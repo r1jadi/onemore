@@ -14,8 +14,8 @@ export const OPERATOR_DETAILS_REQUIRED = [
 
 export const terms = [
   [
-    "1. What onemore is",
-    "onemore is a web catalogue of short playable games with accounts, profiles, scores, leaderboards, follows, notifications and moderation. Browsing the catalogue is public; scoring, following, notifications and settings require an account.",
+    "1. What Unbored is",
+    "Unbored is a web catalogue of short playable games with accounts, profiles, scores, leaderboards, follows, notifications and moderation. Browsing the catalogue is public; scoring, following, notifications and settings require an account.",
   ],
   [
     "2. Accounts, verification and security",
@@ -27,7 +27,7 @@ export const terms = [
   ],
   [
     "4. Your content and social features",
-    "Display names, bios, follows, blocked-user choices and notification preferences you set remain yours. You grant onemore a licence to display profile and social content within the service so follows, leaderboards and notifications can function. Private-account, leaderboard-visibility and interaction settings in Settings → Privacy control who can see your activity where implemented.",
+    "Display names, bios, follows, blocked-user choices and notification preferences you set remain yours. You grant Unbored a licence to display profile and social content within the service so follows, leaderboards and notifications can function. Private-account, leaderboard-visibility and interaction settings in Settings → Privacy control who can see your activity where implemented.",
   ],
   [
     "5. Prohibited conduct",
@@ -62,7 +62,7 @@ export const terms = [
 export const privacy = [
   [
     "What we collect",
-    "Account and authentication: email, password verifier (stored by Supabase Auth, never by onemore), email-verification state, OAuth provider identities you link (Google), and session tokens stored in this browser only (see Storage, cookies and local data below). Profile: username (generated), display name, bio, avatar object path, onboarding state. Gameplay: play sessions (game, seed, start/end times) and scores (session, game, value, duration). Social, when you use it: follows, blocked-user relationships, notification rows (kind, payload, read time) and your privacy/notification preferences. Operational: rate-limit counters, request ids and error logs needed to run and protect the API.",
+    "Account and authentication: email, password verifier (stored by Supabase Auth, never by Unbored), email-verification state, OAuth provider identities you link (Google), and session tokens stored in this browser only (see Storage, cookies and local data below). Profile: username (generated), display name, bio, avatar object path, onboarding state. Gameplay: play sessions (game, seed, start/end times) and scores (session, game, value, duration). Social, when you use it: follows, blocked-user relationships, notification rows (kind, payload, read time) and your privacy/notification preferences. Operational: rate-limit counters, request ids and error logs needed to run and protect the API.",
   ],
   [
     "What we do not collect",
@@ -78,7 +78,7 @@ export const privacy = [
   ],
   [
     "Storage, cookies and local data",
-    "Your session tokens (access and refresh) are saved in this browser's localStorage under one namespaced onemore key so a reload keeps you signed in; the app re-checks them with the server on load and removes them on sign-out or when the server refuses the session. Appearance, language and accessibility choices persist in this browser's localStorage. Recent searches persist in this browser's localStorage. OAuth PKCE verifiers live in sessionStorage for the duration of one sign-in attempt. Avatar images live in the public `avatars` Supabase Storage bucket under your account folder.",
+    "Your session tokens (access and refresh) are saved in this browser's localStorage under one namespaced Unbored key so a reload keeps you signed in; the app re-checks them with the server on load and removes them on sign-out or when the server refuses the session. Appearance, language and accessibility choices persist in this browser's localStorage. Recent searches persist in this browser's localStorage. OAuth PKCE verifiers live in sessionStorage for the duration of one sign-in attempt. Avatar images live in the public `avatars` Supabase Storage bucket under your account folder.",
   ],
   [
     "Infrastructure",

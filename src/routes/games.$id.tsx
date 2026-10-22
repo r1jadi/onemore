@@ -28,7 +28,7 @@ export const Route = createFileRoute("/games/$id")({
   // that is not known: no description, no category, no metrics.
   head: ({ params }) => {
     const title = titleFromSlug(params.id);
-    return seo(title, `${title} on onemore.`, {
+    return seo(title, `${title} on Unbored.`, {
       type: "video.other",
       jsonLd: [
         videoGameJsonLd({ id: params.id, title }),
@@ -123,7 +123,7 @@ function Detail({ game }: { game: Game }) {
           />
           <div className="px-4 pt-4 md:px-0">
             {game.isOfficial && (
-              <p className="text-sm font-medium text-muted-foreground">OneMore</p>
+              <p className="text-sm font-medium text-muted-foreground">Unbored</p>
             )}
             {game.tagline && <p className="mt-1 text-lg font-medium">{game.tagline}</p>}
             {game.description && <p className="mt-3 text-muted-foreground">{game.description}</p>}

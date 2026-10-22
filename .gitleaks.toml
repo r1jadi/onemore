@@ -1,4 +1,4 @@
-# gitleaks configuration for onemore.
+# gitleaks configuration for Unbored.
 #
 # The stock ruleset is kept and only extended, never replaced. The allowlist
 # entries below cover unit-test fixtures that are shaped like credentials but

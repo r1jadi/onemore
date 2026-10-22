@@ -7,7 +7,7 @@ import { publicConfig } from "@/lib/config";
 import { seo } from "@/lib/seo";
 
 export const Route = createFileRoute("/forgot-password")({
-  head: () => seo("Forgot password", "Reset your onemore password."),
+  head: () => seo("Forgot password", "Reset your Unbored password."),
   component: Forgot,
 });
 

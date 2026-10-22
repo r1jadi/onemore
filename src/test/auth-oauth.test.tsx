@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { SocialButtons } from "@/components/auth/AuthLayout";
-import { googleAuthorizeUrl } from "@/lib/auth/session";
+import { OAUTH_VERIFIER_STORAGE_KEY, googleAuthorizeUrl } from "@/lib/auth/session";
 
 function base64Url(bytes: Uint8Array): string {
   return btoa(String.fromCharCode(...bytes))
@@ -44,7 +44,7 @@ describe("googleAuthorizeUrl", () => {
     const raw = await googleAuthorizeUrl("/settings/connected");
     const url = new URL(raw);
 
-    const verifier = sessionStorage.getItem("onemore-oauth-verifier");
+    const verifier = sessionStorage.getItem(OAUTH_VERIFIER_STORAGE_KEY);
     expect(verifier).toBeTruthy();
     expect(url.searchParams.get("code_challenge")).toBe(await s256(verifier ?? ""));
 
@@ -54,9 +54,9 @@ describe("googleAuthorizeUrl", () => {
 
   it("stores a fresh verifier per call (single-use)", async () => {
     await googleAuthorizeUrl("/");
-    const first = sessionStorage.getItem("onemore-oauth-verifier");
+    const first = sessionStorage.getItem(OAUTH_VERIFIER_STORAGE_KEY);
     await googleAuthorizeUrl("/");
-    const second = sessionStorage.getItem("onemore-oauth-verifier");
+    const second = sessionStorage.getItem(OAUTH_VERIFIER_STORAGE_KEY);
     expect(first).toBeTruthy();
     expect(second).toBeTruthy();
     expect(second).not.toBe(first);

@@ -38,12 +38,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/r1jadi/onemore/packages/go/platform/apierr"
-	"github.com/r1jadi/onemore/packages/go/platform/authn"
-	"github.com/r1jadi/onemore/packages/go/platform/config"
-	"github.com/r1jadi/onemore/packages/go/platform/httpx"
-	"github.com/r1jadi/onemore/services/game-sessions/internal/supabaseplay"
-	"github.com/r1jadi/onemore/services/internal/servicekit"
+	"github.com/r1jadi/unbored/packages/go/platform/apierr"
+	"github.com/r1jadi/unbored/packages/go/platform/authn"
+	"github.com/r1jadi/unbored/packages/go/platform/config"
+	"github.com/r1jadi/unbored/packages/go/platform/httpx"
+	"github.com/r1jadi/unbored/services/game-sessions/internal/supabaseplay"
+	"github.com/r1jadi/unbored/services/internal/servicekit"
 )
 
 // Name is the service's name in logs, configuration and the routing table.

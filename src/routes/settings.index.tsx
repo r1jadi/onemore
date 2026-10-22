@@ -21,7 +21,7 @@ import { seo } from "@/lib/seo";
 import { avatarUrl, clearProfile, useProfile, type ProfileState } from "@/lib/users/profile";
 
 export const Route = createFileRoute("/settings/")({
-  head: () => seo("Settings", "Manage your onemore account, privacy and preferences."),
+  head: () => seo("Settings", "Manage your Unbored account, privacy and preferences."),
   component: Settings,
 });
 
@@ -192,7 +192,7 @@ function Settings() {
       <AlertDialog open={logout} onOpenChange={setLogout}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Log out of onemore?</AlertDialogTitle>
+            <AlertDialogTitle>Log out of Unbored?</AlertDialogTitle>
             <AlertDialogDescription>Your scores are saved to your account.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -231,7 +231,7 @@ function Settings() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
-                window.open("https://github.com/r1jadi/onemore/issues", "_blank", "noreferrer");
+                window.open("https://github.com/r1jadi/unbored/issues", "_blank", "noreferrer");
               }}
             >
               Open an issue

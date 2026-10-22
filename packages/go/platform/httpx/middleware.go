@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/r1jadi/onemore/packages/go/platform/config"
-	"github.com/r1jadi/onemore/packages/go/platform/identity"
-	"github.com/r1jadi/onemore/packages/go/platform/logging"
+	"github.com/r1jadi/unbored/packages/go/platform/config"
+	"github.com/r1jadi/unbored/packages/go/platform/identity"
+	"github.com/r1jadi/unbored/packages/go/platform/logging"
 )
 
 type ctxKey int

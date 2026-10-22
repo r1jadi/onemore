@@ -53,7 +53,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/r1jadi/onemore/packages/go/platform/config"
+	"github.com/r1jadi/unbored/packages/go/platform/config"
 )
 
 // PostgREST passes the SQLSTATE through in `code`. These are the ones the admin
@@ -582,7 +582,7 @@ func (c *Client) rpcAs(ctx context.Context, op, function string, payload any, ap
 	request.Header.Set("Authorization", "Bearer "+bearer)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
-	request.Header.Set("X-Client-Info", "onemore-admin-service")
+	request.Header.Set("X-Client-Info", "unbored-admin-service")
 
 	response, err := c.http.Do(request)
 	if err != nil {

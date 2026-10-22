@@ -18,8 +18,8 @@ the frontend.
   then verifies the tokens through `POST /api/v1/auth/session` before adopting
   them. Cancellation (`?error=access_denied`) and missing verifiers show
   specific messages. Parameters are stripped from the URL.
-- Completion: the callback only proves *who* the visitor is. A Google account
-  that has never finished a OneMore sign-up lands with
+- Completion: the callback only proves _who_ the visitor is. A Google account
+  that has never finished an Unbored sign-up lands with
   `session.onboarded === false`; the root gate in `src/routes/__root.tsx`
   routes it to `/signup`, which runs the remaining steps (name + terms)
   without asking for a credential again. Finishing writes
@@ -47,7 +47,7 @@ the frontend.
 1. APIs & Services → Credentials → Create Credentials → OAuth client ID →
    Application type **Web application**.
 2. Authorized JavaScript origins:
-   - `https://onemorestartup.vercel.app`
+   - `https://unboredapp.vercel.app`
    - `https://trrwaftksifjaiaxfmiu.supabase.co`
 3. Authorized redirect URIs (exact, Supabase callback):
    - `https://trrwaftksifjaiaxfmiu.supabase.co/auth/v1/callback`
@@ -59,8 +59,8 @@ the frontend.
 1. Authentication → Providers → Google → Enable.
 2. Paste the Google **Client ID** and **Client secret**.
 3. Authentication → URL Configuration → Site URL:
-   `https://onemorestartup.vercel.app`.
-4. Redirect URLs: add `https://onemorestartup.vercel.app/auth/callback`
+   `https://unboredapp.vercel.app`.
+4. Redirect URLs: add `https://unboredapp.vercel.app/auth/callback`
    (and preview variants as needed).
 
 ### 3. Verify

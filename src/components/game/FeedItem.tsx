@@ -147,8 +147,8 @@ export function FeedItem({ game }: { game: Game }) {
           <div className="pointer-events-auto space-y-3 p-4 pr-20 md:pr-4">
             {game.isOfficial && (
               <div className="flex items-center gap-2 text-sm font-medium">
-                <Avatar name="onemore" size="sm" />
-                OneMore
+                <Avatar name="Unbored" size="sm" />
+                Unbored
               </div>
             )}
             <div>

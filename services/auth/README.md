@@ -5,7 +5,7 @@ The credential lifecycle for the web app, on top of Supabase Auth.
 Supabase is the identity provider: it stores credentials, enforces the password
 policy, sends confirmation and recovery email, and issues access and refresh
 tokens. This service never stores a password and never holds a Supabase secret
-key. What it owns is the *application session* — sign up, sign in, refresh, sign
+key. What it owns is the _application session_ — sign up, sign in, refresh, sign
 out, and "who is this and what may they see" — so the browser talks to one origin
 and no Supabase key of any kind has to be embedded in a page.
 
@@ -20,15 +20,15 @@ All paths are relative to the gateway's `/api/v1` base. The contract in
 [`packages/api-contracts/openapi-v1.yaml`](../../packages/api-contracts/openapi-v1.yaml)
 is authoritative and marks every one of these `x-status: available`.
 
-| Method | Path | Tier | Success | Calls Supabase |
-| --- | --- | --- | --- | --- |
-| `POST` | `/auth/sign-up` | public | `201` | `POST /auth/v1/signup` |
-| `GET` | `/auth/username-available` | public | `200` | `GET /rest/v1/profiles` (availability) |
-| `POST` | `/auth/sign-in` | public | `200` | `POST /auth/v1/token?grant_type=password` |
-| `POST` | `/auth/refresh` | public | `200` | `POST /auth/v1/token?grant_type=refresh_token` |
-| `POST` | `/auth/session` | public (verifies the token in the body) | `200` | `GET /rest/v1/profiles` (onboarding state) |
-| `GET` | `/auth/session` | authenticated | `200` | `GET /rest/v1/profiles` (onboarding state) |
-| `POST` | `/auth/sign-out` | authenticated | `204` | `POST /auth/v1/logout` |
+| Method | Path                       | Tier                                    | Success | Calls Supabase                                 |
+| ------ | -------------------------- | --------------------------------------- | ------- | ---------------------------------------------- |
+| `POST` | `/auth/sign-up`            | public                                  | `201`   | `POST /auth/v1/signup`                         |
+| `GET`  | `/auth/username-available` | public                                  | `200`   | `GET /rest/v1/profiles` (availability)         |
+| `POST` | `/auth/sign-in`            | public                                  | `200`   | `POST /auth/v1/token?grant_type=password`      |
+| `POST` | `/auth/refresh`            | public                                  | `200`   | `POST /auth/v1/token?grant_type=refresh_token` |
+| `POST` | `/auth/session`            | public (verifies the token in the body) | `200`   | `GET /rest/v1/profiles` (onboarding state)     |
+| `GET`  | `/auth/session`            | authenticated                           | `200`   | `GET /rest/v1/profiles` (onboarding state)     |
+| `POST` | `/auth/sign-out`           | authenticated                           | `204`   | `POST /auth/v1/logout`                         |
 
 The three credential endpoints answer with `{ session, tokens?, user? }`. `tokens`
 is absent while Supabase still requires email confirmation — that is a success,
@@ -38,21 +38,21 @@ token.
 
 ## How it talks to Supabase
 
-* **Auth API** — `https://<project>.supabase.co/auth/v1/…`, with the publishable
+- **Auth API** — `https://<project>.supabase.co/auth/v1/…`, with the publishable
   key in `apikey`. No `Authorization` header: it is the credential being
   verified, not a caller's token.
-* **Data API** — `GET /rest/v1/profiles?select=onboarded_at&id=eq.<uuid>&limit=1`
+- **Data API** — `GET /rest/v1/profiles?select=onboarded_at&id=eq.<uuid>&limit=1`
   with the publishable key in `apikey` **and the caller's own access token** in
   `Authorization`. Row Level Security decides what is visible, so the service
   needs no `service_role`/secret key and cannot read another user's profile.
   `onboarded_at` is readable by the `authenticated` role for exactly this reason.
-* **Username availability** — `GET /rest/v1/profiles?select=id&username=eq.<name>&limit=1`
+- **Username availability** — `GET /rest/v1/profiles?select=id&username=eq.<name>&limit=1`
   with the publishable key only. The public profile columns are readable by
   `anon`, so the answer needs no account and no secret; only the boolean leaves
   the service. The case-insensitive unique index on `profiles.username` remains
   the authority — the check is advisory, and the sign-up insert re-runs the same
   uniqueness rule, so two concurrent registrations cannot both commit the name.
-* Every upstream failure is mapped to a platform error code
+- Every upstream failure is mapped to a platform error code
   (`unauthorized`, `forbidden`, `conflict`, `unprocessable_entity`,
   `rate_limited`, `service_unavailable`). Supabase's own message is never
   forwarded — it can describe the project's configuration — and the response body
@@ -61,12 +61,12 @@ token.
 
 ## Configuration
 
-| Variable | Required | Purpose |
-| --- | --- | --- |
-| `SUPABASE_URL` | yes | Project URL. The JWKS URL (`<URL>/auth/v1/.well-known/jwks.json`) and issuer (`<URL>/auth/v1`) are derived from it |
-| `SUPABASE_PUBLISHABLE_KEY` | yes | Presented to the Auth and Data APIs to identify the project. Not a secret — the browser is given the same value — but only the server needs this copy |
-| `SUPABASE_JWT_AUDIENCE` | no | Defaults to `authenticated` |
-| `AUTH_RATE_LIMIT_REQUESTS_PER_MINUTE`, `AUTH_RATE_LIMIT_BURST` | no | Credential budget, per client and per account. Defaults `10` and `5` |
+| Variable                                                       | Required | Purpose                                                                                                                                               |
+| -------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SUPABASE_URL`                                                 | yes      | Project URL. The JWKS URL (`<URL>/auth/v1/.well-known/jwks.json`) and issuer (`<URL>/auth/v1`) are derived from it                                    |
+| `SUPABASE_PUBLISHABLE_KEY`                                     | yes      | Presented to the Auth and Data APIs to identify the project. Not a secret — the browser is given the same value — but only the server needs this copy |
+| `SUPABASE_JWT_AUDIENCE`                                        | no       | Defaults to `authenticated`                                                                                                                           |
+| `AUTH_RATE_LIMIT_REQUESTS_PER_MINUTE`, `AUTH_RATE_LIMIT_BURST` | no       | Credential budget, per client and per account. Defaults `10` and `5`                                                                                  |
 
 Not needed, and deliberately not read: `SUPABASE_SECRET_KEY`,
 `SUPABASE_SERVICE_ROLE_KEY` and `SUPABASE_JWT_SECRET`. If no publishable key is
@@ -90,10 +90,10 @@ There are three ways to start this service, and all three call the same
 `services/auth`, and every entrypoint only names it, so there is no second
 implementation to drift.
 
-| Entrypoint | Used by |
-| --- | --- |
-| `services/auth/cmd/auth` | local shell (`go run ./auth/cmd/auth`) |
-| `services/cmd/server` | **the deployment** — Vercel's Go framework preset detects `main.go`, `cmd/api/main.go` or `cmd/server/main.go` at the service root, and the gateway already owns `cmd/api/main.go` |
+| Entrypoint               | Used by                                                                                                                                                                            |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `services/auth/cmd/auth` | local shell (`go run ./auth/cmd/auth`)                                                                                                                                             |
+| `services/cmd/server`    | **the deployment** — Vercel's Go framework preset detects `main.go`, `cmd/api/main.go` or `cmd/server/main.go` at the service root, and the gateway already owns `cmd/api/main.go` |
 
 The deployed path is described in
 [deployment/vercel.md](../../docs/deployment/vercel.md); the short version is that
@@ -154,7 +154,7 @@ After a deployment, the check that matters is one request to production:
 ```bash
 curl -sS -X POST -H 'Content-Type: application/json' \
   -d '{"email":"does-not-exist@example.com","password":"a-long-password"}' \
-  https://onemorestartup.vercel.app/api/v1/auth/sign-in
+  https://unboredapp.vercel.app/api/v1/auth/sign-in
 # 401 with the platform envelope — the whole chain works.
 # 503 "This API is not available in this environment yet." — the gateway has no
 #     upstream: the binding did not resolve.

@@ -1,6 +1,6 @@
 /**
  * Completing registration: the moment a Supabase account becomes a registered
- * OneMore user.
+ * Unbored user.
  *
  * A valid Supabase authentication session and a registered account are not the
  * same thing. The session answers "who is this?"; `profiles.onboarded_at`

@@ -70,7 +70,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-dvh md:flex">
       <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar px-3 py-5 md:flex lg:w-64">
-        <Link to="/" className="mb-6 px-3" aria-label="onemore home">
+        <Link to="/" className="mb-6 px-3" aria-label="Unbored home">
           <Logo />
         </Link>
         <nav className="flex flex-1 flex-col gap-0.5" aria-label="Main">

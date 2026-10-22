@@ -34,7 +34,7 @@ import { fmt } from "@/lib/format";
 
 export const Route = createFileRoute("/admin/users")({
   head: () => ({
-    meta: [{ title: "Users — admin onemore" }, { name: "robots", content: "noindex" }],
+    meta: [{ title: "Users — Unbored admin" }, { name: "robots", content: "noindex" }],
   }),
   component: UsersAdmin,
 });

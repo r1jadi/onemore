@@ -13,7 +13,7 @@ import { useAdminCategories, type AdminCategory } from "@/lib/admin/api";
 
 export const Route = createFileRoute("/admin/categories")({
   head: () => ({
-    meta: [{ title: "Categories — admin onemore" }, { name: "robots", content: "noindex" }],
+    meta: [{ title: "Categories — Unbored admin" }, { name: "robots", content: "noindex" }],
   }),
   component: CategoriesAdmin,
 });

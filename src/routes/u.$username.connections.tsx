@@ -25,7 +25,7 @@ export const Route = createFileRoute("/u/$username/connections")({
   validateSearch: z.object({ tab: z.enum(["followers", "following"]).optional() }),
   head: ({ params }) => ({
     meta: [
-      { title: `@${params.username} connections — onemore` },
+      { title: `@${params.username} connections — Unbored` },
       { name: "description", content: `Followers and following of @${params.username}.` },
       { property: "og:title", content: `@${params.username} connections` },
       { property: "og:description", content: `Followers and following of @${params.username}.` },

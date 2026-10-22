@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/r1jadi/onemore/packages/go/platform/config"
+	"github.com/r1jadi/unbored/packages/go/platform/config"
 )
 
 // newClient points a client at a stand-in for PostgREST and counts what reached

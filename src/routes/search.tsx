@@ -17,6 +17,7 @@ import { listBlockedIds } from "@/lib/settings/blocked";
 import { listFollowees, searchProfiles, type PublicProfile } from "@/lib/social/follows";
 import { getAuthState, getSessionUserId } from "@/lib/auth/session";
 import { seo } from "@/lib/seo";
+import { readWithLegacy, safeLocalStorage } from "@/lib/storage";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/search")({
@@ -34,12 +35,14 @@ function useDebounced<T>(value: T, ms = 250): T {
   return settled;
 }
 
-const RECENT_KEY = "onemore-recent-searches";
+const RECENT_KEY = "unbored-recent-searches";
+/** Pre-rename key: read once and moved forward by `readWithLegacy`. */
+const LEGACY_RECENT_KEY = "onemore-recent-searches";
 
 function readRecent(): string[] {
+  const raw = readWithLegacy(safeLocalStorage(), RECENT_KEY, LEGACY_RECENT_KEY);
+  if (!raw) return [];
   try {
-    const raw = localStorage.getItem(RECENT_KEY);
-    if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     return Array.isArray(parsed)
       ? parsed.filter((x): x is string => typeof x === "string").slice(0, 8)

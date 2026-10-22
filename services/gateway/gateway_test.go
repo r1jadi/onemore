@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/r1jadi/onemore/packages/go/platform/httpx"
-	"github.com/r1jadi/onemore/services/internal/servicekit"
+	"github.com/r1jadi/unbored/packages/go/platform/httpx"
+	"github.com/r1jadi/unbored/services/internal/servicekit"
 )
 
 // newGateway serves the wired gateway over httptest. It builds the same

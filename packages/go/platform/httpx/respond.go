@@ -1,4 +1,4 @@
-// Package httpx contains the HTTP conventions shared by every onemore service:
+// Package httpx contains the HTTP conventions shared by every Unbored service:
 // one error envelope, one middleware chain, one server bootstrap.
 package httpx
 
@@ -11,7 +11,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/r1jadi/onemore/packages/go/platform/apierr"
+	"github.com/r1jadi/unbored/packages/go/platform/apierr"
 )
 
 // Error codes re-exported so services only need this package for HTTP concerns.

@@ -248,6 +248,6 @@ export function describeNotification(item: AppNotification): string {
       return text !== "" ? text : "An update about your content";
     case "system":
     default:
-      return text !== "" ? text : "An update from onemore";
+      return text !== "" ? text : "An update from Unbored";
   }
 }

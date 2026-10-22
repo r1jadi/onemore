@@ -28,7 +28,7 @@ export function AuthLayout({
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-2">
       <div className="hidden border-r border-border bg-sidebar p-10 lg:flex lg:flex-col">
-        <Link to="/" aria-label="onemore home">
+        <Link to="/" aria-label="Unbored home">
           <Logo />
         </Link>
         <div className="my-auto grid max-w-md grid-cols-2 gap-3 self-center">
@@ -41,7 +41,7 @@ export function AuthLayout({
           ))}
         </div>
         <p className="max-w-sm text-sm text-muted-foreground">
-          Short games. Real scores. Always one more.
+          Short games. Real scores. Stay unbored.
         </p>
       </div>
       <div className="flex min-h-dvh flex-col px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1.5rem,env(safe-area-inset-bottom))]">

@@ -1,6 +1,6 @@
 // Package version exposes build metadata. Values are injected at build time:
 //
-//	go build -ldflags "-X github.com/r1jadi/onemore/packages/go/platform/version.Version=$(git rev-parse --short HEAD)"
+//	go build -ldflags "-X github.com/r1jadi/unbored/packages/go/platform/version.Version=$(git rev-parse --short HEAD)"
 package version
 
 // APIVersion is the version segment of the public API path (/api/v1).

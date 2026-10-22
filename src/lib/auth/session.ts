@@ -7,9 +7,10 @@
  * decides how a session is stored.
  *
  * Storage rule: the token pair and the last known session view are persisted
- * under one namespaced `localStorage` key (`onemore.auth.session.v1`), so a
+ * under one namespaced `localStorage` key (`unbored.auth.session.v1`), so a
  * reload can restore the session the visitor already earned instead of starting
- * anonymous. Nothing else is written: no cookies, and `sessionStorage` holds
+ * anonymous. The pre-rename key (`onemore.auth.session.v1`) is still read once
+ * and moved forward, so the rebrand signs nobody out. Nothing else is written: no cookies, and `sessionStorage` holds
  * only the short-lived OAuth PKCE verifier (never a session token). The server
  * stays authoritative: a restored pair is re-validated against
  * `GET /auth/session` before the app relies on it, and a pair the server
@@ -29,6 +30,12 @@ import { useSyncExternalStore } from "react";
 
 import { ApiError, apiFetch } from "@/lib/api/client";
 import { publicConfig } from "@/lib/config";
+import {
+  readWithLegacy,
+  removeWithLegacy,
+  safeLocalStorage,
+  safeSessionStorage,
+} from "@/lib/storage";
 
 /** Routes implemented by `services/auth`. Kept together so they cannot drift. */
 const Routes = {
@@ -85,7 +92,16 @@ export type AuthState =
  * The one web storage key the session is persisted under. The suffix is the
  * payload version, so a shape change is never read as an older payload.
  */
-export const SESSION_STORAGE_KEY = "onemore.auth.session.v1";
+export const SESSION_STORAGE_KEY = "unbored.auth.session.v1";
+
+/** The pre-rename session key. Read once and moved forward; never written. */
+const LEGACY_SESSION_STORAGE_KEY = "onemore.auth.session.v1";
+
+/** `sessionStorage` key for the single-use OAuth PKCE verifier. */
+export const OAUTH_VERIFIER_STORAGE_KEY = "unbored-oauth-verifier";
+
+/** The pre-rename verifier key. Read once and moved forward; never written. */
+const LEGACY_OAUTH_VERIFIER_STORAGE_KEY = "onemore-oauth-verifier";
 
 const STORAGE_VERSION = 1;
 
@@ -197,19 +213,6 @@ type StoredSession = {
 
 const ROLES: readonly SessionRole[] = ["user", "moderator", "admin"];
 
-/**
- * The browser's storage, or `undefined` where there is none (the server) or it
- * is denied (private mode, blocked cookies). Storage is a convenience: every
- * caller must keep working when it is unavailable.
- */
-function webStorage(): Storage | undefined {
-  try {
-    return typeof localStorage === "undefined" ? undefined : localStorage;
-  } catch {
-    return undefined;
-  }
-}
-
 function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value !== "";
 }
@@ -283,14 +286,9 @@ function parseStoredSession(raw: string): StoredSession | undefined {
 }
 
 function readStoredSession(): StoredSession | undefined {
-  const storage = webStorage();
+  const storage = safeLocalStorage();
   if (!storage) return undefined;
-  let raw: string | null;
-  try {
-    raw = storage.getItem(SESSION_STORAGE_KEY);
-  } catch {
-    return undefined;
-  }
+  const raw = readWithLegacy(storage, SESSION_STORAGE_KEY, LEGACY_SESSION_STORAGE_KEY);
   if (raw === null) return undefined;
   const stored = parseStoredSession(raw);
   // A malformed entry can never become a session; drop it rather than read it
@@ -300,7 +298,7 @@ function readStoredSession(): StoredSession | undefined {
 }
 
 function persistSession(pair: Tokens, view: Session): void {
-  const storage = webStorage();
+  const storage = safeLocalStorage();
   if (!storage) return;
   try {
     const payload: StoredSession = { version: STORAGE_VERSION, tokens: pair, session: view };
@@ -311,13 +309,8 @@ function persistSession(pair: Tokens, view: Session): void {
 }
 
 function clearStoredSession(): void {
-  const storage = webStorage();
-  if (!storage) return;
-  try {
-    storage.removeItem(SESSION_STORAGE_KEY);
-  } catch {
-    // Best effort: nothing else to do when storage is unavailable.
-  }
+  // Both keys: a legacy copy left behind would restore the signed-out session.
+  removeWithLegacy(safeLocalStorage(), SESSION_STORAGE_KEY, LEGACY_SESSION_STORAGE_KEY);
 }
 
 // ── Expiry and refresh policy ──────────────────────────────────────────────
@@ -757,7 +750,7 @@ export async function googleAuthorizeUrl(next = "/"): Promise<string> {
   // a single-use random value in sessionStorage, never a long-lived token.
   const verifier = randomVerifier();
   try {
-    sessionStorage.setItem("onemore-oauth-verifier", verifier);
+    sessionStorage.setItem(OAUTH_VERIFIER_STORAGE_KEY, verifier);
   } catch {
     // Storage may be unavailable (private mode); the callback then reports a
     // clear error instead of silently failing.
@@ -800,7 +793,11 @@ export async function exchangeOAuthCode(code: string): Promise<AuthSession> {
   const { url, publishableKey } = supabaseAuthBase();
   let verifier: string | null = null;
   try {
-    verifier = sessionStorage.getItem("onemore-oauth-verifier");
+    verifier = readWithLegacy(
+      safeSessionStorage(),
+      OAUTH_VERIFIER_STORAGE_KEY,
+      LEGACY_OAUTH_VERIFIER_STORAGE_KEY,
+    );
   } catch {
     verifier = null;
   }
@@ -835,11 +832,12 @@ export async function exchangeOAuthCode(code: string): Promise<AuthSession> {
       status: 400,
     });
   }
-  try {
-    sessionStorage.removeItem("onemore-oauth-verifier");
-  } catch {
-    // Best effort cleanup only.
-  }
+  // Best effort cleanup only, of both keys.
+  removeWithLegacy(
+    safeSessionStorage(),
+    OAUTH_VERIFIER_STORAGE_KEY,
+    LEGACY_OAUTH_VERIFIER_STORAGE_KEY,
+  );
   // Tokens are verified by the backend before they are trusted (see above).
   return adoptSupabaseTokens({
     accessToken: payload.access_token,

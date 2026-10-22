@@ -26,7 +26,7 @@ import { fmt } from "@/lib/format";
 
 export const Route = createFileRoute("/admin/review")({
   head: () => ({
-    meta: [{ title: "Review queue — admin onemore" }, { name: "robots", content: "noindex" }],
+    meta: [{ title: "Review queue — Unbored admin" }, { name: "robots", content: "noindex" }],
   }),
   component: ReviewQueue,
 });

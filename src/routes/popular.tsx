@@ -4,7 +4,7 @@ import { EmptyState } from "@/components/common";
 import { seo } from "@/lib/seo";
 
 export const Route = createFileRoute("/popular")({
-  head: () => seo("Popular games", "The most played games on onemore."),
+  head: () => seo("Popular games", "The most played games on Unbored."),
   component: Popular,
 });
 
@@ -19,7 +19,7 @@ export const Route = createFileRoute("/popular")({
  */
 function Popular() {
   return (
-    <GameListPage title="Popular games" subtitle="The most played games on onemore.">
+    <GameListPage title="Popular games" subtitle="The most played games on Unbored.">
       <EmptyState
         title="Ranking is not available yet"
         body="Popularity is a count of recorded plays. Plays are recorded, but no game is ranked by them yet. Browse the newest games instead."

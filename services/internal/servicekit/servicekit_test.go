@@ -12,9 +12,9 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/r1jadi/onemore/packages/go/platform/authn"
-	"github.com/r1jadi/onemore/packages/go/platform/config"
-	"github.com/r1jadi/onemore/packages/go/platform/httpx"
+	"github.com/r1jadi/unbored/packages/go/platform/authn"
+	"github.com/r1jadi/unbored/packages/go/platform/config"
+	"github.com/r1jadi/unbored/packages/go/platform/httpx"
 )
 
 // testSecret must be at least 32 characters; the verifier refuses shorter ones.
@@ -406,13 +406,13 @@ func TestSecurityHeadersAreAlwaysPresent(t *testing.T) {
 }
 
 func TestCORSOnlyAllowsConfiguredOrigins(t *testing.T) {
-	server := newTestServer(t, testOptions{withAuth: true, corsOrigin: "https://onemorestartup.vercel.app"})
+	server := newTestServer(t, testOptions{withAuth: true, corsOrigin: "https://unboredapp.vercel.app"})
 
 	allowed := get(t, server.URL+"/api/v1/things/public", map[string]string{
-		"Origin": "https://onemorestartup.vercel.app",
+		"Origin": "https://unboredapp.vercel.app",
 	})
 	allowed.Body.Close()
-	if got := allowed.Header.Get("Access-Control-Allow-Origin"); got != "https://onemorestartup.vercel.app" {
+	if got := allowed.Header.Get("Access-Control-Allow-Origin"); got != "https://unboredapp.vercel.app" {
 		t.Fatalf("allowed origin not echoed: %q", got)
 	}
 

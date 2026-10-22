@@ -13,7 +13,7 @@ import { useAdminSession, useAdminSystemServices } from "@/lib/admin/api";
 
 export const Route = createFileRoute("/admin/settings")({
   head: () => ({
-    meta: [{ title: "System — admin onemore" }, { name: "robots", content: "noindex" }],
+    meta: [{ title: "System — Unbored admin" }, { name: "robots", content: "noindex" }],
   }),
   component: SystemSettings,
 });

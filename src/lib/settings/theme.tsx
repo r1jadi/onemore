@@ -7,17 +7,17 @@
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 
+import { readWithLegacy, safeLocalStorage } from "@/lib/storage";
+
 export type Appearance = "dark" | "light" | "system";
 
-const STORAGE_KEY = "onemore-appearance";
+const STORAGE_KEY = "unbored-appearance";
+/** Pre-rename key: read once and moved forward by `readWithLegacy`. */
+const LEGACY_STORAGE_KEY = "onemore-appearance";
 
 function readStored(): Appearance {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw === "dark" || raw === "light" || raw === "system") return raw;
-  } catch {
-    // Storage unavailable: fall through to the default.
-  }
+  const raw = readWithLegacy(safeLocalStorage(), STORAGE_KEY, LEGACY_STORAGE_KEY);
+  if (raw === "dark" || raw === "light" || raw === "system") return raw;
   return "dark";
 }
 

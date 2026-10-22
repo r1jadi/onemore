@@ -7,7 +7,7 @@ import { changePassword, useAuth } from "@/lib/auth/session";
 import { seo } from "@/lib/seo";
 
 export const Route = createFileRoute("/reset-password")({
-  head: () => seo("Set a new password", "Choose a new password for your onemore account."),
+  head: () => seo("Set a new password", "Choose a new password for your Unbored account."),
   component: Reset,
 });
 

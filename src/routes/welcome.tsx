@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { seo } from "@/lib/seo";
 
 export const Route = createFileRoute("/welcome")({
-  head: () => seo("Welcome", "onemore is a social feed of short, playable games."),
+  head: () => seo("Welcome", "Unbored is a social feed of short, playable games."),
   component: Welcome,
 });
 

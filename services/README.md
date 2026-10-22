@@ -1,7 +1,7 @@
 # services
 
 Every backend service lives here, in one Go module
-(`github.com/r1jadi/onemore/services`). Each service has its own `cmd/<name>`
+(`github.com/r1jadi/unbored/services`). Each service has its own `cmd/<name>`
 binary, so they deploy independently while sharing one module. The reasoning is in
 [../docs/decisions/0001-go-module-strategy.md](../docs/decisions/0001-go-module-strategy.md).
 
@@ -33,8 +33,8 @@ services/
 package main
 
 import (
-	"github.com/r1jadi/onemore/packages/go/platform/httpx"
-	"github.com/r1jadi/onemore/services/internal/servicekit"
+	"github.com/r1jadi/unbored/packages/go/platform/httpx"
+	"github.com/r1jadi/unbored/services/internal/servicekit"
 )
 
 const serviceName = "users"
@@ -76,14 +76,14 @@ ENVIRONMENT=development LOG_FORMAT=text CORS_ALLOWED_ORIGINS=http://localhost:80
 
 ## Rules
 
-* Route tiers come from the router: `Public`, `OptionalAuthFunc`, `Authenticated`,
+- Route tiers come from the router: `Public`, `OptionalAuthFunc`, `Authenticated`,
   `Moderator`, `Admin`. There is no unguarded handler.
-* Identity comes from `identity.FromContext(r.Context())`, never from the request.
-* Validate everything the client sends: `httpx.DecodeJSON` for bodies (rejects
+- Identity comes from `identity.FromContext(r.Context())`, never from the request.
+- Validate everything the client sends: `httpx.DecodeJSON` for bodies (rejects
   unknown fields), `httpx.RequireQuery` for required query values, explicit range
   and format checks in the handler.
-* When a service owns data, its rules must also exist in the database (grants, RLS,
+- When a service owns data, its rules must also exist in the database (grants, RLS,
   constraints). See [../docs/security/data-access.md](../docs/security/data-access.md).
-* A new endpoint needs its OpenAPI entry, its prefix in `internal/apiroutes`, and a
+- A new endpoint needs its OpenAPI entry, its prefix in `internal/apiroutes`, and a
   test for the tier boundary — see
   [../docs/development/testing.md](../docs/development/testing.md).

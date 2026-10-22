@@ -114,7 +114,7 @@ select ur.user_id, ur.role, ur.granted_at, ur.granted_by
 
 ```bash
 curl -sS -H "Authorization: Bearer $ACCESS_TOKEN" \
-  https://onemorestartup.vercel.app/api/v1/admin/session
+  https://unboredapp.vercel.app/api/v1/admin/session
 # {"userId":"…","role":"moderator","isStaff":true,"isAdmin":false,…}
 ```
 

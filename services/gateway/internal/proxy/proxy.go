@@ -20,9 +20,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/r1jadi/onemore/packages/go/platform/config"
-	"github.com/r1jadi/onemore/packages/go/platform/httpx"
-	"github.com/r1jadi/onemore/services/internal/apiroutes"
+	"github.com/r1jadi/unbored/packages/go/platform/config"
+	"github.com/r1jadi/unbored/packages/go/platform/httpx"
+	"github.com/r1jadi/unbored/services/internal/apiroutes"
 )
 
 // identityHeaders are stripped from both the inbound request and the outbound

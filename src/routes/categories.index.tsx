@@ -5,7 +5,7 @@ import { catalogErrorMessage, useCategories } from "@/lib/games/catalog";
 import { seo } from "@/lib/seo";
 
 export const Route = createFileRoute("/categories/")({
-  head: () => seo("Categories", "Browse every game category on onemore."),
+  head: () => seo("Categories", "Browse every game category on Unbored."),
   component: Categories,
 });
 

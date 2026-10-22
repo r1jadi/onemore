@@ -9,9 +9,9 @@ import { Button } from "@/components/ui/button";
 export const Route = createFileRoute("/u/$username/")({
   head: ({ params }) => ({
     meta: [
-      { title: `@${params.username} — onemore` },
+      { title: `@${params.username} — Unbored` },
       { name: "description", content: `Scores and games played by @${params.username}.` },
-      { property: "og:title", content: `@${params.username} on onemore` },
+      { property: "og:title", content: `@${params.username} on Unbored` },
       { property: "og:description", content: `Scores and games played by @${params.username}.` },
     ],
   }),

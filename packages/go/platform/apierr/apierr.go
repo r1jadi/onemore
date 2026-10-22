@@ -1,4 +1,4 @@
-// Package apierr defines the error vocabulary shared by every onemore service.
+// Package apierr defines the error vocabulary shared by every Unbored service.
 // It has no dependencies so both the HTTP helpers and the auth package can use
 // it without import cycles.
 package apierr

@@ -4,7 +4,7 @@ import { LegalBody, privacy } from "@/components/legal";
 import { seo } from "@/lib/seo";
 
 export const Route = createFileRoute("/privacy")({
-  head: () => seo("Privacy Policy", "How onemore collects, uses and protects your data."),
+  head: () => seo("Privacy Policy", "How Unbored collects, uses and protects your data."),
   component: () => (
     <Page>
       <PageHeader back title="Privacy Policy" />

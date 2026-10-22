@@ -142,7 +142,7 @@ export function AdminShell({ children }: { children?: ReactNode }) {
         body="Your account is not on the administrator allowlist, so the API has no admin data to show you."
       >
         <Button asChild variant="secondary">
-          <Link to="/">Back to onemore</Link>
+          <Link to="/">Back to Unbored</Link>
         </Button>
       </AdminGate>
     );
@@ -195,9 +195,9 @@ function AdminDashboard({
   return (
     <div className="min-h-dvh md:flex">
       <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar px-3 py-5 md:flex lg:w-64">
-        <Link to="/" className="mb-1 flex items-center gap-2 px-3" aria-label="Back to onemore">
+        <Link to="/" className="mb-1 flex items-center gap-2 px-3" aria-label="Back to Unbored">
           <LogoMark className="size-6" />
-          <span className="text-base font-semibold">onemore</span>
+          <span className="text-base font-semibold">Unbored</span>
         </Link>
         <p className="mb-4 px-3 text-xs text-muted-foreground">Admin dashboard</p>
         <nav className="no-scrollbar flex flex-1 flex-col gap-4 overflow-y-auto" aria-label="Admin">
@@ -234,7 +234,7 @@ function AdminDashboard({
             className="press flex h-10 items-center gap-3 rounded-lg px-3 text-sm text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-foreground"
           >
             <ArrowLeft className="size-[18px]" strokeWidth={1.75} />
-            Back to onemore
+            Back to Unbored
           </Link>
           <div className="mt-1 flex items-center gap-2.5 px-3 pt-2">
             <Avatar name={session.username} size="sm" />
@@ -249,9 +249,9 @@ function AdminDashboard({
       <div className="min-w-0 flex-1">
         <div className="sticky top-0 z-40 glass border-x-0 border-t-0 md:hidden">
           <div className="flex items-center gap-2 px-4 pt-[calc(0.75rem+env(safe-area-inset-top))] pb-2">
-            <Link to="/" aria-label="Back to onemore" className="press flex items-center gap-2">
+            <Link to="/" aria-label="Back to Unbored" className="press flex items-center gap-2">
               <LogoMark className="size-6" />
-              <span className="text-sm font-semibold">onemore admin</span>
+              <span className="text-sm font-semibold">Unbored admin</span>
             </Link>
             <span className="ml-auto rounded-full bg-surface-2 px-2 py-0.5 text-[11px] text-muted-foreground">
               {roleLabel}

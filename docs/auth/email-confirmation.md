@@ -10,7 +10,7 @@ steps that code cannot perform.
   Supabase and proposes `options.emailRedirectTo = <SITE>/auth/callback`
   (`services/auth/internal/supabaseauth/client.go`). The site is resolved from
   `PUBLIC_SITE_URL`, `SITE_URL`, then `VITE_PUBLIC_SITE_URL`, defaulting to
-  `https://onemorestartup.vercel.app`. An invalid value is omitted rather than
+  `https://unboredapp.vercel.app`. An invalid value is omitted rather than
   sent.
 - The username chosen on the same form travels in that request's `data`
   payload (`data.username`). Supabase stores it on the auth user before the
@@ -34,11 +34,11 @@ steps that code cannot perform.
 
 ## Manual Supabase steps (owner)
 
-1. **Authentication → URL Configuration → Site URL**: `https://onemorestartup.vercel.app`.
+1. **Authentication → URL Configuration → Site URL**: `https://unboredapp.vercel.app`.
 2. **Redirect URLs** (allowlist): add
-   - `https://onemorestartup.vercel.app/auth/callback`
-   - `https://onemorestartup.vercel.app/auth/callback?next=/reset-password`
-   - preview origins as needed (`https://onemorestartup-*.vercel.app/auth/callback`).
+   - `https://unboredapp.vercel.app/auth/callback`
+   - `https://unboredapp.vercel.app/auth/callback?next=/reset-password`
+   - preview origins as needed (`https://unboredapp-*.vercel.app/auth/callback`).
      Without these, Supabase ignores the proposed `emailRedirectTo`.
 3. **Authentication → Email templates → Confirm signup**: ensure the button links
    to `{{ .ConfirmationURL }}` (the Supabase verify URL carrying the redirect).
@@ -46,9 +46,9 @@ steps that code cannot perform.
 4. **Authentication → Providers → Email**: confirm signup confirmation is ON
    (the app handles the pending state; do not disable it to make signup look
    instant).
-5. **Vercel env (Production)**: `PUBLIC_SITE_URL=https://onemorestartup.vercel.app`,
-   `VITE_API_BASE_URL=https://onemorestartup.vercel.app/api/v1`,
-   `CORS_ALLOWED_ORIGINS=https://onemorestartup.vercel.app`.
+5. **Vercel env (Production)**: `PUBLIC_SITE_URL=https://unboredapp.vercel.app`,
+   `VITE_API_BASE_URL=https://unboredapp.vercel.app/api/v1`,
+   `CORS_ALLOWED_ORIGINS=https://unboredapp.vercel.app`.
 
 ## Verify without touching production data
 

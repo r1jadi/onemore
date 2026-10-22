@@ -1,14 +1,15 @@
-# onemore
+# Unbored
 
-Short games you can play instantly, with scores that mean something and people you
-follow to beat.
+Unbored is short games you can play instantly, with scores that mean something and
+people you follow to beat.
 
 The repository holds the whole product: a TanStack Start web app, a Go API split
 into independent services behind one gateway, and a Supabase (Postgres) database
 whose authorization lives in Row Level Security rather than in application code.
 
-- **Web** — <https://onemorestartup.vercel.app>
-- **API** — <https://onemorestartup.vercel.app/api/v1> (a service of the same Vercel project)
+- **Web** — <https://unboredapp.vercel.app>
+- **API** — <https://unboredapp.vercel.app/api/v1> (a service of the same Vercel project)
+- **Source** — <https://github.com/r1jadi/unbored>
 
 ## Status
 
@@ -49,6 +50,28 @@ its screens read the admin API or say plainly that a feature has no backend yet.
 Screens whose data would be a
 personal history — liked, saved, recently played, activity, leaderboards — say they
 are unavailable instead of showing fabricated rows.
+
+## Games
+
+Seven games are playable end to end. Each has a browser runtime in
+[`src/lib/games/`](src/lib/games/), a server-issued play session, and a score the
+database accepts only after replaying the run.
+
+| Game                  | Slug                   | Runtime module    |
+| --------------------- | ---------------------- | ----------------- |
+| Stack 10              | `stack-10`             | `stack10.ts`      |
+| One Move              | `one-move`             | `one-move.ts`     |
+| Don't Break the Chain | `dont-break-the-chain` | `chain.ts`        |
+| Memory Flash          | `memory-flash`         | `memory-flash.ts` |
+| Color Merge           | `color-merge`          | `color-merge.ts`  |
+| Don't Touch the Black | `dont-touch-the-black` | `dont-touch.ts`   |
+| 7 Second              | `7-second`             | `seven-second.ts` |
+
+7 Second is the daily game: one shared deck per UTC day and one ranked attempt a
+day. `play.$id.tsx` mounts a runtime only for a game whose `runtime` identifier it
+ships, so a catalogue row without one gets an honest "no runtime yet" screen. How
+to add a game, and the rules a runtime must follow, are in
+[docs/games/README.md](docs/games/README.md).
 
 ## Architecture
 
@@ -169,7 +192,7 @@ shutdown with readiness draining.
 | `auth`            | Session lifecycle on top of Supabase Auth                         | **Implemented**               |
 | `users`           | Profiles                                                          | **Implemented** (own profile) |
 | `games`           | Catalogue and game metadata                                       | **Implemented** (read-only)   |
-| `game-sessions`   | Play sessions; the only path to a score                           | Scaffolded                    |
+| `game-sessions`   | Play sessions; the only path to a score                           | **Implemented**               |
 | `scores`          | Score records (read-only to clients)                              | Scaffolded                    |
 | `leaderboards`    | Global and friends boards                                         | Scaffolded                    |
 | `feed`            | The personalised feed                                             | Scaffolded                    |
@@ -323,4 +346,4 @@ Linux and is unaffected. Do not commit a repo-wide reformat to silence it.
 
 ## License
 
-Copyright (c) 2026 onemore. All rights reserved. See [LICENSE](LICENSE). INTUITA
+Copyright (c) 2026 Unbored. All rights reserved. See [LICENSE](LICENSE).

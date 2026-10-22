@@ -7,7 +7,7 @@ import { breadcrumbJsonLd, seo } from "@/lib/seo";
 export const Route = createFileRoute("/categories/$slug")({
   head: ({ params }) => {
     const title = titleFromSlug(params.slug);
-    return seo(title, `Play the best ${title.toLowerCase()} games on onemore.`, {
+    return seo(title, `Play the best ${title.toLowerCase()} games on Unbored.`, {
       jsonLd: breadcrumbJsonLd([
         { name: "Categories", path: "/categories" },
         { name: title, path: `/categories/${params.slug}` },

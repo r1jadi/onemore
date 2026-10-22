@@ -50,15 +50,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/r1jadi/onemore/packages/go/platform/adminallowlist"
-	"github.com/r1jadi/onemore/packages/go/platform/apierr"
-	"github.com/r1jadi/onemore/packages/go/platform/authn"
-	"github.com/r1jadi/onemore/packages/go/platform/config"
-	"github.com/r1jadi/onemore/packages/go/platform/httpx"
-	"github.com/r1jadi/onemore/packages/go/platform/identity"
-	"github.com/r1jadi/onemore/services/admin/internal/supabaseadmin"
-	"github.com/r1jadi/onemore/services/internal/apiroutes"
-	"github.com/r1jadi/onemore/services/internal/servicekit"
+	"github.com/r1jadi/unbored/packages/go/platform/adminallowlist"
+	"github.com/r1jadi/unbored/packages/go/platform/apierr"
+	"github.com/r1jadi/unbored/packages/go/platform/authn"
+	"github.com/r1jadi/unbored/packages/go/platform/config"
+	"github.com/r1jadi/unbored/packages/go/platform/httpx"
+	"github.com/r1jadi/unbored/packages/go/platform/identity"
+	"github.com/r1jadi/unbored/services/admin/internal/supabaseadmin"
+	"github.com/r1jadi/unbored/services/internal/apiroutes"
+	"github.com/r1jadi/unbored/services/internal/servicekit"
 )
 
 // Name is the service name used in logs, configuration validation and the

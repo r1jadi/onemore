@@ -9,9 +9,13 @@
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 
+import { readWithLegacy, safeLocalStorage } from "@/lib/storage";
+
 export type Language = "en" | "pl";
 
-const STORAGE_KEY = "onemore-language";
+const STORAGE_KEY = "unbored-language";
+/** Pre-rename key: read once and moved forward by `readWithLegacy`. */
+const LEGACY_STORAGE_KEY = "onemore-language";
 
 const dictionaries = {
   en: {
@@ -87,13 +91,9 @@ const dictionaries = {
 export type TranslationKey = keyof (typeof dictionaries)["en"];
 
 function readStored(): Language {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw === "pl") return "pl";
-    if (raw === "en") return "en";
-  } catch {
-    // Ignore storage failures.
-  }
+  const raw = readWithLegacy(safeLocalStorage(), STORAGE_KEY, LEGACY_STORAGE_KEY);
+  if (raw === "pl") return "pl";
+  if (raw === "en") return "en";
   try {
     const nav = navigator.language.toLowerCase();
     if (nav.startsWith("pl")) return "pl";

@@ -1,4 +1,4 @@
-// Go workspace for the onemore backend.
+// Go workspace for the Unbored backend.
 //
 // Two modules for now:
 //   ./packages/go/platform — shared library (config, logging, errors, HTTP, auth)

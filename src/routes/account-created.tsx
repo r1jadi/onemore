@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { seo } from "@/lib/seo";
 
 export const Route = createFileRoute("/account-created")({
-  head: () => seo("You're in", "Your onemore account is ready."),
+  head: () => seo("You're in", "Your Unbored account is ready."),
   component: () => (
     <AuthLayout
       title="You're in"

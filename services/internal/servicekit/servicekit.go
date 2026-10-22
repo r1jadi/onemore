@@ -9,11 +9,11 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/r1jadi/onemore/packages/go/platform/authn"
-	"github.com/r1jadi/onemore/packages/go/platform/config"
-	"github.com/r1jadi/onemore/packages/go/platform/httpx"
-	"github.com/r1jadi/onemore/packages/go/platform/logging"
-	"github.com/r1jadi/onemore/packages/go/platform/version"
+	"github.com/r1jadi/unbored/packages/go/platform/authn"
+	"github.com/r1jadi/unbored/packages/go/platform/config"
+	"github.com/r1jadi/unbored/packages/go/platform/httpx"
+	"github.com/r1jadi/unbored/packages/go/platform/logging"
+	"github.com/r1jadi/unbored/packages/go/platform/version"
 )
 
 // Options describes a service.

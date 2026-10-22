@@ -15,7 +15,7 @@ const searchSchema = z.object({
 
 export const Route = createFileRoute("/login")({
   validateSearch: (search) => searchSchema.parse(search),
-  head: () => seo("Log in", "Log in to onemore to keep your scores and streaks."),
+  head: () => seo("Log in", "Log in to Unbored to keep your scores and streaks."),
   component: Login,
 });
 
@@ -56,7 +56,7 @@ function Login() {
       subtitle="Log in to keep your scores and streaks."
       footer={
         <>
-          New to onemore?{" "}
+          New to Unbored?{" "}
           <Link to="/signup" className="font-medium text-foreground">
             Create account
           </Link>

@@ -17,7 +17,7 @@ import { dirname, resolve } from "node:path";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SEO_SOURCE = resolve(root, "src/lib/seo.ts");
 const OUTPUT = resolve(root, "public/sitemap.xml");
-const DEFAULT_ORIGIN = "https://onemorestartup.vercel.app";
+const DEFAULT_ORIGIN = "https://unboredapp.vercel.app";
 
 // Catalogue entries. Replace with a database/API query in the catalogue task.
 const DYNAMIC_PATHS = [

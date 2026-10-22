@@ -10,9 +10,9 @@
  * domain is an environment change, not a code change.
  */
 
-const DEFAULT_SITE_URL = "https://onemorestartup.vercel.app";
+const DEFAULT_SITE_URL = "https://unboredapp.vercel.app";
 
-export const SITE_NAME = "onemore";
+export const SITE_NAME = "Unbored";
 export const SITE_DESCRIPTION = "Swipe through short, playable games. Play, score, and swipe on.";
 
 function resolveSiteUrl(): string {

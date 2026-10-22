@@ -32,7 +32,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/r1jadi/onemore/packages/go/platform/config"
+	"github.com/r1jadi/unbored/packages/go/platform/config"
 )
 
 // Postgres error codes the service maps onto its own responses. PostgREST
@@ -496,7 +496,7 @@ func (c *Client) rpc(ctx context.Context, op, function string, payload any, dst 
 	request.Header.Set("apikey", c.apiKey)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
-	request.Header.Set("X-Client-Info", "onemore-games-service")
+	request.Header.Set("X-Client-Info", "unbored-games-service")
 
 	response, err := c.http.Do(request)
 	if err != nil {
@@ -760,7 +760,7 @@ func getRows[T any](c *Client, ctx context.Context, op, path string) ([]T, error
 	}
 	request.Header.Set("apikey", c.apiKey)
 	request.Header.Set("Accept", "application/json")
-	request.Header.Set("X-Client-Info", "onemore-games-service")
+	request.Header.Set("X-Client-Info", "unbored-games-service")
 	// Deliberately no Authorization header. The publishable key identifies the
 	// project and nothing more, so the request is answered as `anon` and RLS is
 	// the only thing deciding what comes back.

@@ -1,4 +1,4 @@
-module github.com/r1jadi/onemore/packages/go/platform
+module github.com/r1jadi/unbored/packages/go/platform
 
 go 1.27
 

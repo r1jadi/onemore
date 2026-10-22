@@ -60,7 +60,7 @@ function Verify() {
     >
       <div className="space-y-4">
         <p className="text-sm text-muted-foreground">
-          The email contains a link — not a code. Clicking it opens onemore and signs you in
+          The email contains a link — not a code. Clicking it opens Unbored and signs you in
           automatically. If you already opened the link, continue to log in.
         </p>
         <label className="block space-y-1.5" htmlFor="verify-email">

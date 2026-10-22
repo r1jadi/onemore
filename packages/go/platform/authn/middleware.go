@@ -5,10 +5,10 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/r1jadi/onemore/packages/go/platform/adminallowlist"
-	"github.com/r1jadi/onemore/packages/go/platform/apierr"
-	"github.com/r1jadi/onemore/packages/go/platform/identity"
-	"github.com/r1jadi/onemore/packages/go/platform/version"
+	"github.com/r1jadi/unbored/packages/go/platform/adminallowlist"
+	"github.com/r1jadi/unbored/packages/go/platform/apierr"
+	"github.com/r1jadi/unbored/packages/go/platform/identity"
+	"github.com/r1jadi/unbored/packages/go/platform/version"
 )
 
 // MiddlewareOptions configures the authentication middleware.
@@ -120,7 +120,7 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("WWW-Authenticate", `Bearer realm="onemore", version="`+version.APIVersion+`"`)
+	w.Header().Set("WWW-Authenticate", `Bearer realm="unbored", version="`+version.APIVersion+`"`)
 	w.WriteHeader(apierr.Status(body.Code))
 	_ = json.NewEncoder(w).Encode(apierr.Envelope{Error: body})
 }

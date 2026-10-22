@@ -137,6 +137,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  window.localStorage.removeItem("unbored-language");
   window.localStorage.removeItem("onemore-language");
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -241,7 +242,7 @@ describe("session restoration on boot", () => {
 
 describe("language selection changes the interface", () => {
   it("renders the stored language's navigation labels without a reload", async () => {
-    window.localStorage.setItem("onemore-language", "pl");
+    window.localStorage.setItem("unbored-language", "pl");
     await renderShell();
 
     const sidebar = desktopSidebar();
@@ -252,6 +253,17 @@ describe("language selection changes the interface", () => {
     );
     expect(within(sidebar).queryByRole("link", { name: "For You" })).toBeNull();
     expect(document.documentElement.lang).toBe("pl");
+  });
+
+  it("keeps a language chosen before the rename and moves it forward", async () => {
+    window.localStorage.setItem("onemore-language", "pl");
+    await renderShell();
+
+    const sidebar = desktopSidebar();
+    expect(within(sidebar).getByRole("link", { name: "Dla Ciebie" })).toHaveAttribute("href", "/");
+    // The value moved to the current key, so the fallback runs once per visitor.
+    expect(window.localStorage.getItem("onemore-language")).toBeNull();
+    expect(window.localStorage.getItem("unbored-language")).toBe("pl");
   });
 });
 

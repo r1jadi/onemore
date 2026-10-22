@@ -11,10 +11,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/r1jadi/onemore/packages/go/platform/authn"
-	"github.com/r1jadi/onemore/packages/go/platform/config"
-	"github.com/r1jadi/onemore/packages/go/platform/identity"
-	"github.com/r1jadi/onemore/packages/go/platform/version"
+	"github.com/r1jadi/unbored/packages/go/platform/authn"
+	"github.com/r1jadi/unbored/packages/go/platform/config"
+	"github.com/r1jadi/unbored/packages/go/platform/identity"
+	"github.com/r1jadi/unbored/packages/go/platform/version"
 )
 
 // APIVersion is the only API version served at this point. Paths outside a

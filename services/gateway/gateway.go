@@ -15,12 +15,12 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/r1jadi/onemore/packages/go/platform/config"
-	"github.com/r1jadi/onemore/packages/go/platform/httpx"
-	"github.com/r1jadi/onemore/packages/go/platform/version"
-	"github.com/r1jadi/onemore/services/gateway/internal/proxy"
-	"github.com/r1jadi/onemore/services/internal/apiroutes"
-	"github.com/r1jadi/onemore/services/internal/servicekit"
+	"github.com/r1jadi/unbored/packages/go/platform/config"
+	"github.com/r1jadi/unbored/packages/go/platform/httpx"
+	"github.com/r1jadi/unbored/packages/go/platform/version"
+	"github.com/r1jadi/unbored/services/gateway/internal/proxy"
+	"github.com/r1jadi/unbored/services/internal/apiroutes"
+	"github.com/r1jadi/unbored/services/internal/servicekit"
 )
 
 // Name is the service name used in logs and configuration validation.

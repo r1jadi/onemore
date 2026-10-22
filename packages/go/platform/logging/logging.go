@@ -9,7 +9,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/r1jadi/onemore/packages/go/platform/config"
+	"github.com/r1jadi/unbored/packages/go/platform/config"
 )
 
 type ctxKey int

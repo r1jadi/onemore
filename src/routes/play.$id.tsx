@@ -22,9 +22,9 @@ export const Route = createFileRoute("/play/$id")({
     const title = titleFromSlug(params.id);
     return {
       meta: [
-        { title: `${title} — onemore` },
-        { name: "description", content: `${title} on onemore.` },
-        { property: "og:title", content: `${title} — onemore` },
+        { title: `${title} — Unbored` },
+        { name: "description", content: `${title} on Unbored.` },
+        { property: "og:title", content: `${title} — Unbored` },
       ],
     };
   },

@@ -30,7 +30,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/r1jadi/onemore/packages/go/platform/config"
+	"github.com/r1jadi/unbored/packages/go/platform/config"
 )
 
 // maxBodyBytes bounds what is read from the Data API. One session or one verdict
@@ -273,7 +273,7 @@ func (c *Client) rpc(ctx context.Context, op, function string, payload any, acce
 	request.Header.Set("apikey", c.apiKey)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
-	request.Header.Set("X-Client-Info", "onemore-game-sessions-service")
+	request.Header.Set("X-Client-Info", "unbored-game-sessions-service")
 	if accessToken != "" {
 		request.Header.Set("Authorization", "Bearer "+accessToken)
 	}

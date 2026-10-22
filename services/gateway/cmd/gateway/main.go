@@ -8,8 +8,8 @@
 package main
 
 import (
-	"github.com/r1jadi/onemore/services/gateway"
-	"github.com/r1jadi/onemore/services/internal/servicekit"
+	"github.com/r1jadi/unbored/services/gateway"
+	"github.com/r1jadi/unbored/services/internal/servicekit"
 )
 
 func main() {

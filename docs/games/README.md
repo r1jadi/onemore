@@ -1,6 +1,6 @@
 # Games
 
-How OneMore's games work: the rules, who is allowed to decide a score, and how a
+How Unbored's games work: the rules, who is allowed to decide a score, and how a
 game earns the right to be called playable.
 
 Seven games are implemented today: **Stack 10**, **Chain** (Don't Break the

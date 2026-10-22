@@ -3,7 +3,7 @@ import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/rea
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { clearSession, SESSION_STORAGE_KEY } from "@/lib/auth/session";
+import { clearSession, OAUTH_VERIFIER_STORAGE_KEY, SESSION_STORAGE_KEY } from "@/lib/auth/session";
 import { Route as RootRoute } from "@/routes/__root";
 import { routeTree } from "@/routeTree.gen";
 
@@ -63,9 +63,13 @@ function stubOAuth(onboarded: boolean | undefined) {
   });
 }
 
-async function renderCallback(onboarded: boolean | undefined, next = "/login") {
+async function renderCallback(
+  onboarded: boolean | undefined,
+  next = "/login",
+  verifierKey = OAUTH_VERIFIER_STORAGE_KEY,
+) {
   vi.stubGlobal("fetch", stubOAuth(onboarded));
-  sessionStorage.setItem("onemore-oauth-verifier", "test-verifier");
+  sessionStorage.setItem(verifierKey, "test-verifier");
   const router = createRouter({
     routeTree,
     context: { queryClient: new QueryClient() },
@@ -100,6 +104,13 @@ describe("Google OAuth callback", () => {
     // The completion step, not a fresh credential form: the Google account
     // already exists as an auth user, it just has no registration marker yet.
     expect(await screen.findByText("Choose your name")).toBeInTheDocument();
+    expect(window.localStorage.getItem(SESSION_STORAGE_KEY)).not.toBeNull();
+  });
+
+  it("completes with a verifier stored under the pre-rename key", async () => {
+    const router = await renderCallback(true, "/login", "onemore-oauth-verifier");
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
     expect(window.localStorage.getItem(SESSION_STORAGE_KEY)).not.toBeNull();
   });
 

@@ -34,7 +34,7 @@ import {
 
 export const Route = createFileRoute("/admin/reports")({
   head: () => ({
-    meta: [{ title: "Reports — admin onemore" }, { name: "robots", content: "noindex" }],
+    meta: [{ title: "Reports — Unbored admin" }, { name: "robots", content: "noindex" }],
   }),
   component: ReportsAdmin,
 });

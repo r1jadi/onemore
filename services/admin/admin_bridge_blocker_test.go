@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/r1jadi/onemore/packages/go/platform/config"
-	"github.com/r1jadi/onemore/services/admin/internal/supabaseadmin"
+	"github.com/r1jadi/unbored/packages/go/platform/config"
+	"github.com/r1jadi/unbored/services/admin/internal/supabaseadmin"
 )
 
 // The ADMIN_EMAILS authorization bridge, proven end to end.

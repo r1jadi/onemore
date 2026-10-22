@@ -30,7 +30,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/r1jadi/onemore/packages/go/platform/config"
+	"github.com/r1jadi/unbored/packages/go/platform/config"
 )
 
 // Postgres error codes the service maps onto its own responses. PostgREST passes
@@ -257,7 +257,7 @@ func (c *Client) do(ctx context.Context, op, method, path string, payload any, a
 	}
 	request.Header.Set("apikey", c.apiKey)
 	request.Header.Set("Accept", "application/json")
-	request.Header.Set("X-Client-Info", "onemore-users-service")
+	request.Header.Set("X-Client-Info", "unbored-users-service")
 	if payload != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}

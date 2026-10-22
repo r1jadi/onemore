@@ -5,13 +5,17 @@
 
 import { useEffect, useState } from "react";
 
+import { readWithLegacy, safeLocalStorage } from "@/lib/storage";
+
 export type AccessibilityPrefs = {
   reduceMotion: boolean;
   largerText: boolean;
   increaseContrast: boolean;
 };
 
-const STORAGE_KEY = "onemore-accessibility";
+const STORAGE_KEY = "unbored-accessibility";
+/** Pre-rename key: read once and moved forward by `readWithLegacy`. */
+const LEGACY_STORAGE_KEY = "onemore-accessibility";
 
 const defaults: AccessibilityPrefs = {
   reduceMotion: false,
@@ -20,9 +24,9 @@ const defaults: AccessibilityPrefs = {
 };
 
 function readStored(): AccessibilityPrefs {
+  const raw = readWithLegacy(safeLocalStorage(), STORAGE_KEY, LEGACY_STORAGE_KEY);
+  if (!raw) return defaults;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return defaults;
     const parsed = JSON.parse(raw) as Partial<AccessibilityPrefs>;
     return {
       reduceMotion: parsed.reduceMotion === true,
@@ -53,11 +57,12 @@ export function useAccessibility(): {
     apply(prefs);
   }, [prefs]);
 
-  // Respect the OS reduce-motion setting until the user chooses explicitly.
+  // Respect the OS reduce-motion setting until the user chooses explicitly. A
+  // choice saved before the rename counts as explicit, so it is read (and moved
+  // forward) rather than mistaken for "never chose".
   useEffect(() => {
+    if (readWithLegacy(safeLocalStorage(), STORAGE_KEY, LEGACY_STORAGE_KEY)) return;
     try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) return;
       if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
         setPrefsState((prev) => ({ ...prev, reduceMotion: true }));
       }

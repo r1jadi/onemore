@@ -25,7 +25,7 @@ import { fmt } from "@/lib/format";
 
 export const Route = createFileRoute("/admin/analytics")({
   head: () => ({
-    meta: [{ title: "Analytics — admin onemore" }, { name: "robots", content: "noindex" }],
+    meta: [{ title: "Analytics — Unbored admin" }, { name: "robots", content: "noindex" }],
   }),
   component: AnalyticsAdmin,
 });

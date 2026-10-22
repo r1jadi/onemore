@@ -66,19 +66,19 @@ where they will attach is described in
 
 ## Repository layout
 
-| Path | What lives there |
-| --- | --- |
-| `src/`, `public/`, `vite.config.ts` | The web app. It is at the repository root today; [0002](../decisions/0002-web-app-location.md) records why and how it moves to `apps/web`. |
-| `services/` | One Go module holding every service, each with `cmd/<service>`. |
-| `packages/go/platform` | Shared Go library: config, logging, errors, HTTP conventions, JWT verification, health. |
-| `packages/api-contracts/` | The OpenAPI 3.1 contract for `/api/v1`. |
-| `supabase/` | `config.toml`, `migrations/`, `seed.sql`. Migrations are the only way the schema changes. |
-| `database/` | Reference notes and future SQL artifacts (views, functions, policies). Migrations in `supabase/migrations` stay authoritative. |
-| `tests/` | Contract, e2e, integration, load, security and smoke suites. `tests/security/rls_test.sql` is live today. |
-| `scripts/` | Operational helpers: `test-rls.sh`, `generate-sitemap.mjs`, `check-api-contract.mjs`. |
-| `.github/workflows/` | CI: web, go, database, api-contract, security. |
-| `infrastructure/` | Placeholders for container, CDN, monitoring and Terraform work. |
-| `vercel.json`, `Dockerfile.vercel` | The deployment: four services (`web`, the container-image Go gateway `api`, and the internal Go `auth` and `users` services), the rewrites that route `/api/v1/*` to the gateway, and the two service bindings that give the gateway a private route to `auth` and to `users`. See [deployment/vercel.md](../deployment/vercel.md), [0010](../decisions/0010-auth-service-deployment-topology.md) and [0011](../decisions/0011-users-service-and-real-profile.md). |
+| Path                                | What lives there                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/`, `public/`, `vite.config.ts` | The web app. It is at the repository root today; [0002](../decisions/0002-web-app-location.md) records why and how it moves to `apps/web`.                                                                                                                                                                                                                                                                                                                         |
+| `services/`                         | One Go module holding every service, each with `cmd/<service>`.                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `packages/go/platform`              | Shared Go library: config, logging, errors, HTTP conventions, JWT verification, health.                                                                                                                                                                                                                                                                                                                                                                            |
+| `packages/api-contracts/`           | The OpenAPI 3.1 contract for `/api/v1`.                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `supabase/`                         | `config.toml`, `migrations/`, `seed.sql`. Migrations are the only way the schema changes.                                                                                                                                                                                                                                                                                                                                                                          |
+| `database/`                         | Reference notes and future SQL artifacts (views, functions, policies). Migrations in `supabase/migrations` stay authoritative.                                                                                                                                                                                                                                                                                                                                     |
+| `tests/`                            | Contract, e2e, integration, load, security and smoke suites. `tests/security/rls_test.sql` is live today.                                                                                                                                                                                                                                                                                                                                                          |
+| `scripts/`                          | Operational helpers: `test-rls.sh`, `generate-sitemap.mjs`, `check-api-contract.mjs`.                                                                                                                                                                                                                                                                                                                                                                              |
+| `.github/workflows/`                | CI: web, go, database, api-contract, security.                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `infrastructure/`                   | Placeholders for container, CDN, monitoring and Terraform work.                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `vercel.json`, `Dockerfile.vercel`  | The deployment: four services (`web`, the container-image Go gateway `api`, and the internal Go `auth` and `users` services), the rewrites that route `/api/v1/*` to the gateway, and the two service bindings that give the gateway a private route to `auth` and to `users`. See [deployment/vercel.md](../deployment/vercel.md), [0010](../decisions/0010-auth-service-deployment-topology.md) and [0011](../decisions/0011-users-service-and-real-profile.md). |
 
 ## Two modules, one workspace
 
@@ -90,27 +90,27 @@ graduation path to per-service modules are in
 
 ## Environments
 
-| Environment | Web | API | Database |
-| --- | --- | --- | --- |
-| development | `npm run dev`, port 8081 | `go run ./gateway/cmd/gateway`, port 8080 | local Supabase or the Docker harness in `scripts/test-rls.sh` |
-| preview | Vercel preview per pull request | the same deployment's api service, `development`-like config | shares the staging project |
-| staging | Vercel preview of `main` | same deployment as production, separate config | separate Supabase project |
-| production | `https://onemorestartup.vercel.app` | `https://onemorestartup.vercel.app/api/v1` (the api service of the same project) | the hosted Supabase project |
+| Environment | Web                             | API                                                                          | Database                                                      |
+| ----------- | ------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| development | `npm run dev`, port 8081        | `go run ./gateway/cmd/gateway`, port 8080                                    | local Supabase or the Docker harness in `scripts/test-rls.sh` |
+| preview     | Vercel preview per pull request | the same deployment's api service, `development`-like config                 | shares the staging project                                    |
+| staging     | Vercel preview of `main`        | same deployment as production, separate config                               | separate Supabase project                                     |
+| production  | `https://unboredapp.vercel.app` | `https://unboredapp.vercel.app/api/v1` (the api service of the same project) | the hosted Supabase project                                   |
 
 Enable services mode — the framework preset in the Vercel dashboard — before
 relying on the API column: see [deployment/vercel.md](../deployment/vercel.md).
 
 ## What this foundation deliberately does not do
 
-* Most product features are not implemented: `auth` (the session lifecycle),
+- Most product features are not implemented: `auth` (the session lifecycle),
   `users` (the caller's own profile), `games` (the catalogue, with real play
   counts), `sessions` (a Stack 10 run, verified and scored server-side) and one
   `leaderboards` operation (a game's board) are available; every other service
   exposes its contract and answers `501`.
-* No Redis, no queue, no CDN, no autoscaling: the API runs as a single instance
+- No Redis, no queue, no CDN, no autoscaling: the API runs as a single instance
   until load justifies more.
-* No payments: the RaiAccept integration is designed, not built.
-* The **signed-in identity is no longer mock data**: the UI reads it from
+- No payments: the RaiAccept integration is designed, not built.
+- The **signed-in identity is no longer mock data**: the UI reads it from
   `GET /api/v1/users/me`, and an edit writes the real `public.profiles` row. Nor
   is the play path: **Stack 10** runs from a server-issued session, its score is
   the database's replay of the run, and its detail page and board read real play

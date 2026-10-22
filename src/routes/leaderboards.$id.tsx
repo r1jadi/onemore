@@ -7,9 +7,9 @@ export const Route = createFileRoute("/leaderboards/$id")({
     const title = titleFromSlug(params.id);
     return {
       meta: [
-        { title: `${title} leaderboard — onemore` },
+        { title: `${title} leaderboard — Unbored` },
         { name: "description", content: `Top scores on ${title}.` },
-        { property: "og:title", content: `${title} leaderboard — onemore` },
+        { property: "og:title", content: `${title} leaderboard — Unbored` },
         { property: "og:description", content: `Top scores on ${title}.` },
       ],
     };

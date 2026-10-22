@@ -31,13 +31,13 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/r1jadi/onemore/packages/go/platform/apierr"
-	"github.com/r1jadi/onemore/packages/go/platform/authn"
-	"github.com/r1jadi/onemore/packages/go/platform/config"
-	"github.com/r1jadi/onemore/packages/go/platform/httpx"
-	"github.com/r1jadi/onemore/packages/go/platform/identity"
-	"github.com/r1jadi/onemore/services/auth/internal/supabaseauth"
-	"github.com/r1jadi/onemore/services/internal/servicekit"
+	"github.com/r1jadi/unbored/packages/go/platform/apierr"
+	"github.com/r1jadi/unbored/packages/go/platform/authn"
+	"github.com/r1jadi/unbored/packages/go/platform/config"
+	"github.com/r1jadi/unbored/packages/go/platform/httpx"
+	"github.com/r1jadi/unbored/packages/go/platform/identity"
+	"github.com/r1jadi/unbored/services/auth/internal/supabaseauth"
+	"github.com/r1jadi/unbored/services/internal/servicekit"
 )
 
 // Name is the service name used in logs, configuration validation and the

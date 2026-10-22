@@ -1,4 +1,4 @@
-# onemore — crawler policy
+# Unbored — crawler policy
 # Public routes are listed in /sitemap.xml. Everything that renders account,
 # admin, play-session or search state is disallowed, because those pages carry
 # no crawlable content and must not appear in search results.
@@ -32,4 +32,4 @@ Disallow: /
 User-agent: SemrushBot
 Disallow: /
 
-Sitemap: https://onemorestartup.vercel.app/sitemap.xml
+Sitemap: https://unboredapp.vercel.app/sitemap.xml

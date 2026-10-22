@@ -554,6 +554,22 @@ describe("session restoration", () => {
     });
   });
 
+  it("restores a session stored under the pre-rename key and moves it forward", async () => {
+    window.localStorage.setItem("onemore.auth.session.v1", JSON.stringify(storedPayload()));
+    mockFetch(() => jsonResponse({ userId: testUserID, role: "user", onboarded: true }));
+
+    const restoring = initializeSession();
+    // Read synchronously from the legacy key: the rebrand signs nobody out.
+    expect(getAccessToken()).toBe("access-token-1");
+
+    await restoring;
+
+    expect(getAuthState().status).toBe("authenticated");
+    // Moved to the current key, so the fallback runs once per visitor.
+    expect(window.localStorage.getItem("onemore.auth.session.v1")).toBeNull();
+    expect(window.localStorage.getItem(SESSION_STORAGE_KEY)).not.toBeNull();
+  });
+
   it("rotates an expired stored pair before restoring the session", async () => {
     storeSession(storedPayload({ expiresAt: new Date(Date.now() - 60_000).toISOString() }));
     const spy = mockFetch(() =>

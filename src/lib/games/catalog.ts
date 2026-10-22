@@ -80,7 +80,7 @@ export type Game = {
    * measurement: zero means nobody has finished this game yet.
    */
   plays: number;
-  /** First-party OneMore content, as opposed to a creator's. */
+  /** First-party Unbored content, as opposed to a creator's. */
   isOfficial: boolean;
   /** Storage object path (`<slug>/<file>`), not a URL. See `coverUrl`. */
   coverPath?: string | null;

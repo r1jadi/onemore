@@ -33,10 +33,11 @@ import {
   usernameValidationMessage,
 } from "@/lib/users/username";
 import { seo } from "@/lib/seo";
+import { readWithLegacy, removeWithLegacy, safeSessionStorage } from "@/lib/storage";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/signup")({
-  head: () => seo("Create account", "Create your onemore account in under a minute."),
+  head: () => seo("Create account", "Create your Unbored account in under a minute."),
   component: Signup,
 });
 
@@ -51,14 +52,18 @@ function isValidEmail(value: string): boolean {
 }
 
 /** Where a display name is kept while email confirmation is pending. */
-const PENDING_DISPLAY_NAME_KEY = "onemore-pending-display-name";
+const PENDING_DISPLAY_NAME_KEY = "unbored-pending-display-name";
+/** Pre-rename key: read once and moved forward by `readWithLegacy`. */
+const LEGACY_PENDING_DISPLAY_NAME_KEY = "onemore-pending-display-name";
 
 function storedPendingDisplayName(): string {
-  try {
-    return sessionStorage.getItem(PENDING_DISPLAY_NAME_KEY) ?? "";
-  } catch {
-    return "";
-  }
+  return (
+    readWithLegacy(
+      safeSessionStorage(),
+      PENDING_DISPLAY_NAME_KEY,
+      LEGACY_PENDING_DISPLAY_NAME_KEY,
+    ) ?? ""
+  );
 }
 
 function rememberPendingDisplayName(name: string): void {
@@ -70,11 +75,8 @@ function rememberPendingDisplayName(name: string): void {
 }
 
 function forgetPendingDisplayName(): void {
-  try {
-    sessionStorage.removeItem(PENDING_DISPLAY_NAME_KEY);
-  } catch {
-    // Best effort only.
-  }
+  // Both keys: a stale legacy copy would restore the forgotten name.
+  removeWithLegacy(safeSessionStorage(), PENDING_DISPLAY_NAME_KEY, LEGACY_PENDING_DISPLAY_NAME_KEY);
 }
 
 /** The icon that matches the availability line under the username input. */
@@ -524,7 +526,7 @@ function Signup() {
                 [
                   "terms",
                   "Terms & Conditions",
-                  "Required · Rules for using onemore",
+                  "Required · Rules for using Unbored",
                   FileText,
                   true,
                 ],
@@ -608,7 +610,7 @@ function Signup() {
             </div>
           )}
           <p className="mt-4 text-xs text-muted-foreground">
-            You must be 13 or older to use onemore.
+            You must be 13 or older to use Unbored.
           </p>
           <Button
             variant="play"

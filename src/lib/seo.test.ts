@@ -87,8 +87,8 @@ describe("seo", () => {
   it("keeps the existing title format", () => {
     const { meta } = seo("Explore", "Discover games.");
 
-    expect(meta).toContainEqual({ title: "Explore — onemore" });
-    expect(meta).toContainEqual({ property: "og:title", content: "Explore — onemore" });
+    expect(meta).toContainEqual({ title: "Explore — Unbored" });
+    expect(meta).toContainEqual({ property: "og:title", content: "Explore — Unbored" });
   });
 
   it("supports explicit noindex pages", () => {

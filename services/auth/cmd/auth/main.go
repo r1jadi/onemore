@@ -12,8 +12,8 @@
 package main
 
 import (
-	"github.com/r1jadi/onemore/services/auth"
-	"github.com/r1jadi/onemore/services/internal/servicekit"
+	"github.com/r1jadi/unbored/services/auth"
+	"github.com/r1jadi/unbored/services/internal/servicekit"
 )
 
 func main() {

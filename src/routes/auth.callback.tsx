@@ -164,7 +164,7 @@ function Callback() {
         subtitle={
           outcome.onboarded === false
             ? "One more step to finish your account."
-            : "Taking you back to onemore…"
+            : "Taking you back to Unbored…"
         }
       >
         <p className="text-sm text-muted-foreground" role="status">

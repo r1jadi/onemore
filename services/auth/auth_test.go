@@ -16,12 +16,12 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/r1jadi/onemore/packages/go/platform/authn"
-	"github.com/r1jadi/onemore/packages/go/platform/config"
-	"github.com/r1jadi/onemore/packages/go/platform/httpx"
-	"github.com/r1jadi/onemore/packages/go/platform/identity"
-	"github.com/r1jadi/onemore/packages/go/platform/version"
-	"github.com/r1jadi/onemore/services/auth/internal/supabaseauth"
+	"github.com/r1jadi/unbored/packages/go/platform/authn"
+	"github.com/r1jadi/unbored/packages/go/platform/config"
+	"github.com/r1jadi/unbored/packages/go/platform/httpx"
+	"github.com/r1jadi/unbored/packages/go/platform/identity"
+	"github.com/r1jadi/unbored/packages/go/platform/version"
+	"github.com/r1jadi/unbored/services/auth/internal/supabaseauth"
 )
 
 // testSecret must be at least 32 characters; the verifier refuses shorter ones.

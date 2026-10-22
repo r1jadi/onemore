@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/r1jadi/onemore/packages/go/platform/config"
+	"github.com/r1jadi/unbored/packages/go/platform/config"
 )
 
 // recorder is a stand-in Data API: it answers one canned body and remembers the

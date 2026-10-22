@@ -4,7 +4,7 @@ import { LegalBody, terms } from "@/components/legal";
 import { seo } from "@/lib/seo";
 
 export const Route = createFileRoute("/terms")({
-  head: () => seo("Terms & Conditions", "The rules for using onemore."),
+  head: () => seo("Terms & Conditions", "The rules for using Unbored."),
   component: () => (
     <Page>
       <PageHeader back title="Terms & Conditions" />

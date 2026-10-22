@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/r1jadi/onemore/packages/go/platform/config"
+	"github.com/r1jadi/unbored/packages/go/platform/config"
 )
 
 const testPublishableKey = "sb_publishable_test_value"

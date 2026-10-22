@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
-  title: onemore API
+  title: Unbored API
   version: "1.0.0"
-  summary: The versioned HTTP API behind the onemore web app.
+  summary: The versioned HTTP API behind the Unbored web app.
   description: |
     Every endpoint lives under `/api/v1`. The gateway owns `/api/v1` and routes
     each group to the service that implements it
@@ -45,14 +45,14 @@ info:
     * Idempotency: `POST` creates, `PATCH` updates a subset, `DELETE` removes.
     * Lists are cursor paginated with a bounded page size (`limit`, `cursor`).
   contact:
-    name: onemore
-    url: https://onemorestartup.vercel.app
+    name: Unbored
+    url: https://unboredapp.vercel.app
   license:
     name: Proprietary
     identifier: LicenseRef-Proprietary
 
 servers:
-  - url: https://onemorestartup.vercel.app/api/v1
+  - url: https://unboredapp.vercel.app/api/v1
     description: Production
   - url: http://localhost:8080/api/v1
     description: Local gateway
@@ -2061,7 +2061,7 @@ components:
             run is, and retrying a submission cannot add a second.
         isOfficial:
           type: boolean
-          description: First-party OneMore content, as opposed to a creator's.
+          description: First-party Unbored content, as opposed to a creator's.
         coverPath:
           type: [string, "null"]
           description: |

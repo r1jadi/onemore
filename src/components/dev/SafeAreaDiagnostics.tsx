@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 
+import { readWithLegacy, removeWithLegacy, safeLocalStorage } from "@/lib/storage";
+
 /**
  * Development-only safe-area/PWA diagnostics overlay.
  *
@@ -13,7 +15,9 @@ import { useEffect, useState } from "react";
  * Nothing here affects layout: all probes are fixed, pointer-transparent,
  * zero-size elements that are removed with the panel.
  */
-const FLAG = "onemore-diag-safe-area";
+const FLAG = "unbored-diag-safe-area";
+/** Pre-rename key: read once and moved forward by `readWithLegacy`. */
+const LEGACY_FLAG = "onemore-diag-safe-area";
 
 export function SafeAreaDiagnostics() {
   const [enabled, setEnabled] = useState(false);
@@ -29,11 +33,8 @@ export function SafeAreaDiagnostics() {
       return;
     }
     if (params.has("diag") && params.get("diag") !== "safe-area") {
-      try {
-        window.localStorage.removeItem(FLAG);
-      } catch {
-        /* storage unavailable */
-      }
+      // Both keys: a stale legacy copy would re-enable the panel.
+      removeWithLegacy(safeLocalStorage(), FLAG, LEGACY_FLAG);
       setEnabled(false);
       return;
     }
@@ -45,11 +46,7 @@ export function SafeAreaDiagnostics() {
         /* storage unavailable */
       }
     } else {
-      try {
-        want = window.localStorage.getItem(FLAG) === "1";
-      } catch {
-        want = false;
-      }
+      want = readWithLegacy(safeLocalStorage(), FLAG, LEGACY_FLAG) === "1";
     }
     if (!want) return;
     setEnabled(true);
