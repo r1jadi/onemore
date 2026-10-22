@@ -39,8 +39,9 @@ const (
 	oneMoveRun   = "[7,0]"
 	// Seed 1 opens with two shade-1 tiles side by side: sliding left merges them
 	// for four points, and the next slide deals another tile.
-	colorMergeRules = "color-merge@1"
-	colorMergeRun   = "[3,2]"
+	colorMergeRules        = "color-merge@1"
+	colorMergeEndlessRules = "color-merge@2"
+	colorMergeRun          = "[3,2]"
 	// Seed 1's opening row is black, black, white: clearing the white and then
 	// touching the black scores ten and ends the run with both taps submitted.
 	dontTouchRules        = "dont-touch@1"
@@ -781,6 +782,71 @@ func TestCompleteSessionRejectsAColorMergeDirectionPastTheBoard(t *testing.T) {
 	// A fifth direction is malformed input, so it must never start a replay.
 	if backend.runCalls != 0 {
 		t.Fatal("a direction outside the board reached the verifier")
+	}
+}
+
+func TestCompleteSessionAcceptsAColorMergeRunPastTheLegacyDeck(t *testing.T) {
+	backend := testBackend()
+	started := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)
+	backend.result = supabaseplay.Result{
+		Outcome:      "recorded",
+		SessionID:    sessionID,
+		GameSlug:     "color-merge",
+		Score:        ptr(int64(120)),
+		TilesPlaced:  ptr(49),
+		DurationMS:   ptr(21000),
+		Ranked:       ptr(true),
+		RecordedAt:   &started,
+		PersonalBest: ptr(int64(120)),
+		Rank:         ptr(int64(1)),
+	}
+	server := testServer(t, backend)
+
+	// Two hundred valid directions are far past the legacy forty-eight-slide
+	// deck and are ordinary play on the endless board.
+	actions := make([]string, 0, 200)
+	for index := 0; index < 200; index++ {
+		actions = append(actions, fmt.Sprint(index%4))
+	}
+	status, body := post(t, server,
+		"/api/v1/sessions/"+sessionID+"/complete",
+		completeBodyRules(colorMergeEndlessRules, "120", "21000",
+			"["+strings.Join(actions, ",")+"]"), "")
+
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%#v)", status, body)
+	}
+	if len(backend.lastRun.Actions) != 200 {
+		t.Fatalf("actions = %d, want the 200 submitted slides", len(backend.lastRun.Actions))
+	}
+	if backend.lastRun.RulesVersion != colorMergeEndlessRules {
+		t.Fatalf("rules version = %q, want color-merge@2", backend.lastRun.RulesVersion)
+	}
+}
+
+func TestCompleteSessionRejectsAColorMergeRunPastTheLegacyDeck(t *testing.T) {
+	backend := testBackend()
+	server := testServer(t, backend)
+
+	// A legacy color-merge@1 run keeps the ordinary sixty-move request bound:
+	// the endless ceiling is raised by the rules version, not for everyone.
+	actions := make([]string, 0, 61)
+	for index := 0; index < 61; index++ {
+		actions = append(actions, fmt.Sprint(index%4))
+	}
+	status, body := post(t, server,
+		"/api/v1/sessions/"+sessionID+"/complete",
+		completeBodyRules(colorMergeRules, "0", "45000",
+			"["+strings.Join(actions, ",")+"]"), "")
+
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (%#v)", status, body)
+	}
+	if errorCode(t, body) != "bad_request" {
+		t.Fatalf("code = %s, want bad_request", errorCode(t, body))
+	}
+	if backend.runCalls != 0 {
+		t.Fatal("a run past the legacy deck reached the verifier")
 	}
 }
 

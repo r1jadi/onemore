@@ -17,7 +17,6 @@ import { ErrorState } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
-  COLOR_MERGE_SLIDES,
   COLOR_MERGE_SIZE,
   DOWN,
   LEFT,
@@ -228,8 +227,10 @@ function Board({
               tile merges once per slide.
             </p>
             <p>
-              <span className="font-medium text-foreground">Forty-eight slides</span> per run. The
-              board locks early if it fills with no matching neighbours, and the run ends there.
+              <span className="font-medium text-foreground">No final slide.</span> The run ends only
+              when the board locks — every cell full with no matching neighbours. New tiles arrive
+              with a growing chance of a higher shade, so the space you have to work with keeps
+              shrinking.
             </p>
           </div>
 
@@ -279,9 +280,7 @@ function Board({
           <dd className="text-2xl font-semibold tabular">{run.score}</dd>
         </dl>
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <span className="tabular">
-            Slide {Math.min(readout.slides, COLOR_MERGE_SLIDES)}/{COLOR_MERGE_SLIDES}
-          </span>
+          <span className="tabular">Slide {readout.slides}</span>
           {session.ranked ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-surface-2 px-2 py-1">
               <ShieldCheck className="size-3.5" />
@@ -299,7 +298,7 @@ function Board({
           : run.outcome === "over"
             ? run.endReason === "locked"
               ? "The board locked."
-              : "That was the last slide."
+              : "Submission limit reached."
             : `Slide to merge — best tile ${readout.best}.`}
       </p>
 
@@ -312,15 +311,30 @@ function Board({
             maxWidth: "min(26rem, calc(100dvh - 17rem))",
             gridTemplateColumns: `repeat(${COLOR_MERGE_SIZE}, minmax(0, 1fr))`,
             gridTemplateRows: `repeat(${COLOR_MERGE_SIZE}, minmax(0, 1fr))`,
+            // A finger swipe is a move, not a scroll: without this the browser
+            // claims the drag for panning, cancels the pointer, and the gesture
+            // never reaches the board.
+            touchAction: "none",
           }}
           role="grid"
-          aria-label={`Board — ${readout.slides} of ${COLOR_MERGE_SLIDES} slides played`}
+          aria-label={`Board — ${readout.slides} slides played`}
           onPointerDown={(event) => {
             if (!accepting) return;
             // Some pointer events carry no coordinates (a synthetic event, or a
             // device that reports position only on release). A swipe needs both
             // ends, so a press without one is not recorded.
             if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return;
+            // Capture the pointer so the release is delivered here even when a
+            // finger travels off the grid before lifting: a swipe that ends
+            // outside the board is still a swipe. Released implicitly on up.
+            // A capture that is refused (a pointer released mid-gesture, or a
+            // synthetic event) must not cost the player the press: the swipe
+            // still works, it just has to end over the board.
+            try {
+              event.currentTarget.setPointerCapture?.(event.pointerId);
+            } catch {
+              /* no active pointer to capture */
+            }
             pressed.current = {
               x: event.clientX,
               y: event.clientY,
@@ -418,7 +432,7 @@ function Board({
           ? "The slides you made are your score if the server agrees."
           : run.outcome === "over"
             ? "The run is over. Your result is on its way."
-            : "Two equal tiles merge into the next shade. Each tile merges once per slide."}
+            : `Next tile: ${readout.promotionPercent}% chance it arrives as a ${readout.promotedValue}. Each tile merges once per slide.`}
       </p>
     </div>
   );
@@ -522,7 +536,7 @@ function Finished({
           )}
         </div>
         <p className="text-sm text-muted-foreground">
-          {run.endReason === "locked" ? "The board locked" : "Every slide played"}
+          {run.endReason === "locked" ? "The board locked" : "Submission limit reached"}
         </p>
         <p className="text-5xl font-semibold tabular">{result.score}</p>
         <p className="text-sm text-muted-foreground">

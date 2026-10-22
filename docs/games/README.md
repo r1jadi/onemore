@@ -551,24 +551,26 @@ drifts, one of the two suites fails.
 ## Color Merge
 
 Slide a 4×4 board of shades. Two equal tiles that meet merge into the next shade
-and score the tile they create. A run is **forty-eight slides**; it ends when the
-deck is empty, or earlier if the board locks.
+and score the tile they create. **There is no final slide**: a run ends only when
+the board locks — every cell full and no two neighbours equal — because the tiles
+that arrive keep getting harder to pair.
 
 ### The board
 
-| Thing   | Value                                                            |
-| ------- | ---------------------------------------------------------------- |
-| Board   | 4×4, sixteen cells                                               |
-| Tile    | A shade: `1` shows 2, `2` shows 4, `3` shows 8, and so on        |
-| Opening | Two tiles, dealt from the seed                                   |
-| Deck    | 48 slides — the run always ends, so two scores measure one thing |
-| Rules   | `color-merge@1`                                                  |
-| Runtime | `color-merge` (the catalogue's `games.runtime` value)            |
+| Thing   | Value                                                                    |
+| ------- | ------------------------------------------------------------------------ |
+| Board   | 4×4, sixteen cells                                                       |
+| Tile    | A shade: `1` shows 2, `2` shows 4, `3` shows 8, and so on                 |
+| Opening | Two tiles, dealt from the seed                                           |
+| Run     | Endless in principle — no deck, no final slide                           |
+| Limits  | 4096 slides per submission; that is a request ceiling, not an ending     |
+| Rules   | `color-merge@2` (endless); `color-merge@1` (the retired forty-eight deck) |
+| Runtime | `color-merge` (the catalogue's `games.runtime` value)                    |
 
 A tile's **value** is `2 ** shade`, which is the number on its face. Shades are
 what the rules merge; values are what the player reads and what the score counts.
 
-### The deck
+### The generator and the spawn ramp
 
 The tiles are not random at play time: their cells and shades are a function of
 the run's seed, which the **server** chooses when it issues the session. The
@@ -581,15 +583,50 @@ if state₀ = 0 then state₀ = 2654435769         // 0x9E3779B9: a zero state w
 stateₙ = (stateₙ₋₁ × 1664525 + 1013904223) mod 2³²
 
 // spawn k, 1-based: advance k times to pick the cell, once more for the shade
-cell(k)  = empties[stateₖ mod count(empties)]  // empties are in board order
-shade(k) = 2 if stateₖ₊₁ mod 10 = 0 else 1
+cell(k)      = empties[stateₖ mod count(empties)]   // empties are in board order
+percent(k)   = min(60, 10 + floor(k / 5))           // the promotion chance
+promote(k)   = 2 + floor(k / 120)                   // the shade it arrives at
+shade(k)     = promote(k) if stateₖ₊₁ mod 100 < percent(k) else 1
 ```
 
 Spawn `k` is a pure function of the seed and `k`, rather than a mutable generator
 both sides must advance in step, so the verifier can reach spawn twenty without
 replaying nineteen and neither copy can drift by one draw. The run opens with
-spawns 1 and 2; slide `n` deals spawn `n + 2`, except the last slide, which deals
-nothing because there is no next move to make with the tile.
+spawns 1 and 2, and slide `n` deals spawn `n + 2`.
+
+### Difficulty
+
+The ramp is two curves, both functions of the spawn index alone, so every player
+meets the same difficulty at the same point and the verifier does not have to
+simulate anything to know how hard a board was.
+
+**Promotion chance** — how often a dealt tile arrives already promoted:
+
+| Spawn | Chance |
+| ----- | ------ |
+| 1     | 10%    |
+| 5     | 11%    |
+| 50    | 20%    |
+| 120   | 34%    |
+| 250+  | 60%    |
+
+**Promoted shade** — what a promoted tile becomes:
+
+| Spawn   | Shade | Face value |
+| ------- | ----- | ---------- |
+| 1–119   | 2     | 4          |
+| 120–239 | 3     | 8          |
+| 240–359 | 4     | 16         |
+| …       | +1 every 120 spawns, no cap | … |
+
+The chance ceiling is not where difficulty stops. Once every spawn is likely to
+be promoted, the shade a promoted tile arrives at keeps climbing by one every 120
+spawns: a board fed 32s and 64s has almost nothing to merge, so the space a run
+can keep free shrinks and the next lock arrives sooner. The cap on the chance
+makes the ramp readable; the shade is what keeps it rising.
+
+A run therefore ends by the player's own board filling up, not by a counter:
+there is no slide number at which the rules stop dealing.
 
 The seed travels as a **decimal string** for the same reason the other games' do:
 it is a `bigint` column, and parsing it as a double would deal a different board
@@ -618,22 +655,31 @@ score for this game and the number the verifier derives.
 
 | Outcome | Reason   | When                                                                      |
 | ------- | -------- | ------------------------------------------------------------------------- |
-| `over`  | `deck`   | The forty-eighth slide was played. Every run that survives reaches this.  |
 | `over`  | `locked` | The board is full and no two neighbours match, so no slide can change it. |
+| `over`  | `limit`  | The 4096-slide submission bound was reached. A request ceiling, not a level. |
 
-Every slide of the run must be submitted: a submission that ends before the deck
-is empty or before the board locks is refused, so a player cannot discard the
-slide that ended their run.
+Every slide of the run must be submitted: a submission that stops while the board
+can still move is refused, so a player cannot discard the slide that locked it.
+The retired `color-merge@1` deck still ends at its forty-eighth slide, and a
+session pinned to that version is verified exactly as it shipped — including its
+`deck` ending and its 10%-to-shade-2 spawn.
 
 ### Verified scores
 
 **The database decides the score**, under the same rules as the other four: see
-`supabase/migrations/20261022120000_color_merge_sessions.sql` for the code.
+`supabase/migrations/20261022120000_color_merge_sessions.sql` for the legacy
+rules and `supabase/migrations/20261028120000_endless_color_merge.sql` for the
+endless ones.
 
-- `public.color_merge_board(seed)` deals the opening two tiles, and
-  `public.color_merge_spawn(seed, k, board)` deals spawn `k`. Both are internals:
-  execute is not granted to a client, because a player already holds the seed
-  their own board grows from, and the verifier is the only caller.
+- `public.color_merge_board_endless(seed)` deals the opening two tiles, and
+  `public.color_merge_spawn_endless(seed, k, board)` deals spawn `k` on the ramp.
+  The legacy `public.color_merge_board`/`color_merge_spawn` remain, because a
+  `color-merge@1` session must still replay. All four are internals: execute is
+  not granted to a client, because a player already holds the seed their own
+  board grows from, and the verifier is the only caller.
+- `public.color_merge_spawn_percent(k)` and `public.color_merge_spawn_shade(k)`
+  are the ramp itself, exported so the SQL suite can assert the curve instead of
+  trusting the numbers inside a spawn.
 - `public.color_merge_slide(board, direction)` compacts and merges every line, and
   `public.color_merge_gain(board, direction)` reports the points the same slide
   earns. They share one line function, so the board and the score cannot disagree.
@@ -642,9 +688,10 @@ slide that ended their run.
 - `public.start_game_session(slug, rules, client)` issues the run with the seed,
   the pinned version and the expiry. Its gate is a pair — (`stack-10`,
   `stack-10@1`), (`chain`, `chain@1` or `chain@2`), (`memory-flash`, `memory-flash@1`),
-  (`one-move`, `one-move@1`) or (`color-merge`, `color-merge@1`) — and anything
-  else is `unsupported_runtime`. A Color Merge session's `tile_count` is 48: the
-  field counts the moves a complete run holds, and its moves are slides.
+  (`one-move`, `one-move@1`) or (`color-merge`, `color-merge@1` or
+  `color-merge@2`) — and anything else is `unsupported_runtime`. An endless
+  Color Merge session's `tile_count` is 4096, the submission bound; a legacy
+  session still reports 48, the slides its deck holds.
 - `public.complete_color_merge_run(session, actions, score, duration)` replays the
   direction list from the seed, deals the tiles, derives the score, compares it
   with the claim, and only then closes the session and records it. Its outcome
@@ -663,31 +710,45 @@ drifts, one of the two suites fails.
 
 1. **Seed 1's opening board** — two shade-1 tiles at cells 12 and 13:
    `0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0`. Seed `9223372036854775807` opens with a
-   shade-1 tile at cell 2 and a shade-2 tile at cell 8, which is what catches a
-   client that rounded the seed to a double.
-2. **Seed 1's deck line** — the first legal direction in the order down, left,
-   right, up, played forty-eight times:
+   shade-1 tile at cell 2 and a shade-1 tile at cell 8 under the endless rule,
+   which is what catches a client that rounded the seed to a double — and, because
+   the legacy rule deals a shade-2 tile at cell 8, what catches a client that
+   applied the wrong ruleset.
+2. **Seed 1's endless line** — the first legal direction in the order down, left,
+   right, up, played until the board locks: **sixty-four slides**, sixteen past
+   the retired deck:
 
    ```
-   3,1,3,2,2,2,2,2,2,2,2,2,2,2,2,2,3,2,2,2,3,2,2,2,2,2,3,2,3,2,2,2,
-   2,2,2,2,2,3,2,3,3,2,2,2,2,2,2,2
+   3,1,3,2,2,2,2,2,2,2,3,3,2,3,2,2,2,2,2,3,2,2,2,3,2,3,2,1,2,2,2,2,
+   3,2,2,2,2,2,2,2,2,3,2,2,2,2,3,2,3,1,3,2,3,2,2,2,2,3,3,2,3,1,3,2
    ```
 
-   It scores **272** and leaves `1,0,0,0,2,1,0,0,4,3,2,1,5,4,3,3`. Asserted in
-   [`tests/security/rls_test.sql`](../../tests/security/rls_test.sql) and in
-   [`src/lib/games/color-merge.test.ts`](../../src/lib/games/color-merge.test.ts).
-
-3. **Seed 15's locked line** — the first legal direction in the order right, left,
-   up, down, forty-two slides, scoring **184** and leaving a full board with no
+   It scores **468** and leaves `2,3,1,2,1,4,3,1,2,1,4,3,6,4,2,1` with no move
+   left. Asserted in [`tests/security/rls_test.sql`](../../tests/security/rls_test.sql)
+   and in [`src/lib/games/color-merge.test.ts`](../../src/lib/games/color-merge.test.ts).
+   The first forty-eight of those slides are *not* the legacy line: the ramp deals
+   different shades, and the SQL suite submits the legacy deck to an endless
+   session to prove it is now a partial run.
+3. **Seed 15's endless line** — the first legal direction in the order right, left,
+   up, down, fifty-two slides, scoring **292** and leaving a full board with no
    matching neighbours:
 
    ```
-   1,2,4,1,3,4,1,3,1,3,4,2,2,1,2,1
+   1,2,4,2,4,1,2,3,2,3,5,2,1,2,1,4
    ```
 
-   This is the vector that pins the lock ending: the run stops before the deck is
-   empty, and the verifier must record it rather than call it partial. Asserted in
-   both suites.
+   This is the vector that pins the lock ending: the run stops long after the old
+   deck would have, and the verifier must record it rather than call it partial.
+   Asserted in both suites.
+4. **The retired deck, still verified** — seed 1's `color-merge@1` line is the
+   same forty-eight slides that scored **272** and left
+   `1,0,0,0,2,1,0,0,4,3,2,1,5,4,3,3`; seed 15's legacy line locks after forty-two
+   slides for **184**. Both remain in the SQL suite, because a session issued
+   before this release can still be completed and must be verified under the
+   rules it was issued with.
+5. **The ramp** — `spawn_percent` is 10 at spawns 1–4, 11 at 5, 20 at 50 and 60
+   from 250; `spawn_shade` is 2 until spawn 119, 3 at 120, 4 at 240, and still
+   climbing (1002 at spawn 120,000). Asserted in both suites.
 
 ## Don't Touch the Black
 

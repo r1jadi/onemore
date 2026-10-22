@@ -1340,10 +1340,18 @@ reset role;
 -- twelve restored boards, 120 points. See the One Move section of
 -- docs/games/README.md.
 \set one_move_perfect 'array[7,8,7,7,0,8,6,2,5,18,13,5]'
--- Seed 1's Color Merge deck line: forty-eight slides, ending on the last one
--- with 272 points; seed 15's line locks the board after forty-two slides for 184.
+-- Seed 1's legacy color-merge@1 deck line: forty-eight slides, ending on the
+-- last one with 272 points; seed 15's legacy line locks the board after
+-- forty-two slides for 184. Both are still verified exactly as they shipped.
 \set color_merge_deck 'array[3,1,3,2,2,2,2,2,2,2,2,2,2,2,2,2,3,2,2,2,3,2,2,2,2,2,3,2,3,2,2,2,2,2,2,2,2,3,2,3,3,2,2,2,2,2,2,2]'
 \set color_merge_locked 'array[1,1,1,1,1,3,1,3,1,1,3,1,1,3,1,1,1,1,1,1,1,1,1,3,1,1,1,3,1,1,3,0,1,3,1,1,3,1,0,1,0,1]'
+-- Seed 1's endless color-merge@2 line: sixty-four slides, straight past the
+-- retired forty-eight-slide deck, ending on the board's own lock with 468
+-- points. Seed 15's endless line locks after fifty-two slides for 292. The
+-- first forty-eight of seed 1's endless slides are *not* the legacy deck: the
+-- spawn ramp deals different shades, which is what the refusal below checks.
+\set color_merge_endless_one 'array[3,1,3,2,2,2,2,2,2,2,3,3,2,3,2,2,2,2,2,3,2,2,2,3,2,3,2,1,2,2,2,2,3,2,2,2,2,2,2,2,2,3,2,2,2,2,3,2,3,1,3,2,3,2,2,2,2,3,3,2,3,1,3,2]'
+\set color_merge_endless_two 'array[1,1,1,1,1,1,1,3,1,1,3,1,1,1,1,1,1,3,1,1,1,3,1,1,0,1,1,1,3,1,1,1,0,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,3,1,0,1]'
 -- Seed 1's legacy dont-touch@1 deck: the forty-one whites in board order, and
 -- the nine whites of rows one to five followed by the black tile at cell 15.
 -- The perfect line scores 410; the cautious line scores 90.
@@ -1396,6 +1404,9 @@ reset role;
 \set color_merge_guest_session  '99999999-4444-4444-8444-999999999999'
 \set color_merge_old_session    '99999999-5555-4555-8555-999999999999'
 \set color_merge_locked_session '99999999-6666-4666-8666-999999999999'
+\set color_merge_endless_session       '99999999-3333-4333-8333-999999999999'
+\set color_merge_endless_two_session   '99999999-7777-4777-8777-999999999999'
+\set color_merge_endless_guest_session '99999999-8888-4888-8888-999999999999'
 \set dont_touch_game          'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
 \set dont_touch_session       '77777777-1111-4111-8111-777777777777'
 \set dont_touch_loss_session  '77777777-2222-4222-8222-777777777777'
@@ -1467,12 +1478,18 @@ insert into public.game_sessions (id, game_id, user_id, seed, rules_version, sta
   (:'one_move_guest_session', :'one_move_game', null,     1, 'one-move@1', now() - interval '5 minutes', now() + interval '2 hours', null),
   (:'one_move_old_session',   :'one_move_game', :'alice', 1, 'one-move@0', now() - interval '5 minutes', now() + interval '2 hours', null),
   -- Color Merge fixtures. Seed 1 opens with two shade-1 tiles side by side;
-  -- seed 15's line locks the board after forty-two slides.
+  -- seed 15's legacy line locks the board after forty-two slides.
   (:'color_merge_session',        :'color_merge_game', :'alice', 1,  'color-merge@1', now() - interval '5 minutes', now() + interval '2 hours', null),
   (:'color_merge_loss_session',   :'color_merge_game', :'alice', 1,  'color-merge@1', now() - interval '5 minutes', now() + interval '2 hours', null),
   (:'color_merge_guest_session',  :'color_merge_game', null,     1,  'color-merge@1', now() - interval '5 minutes', now() + interval '2 hours', null),
   (:'color_merge_old_session',    :'color_merge_game', :'alice', 1,  'color-merge@0', now() - interval '5 minutes', now() + interval '2 hours', null),
   (:'color_merge_locked_session', :'color_merge_game', :'alice', 15, 'color-merge@1', now() - interval '5 minutes', now() + interval '2 hours', null),
+  -- Endless Color Merge fixtures: no deck, so a run ends only when its board
+  -- locks. Seed 1's line survives past slide forty-eight; seed 15's locks at
+  -- fifty-two; and a guest run is verified and left unranked like any other.
+  (:'color_merge_endless_session',       :'color_merge_game', :'alice', 1,  'color-merge@2', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'color_merge_endless_two_session',   :'color_merge_game', :'alice', 15, 'color-merge@2', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'color_merge_endless_guest_session', :'color_merge_game', null,     1,  'color-merge@2', now() - interval '5 minutes', now() + interval '2 hours', null),
   -- Don't Touch the Black fixtures. Seed 1's deck opens black, black, white; its
   -- forty-one whites are the perfect line, and cell 15 is the black tile that
   -- ends the cautious one.
@@ -1548,6 +1565,59 @@ select rls_test.ok(
     = array[2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0]::integer[]
   and public.color_merge_gain(array[1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0]::integer[], 3) = 8,
   'each Color Merge tile merges once per slide, and the gain is the merge'
+);
+-- The endless Color Merge generator and its ramp, asserted directly. The spawn
+-- ramp is the whole of the difficulty: a chance that rises to a ceiling, and a
+-- promoted shade that keeps climbing past it. A drift here is a drift in both
+-- copies, and every honest endless run would be refused.
+select rls_test.ok(
+  public.color_merge_rules_version() = 'color-merge@2'
+  and public.color_merge_slides() = 48
+  and public.color_merge_max_slides() = 4096,
+  'the endless rules: no deck, a 4096-slide submission bound, and the legacy 48 kept for color-merge@1'
+);
+select rls_test.ok(
+  public.color_merge_spawn_percent(1) = 10
+  and public.color_merge_spawn_percent(4) = 10
+  and public.color_merge_spawn_percent(5) = 11
+  and public.color_merge_spawn_percent(50) = 20
+  and public.color_merge_spawn_percent(250) = 60
+  and public.color_merge_spawn_percent(100000) = 60,
+  'the Color Merge spawn chance rises one point per five spawns and stops at 60%'
+);
+select rls_test.ok(
+  public.color_merge_spawn_shade(1) = 2
+  and public.color_merge_spawn_shade(119) = 2
+  and public.color_merge_spawn_shade(120) = 3
+  and public.color_merge_spawn_shade(240) = 4
+  and public.color_merge_spawn_shade(120000) = 1002,
+  'the Color Merge promoted shade climbs every 120 spawns, without cap'
+);
+select rls_test.ok(
+  public.color_merge_board_endless(1) = array[0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0]::integer[],
+  'the endless generator opens seed 1 on the board the client engine computes'
+);
+select rls_test.ok(
+  public.color_merge_board_endless(9223372036854775807) = array[0,0,1,0,0,0,0,0,1,0,0,0,0,0,0,0]::integer[],
+  'the endless generator deals a full-width seed with its own shade rule'
+);
+select rls_test.ok(
+  public.color_merge_spawn_endless(1, 3, public.color_merge_board_endless(1))
+    = array[0,0,1,0,0,0,0,0,0,0,0,0,1,1,0,0]::integer[],
+  'the endless generator deals one tile per spawn, into an empty cell'
+);
+select rls_test.ok(
+  public.color_merge_spawn_endless(1, 3, array[1,2,1,2,2,1,2,1,1,2,1,2,2,1,2,1]::integer[])
+    = array[1,2,1,2,2,1,2,1,1,2,1,2,2,1,2,1]::integer[],
+  'a spawn on a full board changes nothing'
+);
+select rls_test.raises(
+  $$select public.color_merge_spawn_endless(1, 0, public.color_merge_board_endless(1))$$,
+  '22023', 'a spawn index starts at one'
+);
+select rls_test.raises(
+  $$select public.color_merge_spawn_percent(0)$$,
+  '22023', 'a spawn before the first has no promotion chance'
 );
 -- The Don't Touch the Black generator, asserted directly: the whole sixty-cell
 -- deck is the one the client engine computes and the verifier replays. A drift
@@ -1853,13 +1923,29 @@ select rls_test.says_field(
 );
 select rls_test.says_field(
   $$public.start_game_session('color-merge', 'color-merge@1', 'test/1.0')$$,
-  'tile_count', '48', 'a Color Merge session counts the slides a run holds'
+  'tile_count', '48', 'a legacy Color Merge session still counts its forty-eight slides'
+);
+select rls_test.says_field(
+  $$public.start_game_session('color-merge', 'color-merge@2', 'test/1.0')$$,
+  'rules_version', 'color-merge@2', 'the shipped Color Merge game issues the endless rules'
+);
+select rls_test.says_field(
+  $$public.start_game_session('color-merge', 'color-merge@2', 'test/1.0')$$,
+  'tile_count', '4096', 'an endless Color Merge session reports the submission bound, not a final slide'
 );
 -- The gate knows the fifth pair too, and refuses a game paired with another
 -- game's rules.
 select rls_test.says(
   $$public.start_game_session('fixture-color-merge', 'color-merge@1', 'test/1.0')$$,
   'started', 'a guest can start a Color Merge run'
+);
+select rls_test.says(
+  $$public.start_game_session('fixture-color-merge', 'color-merge@2', 'test/1.0')$$,
+  'started', 'a guest can start an endless Color Merge run'
+);
+select rls_test.says(
+  $$public.start_game_session('fixture-color-merge', 'color-merge@3', 'test/1.0')$$,
+  'unsupported_runtime', 'a Color Merge rules version no verifier owns is refused'
 );
 select rls_test.says(
   $$public.start_game_session('fixture-color-merge', 'one-move@1', 'test/1.0')$$,
@@ -2021,6 +2107,16 @@ select rls_test.says(
 select rls_test.says_field(
   format($$public.complete_color_merge_run('99999999-4444-4444-8444-999999999999'::uuid, %s, 272, 45000)$$, :'color_merge_deck'),
   'ranked', 'false', 'a guest Color Merge run is never ranked'
+);
+-- The endless guest run takes the same path: verified, recorded on its session,
+-- and never ranked, because a guest has no score to set.
+select rls_test.says(
+  format($$public.complete_color_merge_run('99999999-8888-4888-8888-999999999999'::uuid, %s, 468, 45000)$$, :'color_merge_endless_one'),
+  'recorded', 'a guest endless Color Merge run is replayed and recorded'
+);
+select rls_test.says_field(
+  format($$public.complete_color_merge_run('99999999-8888-4888-8888-999999999999'::uuid, %s, 468, 45000)$$, :'color_merge_endless_one'),
+  'ranked', 'false', 'a guest endless Color Merge run is never ranked'
 );
 -- A guest Don't Touch the Black run completes the same way: verified, recorded,
 -- unranked.
@@ -2459,9 +2555,10 @@ select rls_test.ok(
 
 -- ── Color Merge: the same properties, replayed against a sliding board ──
 --
--- Seed 1's deck line plays all forty-eight slides for 38 points; seed 15's
--- line locks the board after forty-two slides for 28. The expected numbers
--- are arithmetic from the seed, not values read back.
+-- Seed 1's legacy deck line plays all forty-eight slides for 272 points;
+-- seed 15's legacy line locks the board after forty-two slides for 184. The
+-- expected numbers are arithmetic from the seed, not values read back, and the
+-- endless board below is measured the same way.
 select rls_test.ok(
   (select r.outcome = 'recorded'
       and r.score = 272
@@ -2535,6 +2632,58 @@ select rls_test.ok(
 select rls_test.ok(
   (select rank = 1 and score = 272 from public.game_standing('fixture-color-merge', '11111111-1111-4111-8111-111111111111', null)),
   'your Color Merge standing is your recorded best at its real rank'
+);
+-- ── Endless Color Merge: past the retired deck, and only the board ends a run ──
+--
+-- Seed 1 plays sixty-four slides before its board locks: sixteen more than the
+-- old deck allowed, and 468 points. Seed 15 locks at fifty-two for 292. The
+-- legacy forty-eight-slide line is now a *partial* endless run, which is the
+-- clearest proof that the deck no longer ends anything.
+select rls_test.ok(
+  (select r.outcome = 'recorded'
+      and r.score = 468
+      and r.tiles_placed = 64
+     from public.complete_color_merge_run(
+       '99999999-3333-4333-8333-999999999999'::uuid, :color_merge_endless_one, 468, 45000) r),
+  'an endless Color Merge run is recorded: sixty-four slides, 468 points'
+);
+select rls_test.says(
+  format($$public.complete_color_merge_run('99999999-3333-4333-8333-999999999999'::uuid, %s, 468, 45000)$$, :'color_merge_endless_one'),
+  'duplicate', 'a retry of the same endless Color Merge run is safe to repeat'
+);
+select rls_test.says(
+  $$public.complete_color_merge_run('99999999-3333-4333-8333-999999999999'::uuid, array[2], 0, 45000)$$,
+  'closed', 'a closed endless Color Merge session does not accept a different run'
+);
+select rls_test.ok(
+  (select rank = 1 and score = 468 from public.game_standing('fixture-color-merge', '11111111-1111-4111-8111-111111111111', null)),
+  'an endless Color Merge score becomes the standing, past the old deck best'
+);
+-- The legacy deck line, submitted to an endless session, stops at slide 48 with
+-- the board still playable: the run is partial, not complete.
+select rls_test.says(
+  format($$public.complete_color_merge_run('99999999-7777-4777-8777-999999999999'::uuid, %s, 272, 45000)$$, :'color_merge_deck'),
+  'invalid_actions', 'the retired forty-eight-slide deck is a partial endless run'
+);
+select rls_test.says(
+  format($$public.complete_color_merge_run('99999999-7777-4777-8777-999999999999'::uuid, (%s)[1:48], 272, 45000)$$, :'color_merge_endless_one'),
+  'invalid_actions', 'an endless Color Merge run that stops before its board locks is partial'
+);
+select rls_test.says_field(
+  format($$public.complete_color_merge_run('99999999-7777-4777-8777-999999999999'::uuid, %s, 999, 45000)$$, :'color_merge_endless_two'),
+  'score', '292', 'the endless Color Merge replay is the score, and it is reported back'
+);
+select rls_test.says(
+  format($$public.complete_color_merge_run('99999999-7777-4777-8777-999999999999'::uuid, %s || 1, 468, 45000)$$, :'color_merge_endless_one'),
+  'invalid_actions', 'a slide after the endless board locked is impossible play'
+);
+-- The loss fixture is then played to its own lock and recorded: a second board,
+-- a different length, and no deck anywhere in it.
+select rls_test.ok(
+  (select r.outcome = 'recorded' and r.score = 292 and r.tiles_placed = 52
+     from public.complete_color_merge_run(
+       '99999999-7777-4777-8777-999999999999'::uuid, :color_merge_endless_two, 292, 45000) r),
+  'a second endless board locks at fifty-two slides for 292 points'
 );
 
 -- ── Don't Touch the Black: the same properties, replayed against a conveyor ──

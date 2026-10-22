@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   COLOR_MERGE_CELLS,
   COLOR_MERGE_DIRECTIONS,
+  COLOR_MERGE_MAX_SLIDES,
+  COLOR_MERGE_OPENING_TILES,
   COLOR_MERGE_RULES_VERSION,
   COLOR_MERGE_SIZE,
   COLOR_MERGE_SLIDES,
@@ -21,6 +23,8 @@ import {
   slideBoard,
   slideGain,
   spawnBoard,
+  spawnPromotedShade,
+  spawnPromotionPercent,
   submission,
   tileValue,
   type ColorMergeDirection,
@@ -28,13 +32,14 @@ import {
 } from "./color-merge";
 
 /**
- * Color Merge's rules, asserted rather than assumed.
+ * Color Merge's endless rules, asserted rather than assumed.
  *
  * The two vectors that also appear in `tests/security/rls_test.sql` are seed 1's
- * forty-eight-slide deck run (272 points) and seed 15's forty-two-slide locked
- * run (184 points). Those are the runs two copies of the ruleset have to agree
- * on; if either engine drifts, an honest submission becomes `score_mismatch`
- * and the disagreement shows up here first.
+ * sixty-four-slide line (468 points) and seed 15's fifty-two-slide line (292
+ * points). Both run past the retired forty-eight-slide deck, which is the point:
+ * the endless engine keeps dealing after the old endpoint. If either copy of the
+ * ruleset drifts, an honest submission becomes `score_mismatch` and the
+ * disagreement shows up here first.
  */
 
 /** A 4×4 board from at most four rows, padded to the sixteen cells the rules use. */
@@ -60,17 +65,18 @@ function playFirstLegal(seed: string, order: readonly ColorMergeDirection[]): Co
   return run;
 }
 
-const DECK_RUN = playFirstLegal("1", [DOWN, LEFT, RIGHT, UP]);
+const ORDER: readonly ColorMergeDirection[] = [DOWN, LEFT, RIGHT, UP];
+const LONG_RUN = playFirstLegal("1", ORDER);
 const LOCKED_RUN = playFirstLegal("15", [RIGHT, LEFT, UP, DOWN]);
 
 describe("the opening board", () => {
   it("deals two tiles from the seed and leaves the rest empty", () => {
     const board = openingBoard("1");
     expect(board).toHaveLength(COLOR_MERGE_CELLS);
-    expect(board.filter((shade) => shade !== 0)).toHaveLength(2);
-    // A seed with a small value is still a full-width draw, not a rounded one.
+    expect(board.filter((shade) => shade !== 0)).toHaveLength(COLOR_MERGE_OPENING_TILES);
+    // A seed beyond 32 bits is still a full-width draw, not a rounded one.
     expect(openingBoard("9223372036854775807")).toEqual([
-      0, 0, 1, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
     ]);
   });
 
@@ -79,9 +85,10 @@ describe("the opening board", () => {
     expect(createRun("1").board).not.toEqual(createRun("2").board);
   });
 
-  it("opens at the start of the deck, with nothing played or scored", () => {
+  it("opens with nothing played or scored, under the endless rules", () => {
     const run = createRun("1");
     expect(run.rulesVersion).toBe(COLOR_MERGE_RULES_VERSION);
+    expect(run.rulesVersion).toBe("color-merge@2");
     expect(run.moves).toEqual([]);
     expect(run.score).toBe(0);
     expect(run.outcome).toBe("playing");
@@ -94,9 +101,46 @@ describe("the opening board", () => {
     expect(openingBoard("1").every((shade, cell) => shade === 0 || board[cell] !== 0)).toBe(true);
   });
 
+  it("leaves a full board unchanged: there is nowhere to put a tile", () => {
+    const full = [1, 2, 1, 2, 2, 1, 2, 1, 1, 2, 1, 2, 2, 1, 2, 1];
+    expect(spawnBoard("1", 3, full)).toEqual(full);
+  });
+
   it("refuses a spawn index that is not a whole number from one", () => {
     expect(() => spawnBoard("1", 0, openingBoard("1"))).toThrow(RangeError);
     expect(() => spawnBoard("1", 1.5, openingBoard("1"))).toThrow(RangeError);
+    expect(() => spawnPromotionPercent(0)).toThrow(RangeError);
+    expect(() => spawnPromotedShade(0)).toThrow(RangeError);
+  });
+});
+
+describe("the spawn ramp", () => {
+  it("opens at the retired game's ten percent and rises one point per five spawns", () => {
+    expect(spawnPromotionPercent(1)).toBe(10);
+    expect(spawnPromotionPercent(4)).toBe(10);
+    expect(spawnPromotionPercent(5)).toBe(11);
+    expect(spawnPromotionPercent(6)).toBe(11);
+    expect(spawnPromotionPercent(50)).toBe(20);
+  });
+
+  it("caps the chance at sixty percent rather than the difficulty", () => {
+    expect(spawnPromotionPercent(250)).toBe(60);
+    expect(spawnPromotionPercent(600)).toBe(60);
+    expect(spawnPromotionPercent(100_000)).toBe(60);
+  });
+
+  it("climbs the promoted shade by one every hundred and twenty spawns, without cap", () => {
+    expect(spawnPromotedShade(1)).toBe(2);
+    expect(spawnPromotedShade(119)).toBe(2);
+    expect(spawnPromotedShade(120)).toBe(3);
+    expect(spawnPromotedShade(240)).toBe(4);
+    expect(spawnPromotedShade(120_000)).toBe(1002);
+  });
+
+  it("deals higher tiles later in a run, never merely more of the same", () => {
+    // A run of 3,000 spawns is far longer than any session, and the shade still
+    // grows: the ceiling on the chance is not a ceiling on difficulty.
+    expect(spawnPromotedShade(3_000)).toBeGreaterThan(spawnPromotedShade(1_000));
   });
 });
 
@@ -195,20 +239,37 @@ describe("a slide as a move", () => {
 });
 
 describe("the end of a run", () => {
-  it("ends after the deck's forty-eight slides", () => {
-    expect(DECK_RUN.outcome).toBe("over");
-    expect(DECK_RUN.endReason).toBe("deck");
-    expect(DECK_RUN.moves).toHaveLength(COLOR_MERGE_SLIDES);
-    expect(DECK_RUN.score).toBe(272);
-    expect(DECK_RUN.board).toEqual([1, 0, 0, 0, 2, 1, 0, 0, 4, 3, 2, 1, 5, 4, 3, 3]);
+  it("plays straight past the retired forty-eight-slide deck", () => {
+    expect(LONG_RUN.outcome).toBe("over");
+    expect(LONG_RUN.endReason).toBe("locked");
+    expect(LONG_RUN.moves.length).toBeGreaterThan(COLOR_MERGE_SLIDES);
+    expect(LONG_RUN.moves).toHaveLength(64);
+    expect(LONG_RUN.score).toBe(468);
+    expect(LONG_RUN.board).toEqual([2, 3, 1, 2, 1, 4, 3, 1, 2, 1, 4, 3, 6, 4, 2, 1]);
+    expect(canMove(LONG_RUN.board)).toBe(false);
   });
 
-  it("ends early when the board locks, and says so", () => {
+  it("never ends at the old deck, only on the board's own lock", () => {
+    // The board is still live the slide before the sixty-fourth, and there is no
+    // slide number at which the rules end a run by fiat.
+    let run = createRun("1");
+    while (run.moves.length < COLOR_MERGE_SLIDES) {
+      run = slide(
+        run,
+        ORDER.find((c) => canSlide(run, c))!,
+      );
+    }
+    expect(run.outcome).toBe("playing");
+    expect(run.endReason).toBeNull();
+    expect(run.moves).toHaveLength(COLOR_MERGE_SLIDES);
+  });
+
+  it("ends a second board on its own lock, at fifty-two slides", () => {
     expect(LOCKED_RUN.outcome).toBe("over");
     expect(LOCKED_RUN.endReason).toBe("locked");
-    expect(LOCKED_RUN.moves).toHaveLength(42);
-    expect(LOCKED_RUN.score).toBe(184);
-    expect(LOCKED_RUN.board).toEqual([1, 2, 4, 1, 3, 4, 1, 3, 1, 3, 4, 2, 2, 1, 2, 1]);
+    expect(LOCKED_RUN.moves).toHaveLength(52);
+    expect(LOCKED_RUN.score).toBe(292);
+    expect(LOCKED_RUN.board).toEqual([2, 3, 4, 2, 4, 1, 2, 3, 2, 3, 5, 2, 1, 2, 1, 4]);
     expect(canMove(LOCKED_RUN.board)).toBe(false);
   });
 
@@ -221,43 +282,51 @@ describe("the end of a run", () => {
     expect(canMove([1, 1, 2, 3, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1])).toBe(true);
   });
 
-  it("never plays more slides than the deck holds", () => {
-    expect(DECK_RUN.moves.length).toBeLessThanOrEqual(COLOR_MERGE_SLIDES);
-    expect(slide(DECK_RUN, LEFT)).toBe(DECK_RUN);
+  it("stops at the submission bound, without dealing a tile it cannot use", () => {
+    // A synthetic run with the bound one slide away: the last slide is replayed
+    // and ends the run as `limit`, which is a request ceiling rather than a level.
+    const nearly: ColorMergeRun = {
+      ...createRun("1"),
+      moves: Array.from({ length: COLOR_MERGE_MAX_SLIDES - 1 }, (): ColorMergeDirection => LEFT),
+    };
+    const before = nearly.board;
+    const final = slide(nearly, LEFT);
+
+    expect(final.endReason).toBe("limit");
+    expect(final.outcome).toBe("over");
+    expect(final.moves).toHaveLength(COLOR_MERGE_MAX_SLIDES);
+    expect(final.board).toEqual(slideBoard(before, LEFT));
   });
 
-  it("stops a deck run on the slide that empties the deck, without dealing again", () => {
-    let run = createRun("1");
-    while (run.moves.length < COLOR_MERGE_SLIDES - 1) {
-      const direction = COLOR_MERGE_DIRECTIONS.find((candidate) => canSlide(run, candidate));
-      run = slide(run, direction as ColorMergeDirection);
+  it("offers no slide after the bound", () => {
+    const spent: ColorMergeRun = {
+      ...createRun("1"),
+      moves: Array.from({ length: COLOR_MERGE_MAX_SLIDES }, (): ColorMergeDirection => LEFT),
+    };
+    for (const direction of COLOR_MERGE_DIRECTIONS) {
+      expect(canSlide(spent, direction)).toBe(false);
     }
-    const before = run.board;
-    const final = slide(
-      run,
-      COLOR_MERGE_DIRECTIONS.find((candidate) => canSlide(run, candidate))!,
-    );
-
-    expect(final.endReason).toBe("deck");
-    expect(final.board).toEqual(slideBoard(before, final.moves[final.moves.length - 1]));
   });
 });
 
 describe("what a run submits", () => {
   it("submits the move list, the rules version and the score it computed", () => {
-    expect(submission(DECK_RUN)).toEqual({
+    expect(submission(LONG_RUN)).toEqual({
       rulesVersion: COLOR_MERGE_RULES_VERSION,
-      actions: DECK_RUN.moves,
-      score: 272,
+      actions: LONG_RUN.moves,
+      score: 468,
     });
   });
 
-  it("reports progress from the moves played and the best tile", () => {
-    expect(progress(DECK_RUN)).toEqual({
-      slides: COLOR_MERGE_SLIDES,
-      total: COLOR_MERGE_SLIDES,
-      best: tileValue(bestShade(DECK_RUN.board)),
+  it("reports progress from the moves played, the best tile and the ramp", () => {
+    expect(progress(LONG_RUN)).toEqual({
+      slides: 64,
+      best: 64,
+      promotionPercent: spawnPromotionPercent(67),
+      promotedValue: tileValue(spawnPromotedShade(67)),
     });
+    expect(progress(LONG_RUN).promotionPercent).toBe(23);
+    expect(progress(LONG_RUN).promotedValue).toBe(4);
   });
 
   it("reads a shade as the number on its face", () => {

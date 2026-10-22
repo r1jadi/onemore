@@ -62,11 +62,12 @@ const (
 	// absurd body from reaching the database at all.
 	maxActions = 60
 	// The endless games' submission bounds. These are request ceilings rather
-	// than complete-run lengths: chain@2 carries at most 4096 taps, and
-	// dont-touch@2 at most 4095 cell taps (a cell can be tapped once). Every
-	// other runtime keeps the bound its own verifier owns.
-	chainMaxActions     = 4096
-	dontTouchMaxActions = 4095
+	// than complete-run lengths: chain@2 and color-merge@2 carry at most 4096
+	// moves, and dont-touch@2 at most 4095 cell taps (a cell can be tapped once).
+	// Every other runtime keeps the bound its own verifier owns.
+	chainMaxActions      = 4096
+	colorMergeMaxActions = 4096
+	dontTouchMaxActions  = 4095
 	// The bounds a move has to fit. Stack 10 addresses a column and Chain a pad,
 	// both 0 to 3; Color Merge addresses one of its four directions, also 0 to 3;
 	// Memory Flash addresses one of the sixteen cells of its 4×4 board; One Move
@@ -314,6 +315,8 @@ func (s *service) completeSession(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case rules == "chain@2":
 		limit = chainMaxActions
+	case rules == "color-merge@2":
+		limit = colorMergeMaxActions
 	case strings.HasPrefix(rules, "dont-touch@") && rules != "dont-touch@1":
 		limit = dontTouchMaxActions
 	}

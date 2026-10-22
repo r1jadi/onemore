@@ -38,15 +38,17 @@ import {
  *   - a score is never shown as verified before it is;
  *   - a guest's run is shown as a guest's run, not quietly ranked;
  *   - a failed submission keeps the run and can be retried.
+ *   - the run keeps dealing past the retired forty-eight-slide deck, and only a
+ *     locked board ends it.
  */
 
 function sessionPayload(overrides: Record<string, unknown> = {}) {
   return {
     id: "99999999-1111-4111-8111-999999999999",
     gameSlug: "color-merge",
-    rulesVersion: "color-merge@1",
+    rulesVersion: "color-merge@2",
     seed: "1",
-    tileCount: 48,
+    tileCount: 4096,
     startedAt: "2026-10-22T12:00:00.000Z",
     expiresAt: "2026-10-22T14:00:00.000Z",
     ranked: true,
@@ -58,10 +60,10 @@ function resultPayload(overrides: Record<string, unknown> = {}) {
   return {
     sessionId: "99999999-1111-4111-8111-999999999999",
     gameSlug: "color-merge",
-    // Deliberately not the client's 272: the screen must show the verified number.
+    // Deliberately not the client's 468: the screen must show the verified number.
     score: 400,
     clearedColumns: 0,
-    tilesPlaced: COLOR_MERGE_SLIDES,
+    tilesPlaced: RUN.length,
     durationMs: 62000,
     ranked: true,
     recordedAt: "2026-10-22T12:01:00.000Z",
@@ -133,11 +135,11 @@ const KEYS: Record<ColorMergeDirection, string> = {
 };
 
 /**
- * Seed 1's deck line, played the way a screen test can play it: the first
+ * Seed 1's endless line, played the way a screen test can play it: the first
  * direction that changes the board, in the order down, left, right, up. The run
- * ends when all forty-eight slides are played.
+ * ends when the board locks — sixty-four slides in, well past the retired deck.
  */
-function deckLine(): ColorMergeDirection[] {
+function runLine(): ColorMergeDirection[] {
   const order: ColorMergeDirection[] = [DOWN, LEFT, RIGHT, UP];
   const moves: ColorMergeDirection[] = [];
   let current = createRun("1");
@@ -150,7 +152,7 @@ function deckLine(): ColorMergeDirection[] {
   return moves;
 }
 
-const DECK = deckLine();
+const RUN = runLine();
 
 /** The wrapper that owns the keyboard controls. */
 function boardControls() {
@@ -175,9 +177,38 @@ function swipe(el: HTMLElement, fromX: number, fromY: number, toX: number, toY: 
   fireEvent(el, new MouseEvent("pointerup", { bubbles: true, clientX: toX, clientY: toY }));
 }
 
-/** Plays the whole deck through the keyboard and waits for verification. */
-async function playDeck() {
-  for (const direction of DECK) press(direction);
+/**
+ * A touch gesture that starts on one element and lifts on another, the way a
+ * finger leaves the grid when it swipes off its edge. Pointer capture is what
+ * delivers the release back to the board in a real browser; this shapes the two
+ * events the handler actually receives.
+ */
+function touchSwipe(
+  from: HTMLElement,
+  to: HTMLElement,
+  fromX: number,
+  fromY: number,
+  toX: number,
+  toY: number,
+) {
+  const down = new MouseEvent("pointerdown", {
+    bubbles: true,
+    clientX: fromX,
+    clientY: fromY,
+  });
+  Object.defineProperty(down, "pointerId", { value: 9 });
+  Object.defineProperty(down, "pointerType", { value: "touch" });
+  fireEvent(from, down);
+
+  const up = new MouseEvent("pointerup", { bubbles: true, clientX: toX, clientY: toY });
+  Object.defineProperty(up, "pointerId", { value: 9 });
+  Object.defineProperty(up, "pointerType", { value: "touch" });
+  fireEvent(to, up);
+}
+
+/** Plays the whole run through the keyboard and waits for verification. */
+async function playRun() {
+  for (const direction of RUN) press(direction);
   await screen.findByRole("button", { name: /play again/i });
 }
 
@@ -226,7 +257,7 @@ describe("starting a run", () => {
     const start = spy.mock.calls.find((call) => String(call[0]).endsWith("/api/v1/sessions"));
     expect(JSON.parse(String(start?.[1]?.body ?? "{}"))).toEqual({
       gameSlug: "color-merge",
-      rulesVersion: "color-merge@1",
+      rulesVersion: "color-merge@2",
       client: "web/1.0",
     });
   });
@@ -237,13 +268,13 @@ describe("starting a run", () => {
 
     expect(await screen.findByRole("heading", { name: "Merge the shades" })).toBeInTheDocument();
     expect(screen.getByText(/Two equal colours become the next shade/)).toBeInTheDocument();
-    expect(screen.getByText(/Forty-eight slides/)).toBeInTheDocument();
+    expect(screen.getByText(/No final slide/)).toBeInTheDocument();
     expect(screen.getByText("Signed in: this run can be ranked")).toBeInTheDocument();
     expect(screen.queryByRole("grid")).not.toBeInTheDocument();
 
     await startRun();
 
-    expect(screen.getByRole("grid", { name: /0 of 48 slides/ })).toBeInTheDocument();
+    expect(screen.getByRole("grid", { name: /0 slides played/ })).toBeInTheDocument();
     // Seed 1 opens with two shade-1 tiles on the last row, side by side.
     expect(screen.getByRole("gridcell", { name: "Row 4 column 1, 2" })).toBeInTheDocument();
     expect(screen.getByRole("gridcell", { name: "Row 4 column 2, 2" })).toBeInTheDocument();
@@ -295,7 +326,7 @@ describe("sliding the board", () => {
     // The two 2s merge into a 4 — the tile that was created is the score.
     expect(screen.getByRole("gridcell", { name: "Row 4 column 1, 4" })).toBeInTheDocument();
     expect(screen.getByText("Score").closest("dl")?.querySelector("dd")?.textContent).toBe("4");
-    expect(screen.getByText("Slide 1/48")).toBeInTheDocument();
+    expect(screen.getByText("Slide 1")).toBeInTheDocument();
     expect(screen.queryByText(/saved/i)).not.toBeInTheDocument();
   });
 
@@ -306,7 +337,7 @@ describe("sliding the board", () => {
 
     fireEvent.keyDown(boardControls(), { key: "a" });
 
-    expect(screen.getByText("Slide 1/48")).toBeInTheDocument();
+    expect(screen.getByText("Slide 1")).toBeInTheDocument();
   });
 
   it("does not record or score a slide that cannot move the board", async () => {
@@ -318,7 +349,7 @@ describe("sliding the board", () => {
     expect(screen.getByRole("button", { name: "Slide down" })).toBeDisabled();
     press(DOWN);
 
-    expect(screen.getByText("Slide 0/48")).toBeInTheDocument();
+    expect(screen.getByText("Slide 0")).toBeInTheDocument();
     expect(screen.getByText("Score").closest("dl")?.querySelector("dd")?.textContent).toBe("0");
     expect(spy.mock.calls.some((call) => String(call[0]).includes("/complete"))).toBe(false);
   });
@@ -335,7 +366,7 @@ describe("sliding the board", () => {
     }
 
     fireEvent.click(screen.getByRole("button", { name: "Slide left" }));
-    expect(screen.getByText("Slide 1/48")).toBeInTheDocument();
+    expect(screen.getByText("Slide 1")).toBeInTheDocument();
   });
 
   it("keeps the arrow keys working after a d-pad press disables its own button", async () => {
@@ -353,7 +384,7 @@ describe("sliding the board", () => {
     expect(document.activeElement).toBe(boardControls());
 
     press(RIGHT);
-    expect(screen.getByText("Slide 2/48")).toBeInTheDocument();
+    expect(screen.getByText("Slide 2")).toBeInTheDocument();
   });
 
   it("slides on a swipe", async () => {
@@ -365,7 +396,7 @@ describe("sliding the board", () => {
     // dispatched as a pointer event — the same shape React hands the handler.
     swipe(screen.getByRole("grid"), 200, 300, 80, 302);
 
-    expect(screen.getByText("Slide 1/48")).toBeInTheDocument();
+    expect(screen.getByText("Slide 1")).toBeInTheDocument();
     // A leftward swipe merges the opening pair, which is the left move.
     expect(screen.getByRole("gridcell", { name: "Row 4 column 1, 4" })).toBeInTheDocument();
   });
@@ -377,37 +408,95 @@ describe("sliding the board", () => {
 
     swipe(screen.getByRole("grid"), 200, 300, 205, 306);
 
-    expect(screen.getByText("Slide 0/48")).toBeInTheDocument();
+    expect(screen.getByText("Slide 0")).toBeInTheDocument();
+  });
+
+  it("takes over the gesture from the browser, so a finger swipe is not a scroll", async () => {
+    mockPlayback();
+    await renderRuntime();
+    await startRun();
+
+    // Without `touch-action: none`, a touch drag is claimed by panning: the
+    // pointer is cancelled before release and the board never sees the swipe.
+    // (jsdom does not serialise the property, so it is read off the declaration.)
+    expect(screen.getByRole("grid").style.touchAction).toBe("none");
+  });
+
+  it("swipes with a finger that lifts after leaving the board", async () => {
+    mockPlayback();
+    await renderRuntime();
+    await startRun();
+
+    const grid = screen.getByRole("grid");
+    const cell = screen.getByRole("gridcell", { name: "Row 4 column 1, 2" });
+    touchSwipe(cell, grid, 200, 300, 80, 302);
+
+    expect(screen.getByText("Slide 1")).toBeInTheDocument();
+    // The opening pair merged into the 4 at the left wall.
+    expect(screen.getByRole("gridcell", { name: "Row 4 column 1, 4" })).toBeInTheDocument();
+  });
+
+  it("swipes up as well as sideways", async () => {
+    mockPlayback();
+    await renderRuntime();
+    await startRun();
+
+    swipe(screen.getByRole("grid"), 200, 300, 202, 150);
+
+    expect(screen.getByText("Slide 1")).toBeInTheDocument();
+    // The pair rose to the top row, and the slide dealt one tile beside it.
+    expect(screen.getByRole("gridcell", { name: "Row 1 column 1, 2" })).toBeInTheDocument();
+    expect(screen.getByRole("gridcell", { name: "Row 1 column 2, 2" })).toBeInTheDocument();
+    expect(screen.getByRole("gridcell", { name: "Row 4 column 1, empty" })).toBeInTheDocument();
   });
 });
 
 describe("finishing a run", () => {
-  it("ends after the deck's slides and submits them in order", async () => {
+  it("plays past the old deck, ends on a locked board, and submits every slide", async () => {
     const spy = mockPlayback();
     await renderRuntime();
     await startRun();
-    await playDeck();
+    expect(RUN.length).toBeGreaterThan(COLOR_MERGE_SLIDES);
+    await playRun();
 
-    expect(screen.getByText("Every slide played")).toBeInTheDocument();
-    // The verified 400, not the 272 the board accumulated.
+    expect(screen.getByText("The board locked")).toBeInTheDocument();
+    // The verified 400, not the 468 the board accumulated.
     expect(screen.getByText("400")).toBeInTheDocument();
-    expect(screen.getByText("48 slides, best tile 32.")).toBeInTheDocument();
+    expect(screen.getByText(`${RUN.length} slides, best tile 64.`)).toBeInTheDocument();
     expect(screen.getByText("512")).toBeInTheDocument(); // personal best
     expect(screen.getByText("#3")).toBeInTheDocument(); // rank
     expect(screen.getByText(/Verified by replaying your slides on the server/)).toBeInTheDocument();
 
     const completion = spy.mock.calls.find((call) => String(call[0]).includes("/complete"));
     const body = JSON.parse(String(completion?.[1]?.body ?? "{}"));
-    expect(body.progress.actions).toEqual(DECK);
-    expect(body.progress.rulesVersion).toBe("color-merge@1");
-    expect(body.score).toBe(272);
+    expect(body.progress.actions).toEqual(RUN);
+    expect(body.progress.actions).toHaveLength(64);
+    expect(body.progress.rulesVersion).toBe("color-merge@2");
+    expect(body.score).toBe(468);
+  });
+
+  it("shows the spawn ramp climbing while the run goes on", async () => {
+    mockPlayback();
+    await renderRuntime();
+    await startRun();
+
+    // Spawn three is the next tile: a ten percent chance it arrives promoted,
+    // and at spawn three a promoted tile is still a 4.
+    expect(screen.getByText(/10% chance it arrives as a 4/)).toBeInTheDocument();
+
+    for (const direction of RUN.slice(0, 3)) press(direction);
+
+    // Three slides on, the chance has risen: the board is being squeezed even
+    // while the tiles themselves are still cheap.
+    expect(screen.getByText(/11% chance it arrives as a 4/)).toBeInTheDocument();
+    expect(screen.getByText("Slide 3")).toBeInTheDocument();
   });
 
   it("starts a fresh run from the end-of-run screen, rules first", async () => {
     const spy = mockPlayback();
     await renderRuntime();
     await startRun();
-    await playDeck();
+    await playRun();
 
     fireEvent.click(screen.getByRole("button", { name: /play again/i }));
 
@@ -429,7 +518,7 @@ describe("finishing a run", () => {
     expect(await screen.findByText("Guest run: verified, but not ranked")).toBeInTheDocument();
 
     await startRun();
-    await playDeck();
+    await playRun();
 
     expect(
       screen.getByText(/This was a guest run, so it is not on the leaderboard\./),
@@ -458,9 +547,9 @@ describe("finishing a run", () => {
 
     await renderRuntime();
     await startRun();
-    for (const direction of DECK.slice(0, -1)) press(direction);
+    for (const direction of RUN.slice(0, -1)) press(direction);
     // The last slide ends the run; verification is attempted once and refused.
-    press(DECK[DECK.length - 1]);
+    press(RUN[RUN.length - 1]);
 
     await screen.findByText("Your run was not verified");
     expect(
@@ -500,7 +589,7 @@ describe("finishing a run", () => {
     const spy = mockPlayback();
     await renderRuntime();
     await startRun();
-    await playDeck();
+    await playRun();
 
     const completion = spy.mock.calls.find((call) => String(call[0]).includes("/complete"));
     const headers = new Headers(completion?.[1]?.headers);

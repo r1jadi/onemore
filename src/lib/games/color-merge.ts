@@ -3,14 +3,15 @@
  *
  * This module is the *client's* copy of the rules. The authority is the database:
  * `public.complete_color_merge_run` in
- * `supabase/migrations/20261022120000_color_merge_sessions.sql` replays the
+ * `supabase/migrations/20261028120000_endless_color_merge.sql` replays the
  * submitted slide list from the session's seed and derives the score itself. Two
  * copies of one ruleset is a real risk, so the copy is pinned in three ways:
  *
  *   - **The rules version is data.** A session carries the version it was started
- *     under (`color-merge@1`), the server refuses to verify a version it does not
- *     implement, and this module declares the same string. A change to the rules
- *     is a change to the version, not an edit in place.
+ *     under (`color-merge@2`), the server refuses to verify a version it does not
+ *     implement, and this module declares the same string. The server still
+ *     verifies the retired finite `color-merge@1` runs a session may have pinned.
+ *     A change to the rules is a change to the version, not an edit in place.
  *   - **The state machine is total and pure.** `slide` takes a run and a
  *     direction and returns a run — no clock, no randomness, no I/O — so the same
  *     inputs produce the same run on both sides.
@@ -27,28 +28,40 @@
  * Storage rule: nothing here is persisted. A run lives in React state for as long
  * as the screen is open; losing it costs the player one run and never a score,
  * because a score only exists once the server has verified it.
+ *
+ * Endless rule: there is no deck. A run ends only when the board locks — every
+ * cell full and no two neighbours equal — or at the representable submission
+ * bound. Difficulty is the spawn ramp: as slides go on, a dealt tile is likelier
+ * to arrive already promoted, and the shade it arrives at grows without cap, so
+ * the board fills with tiles that are harder to pair and the next lock comes
+ * closer. The ramp is a pure function of the spawn index, mirrored by the
+ * verifier.
  */
 
 /** The `runtime` value the catalogue must carry for these rules to play a game. */
 export const COLOR_MERGE_RUNTIME = "color-merge";
 
 /** The rules the server can verify. Sent with every run and pinned to a session. */
-export const COLOR_MERGE_RULES_VERSION = "color-merge@1";
+export const COLOR_MERGE_RULES_VERSION = "color-merge@2";
 
 /** The board: a 4×4 grid, like the game it borrows its slide from. */
 export const COLOR_MERGE_SIZE = 4;
 export const COLOR_MERGE_CELLS = COLOR_MERGE_SIZE * COLOR_MERGE_SIZE;
 
 /**
- * The deck: every run gets the same forty-eight slides.
+ * The retired deck: `color-merge@1` ended after forty-eight slides.
  *
- * A 2048-style board can be kept alive indefinitely by a good player, and a run
- * that never ends cannot be compared to another. The deck is the rule that ends
- * it — after the last slide the board locks, whatever it looks like — so two
- * scores always measure the same number of moves. A board that runs out of legal
- * moves ends earlier, which is the other way a run stops.
+ * The constant is kept because the legacy verifier still counts it and the
+ * pinned vectors still measure it; a new run has no deck and never consults it.
  */
 export const COLOR_MERGE_SLIDES = 48;
+
+/**
+ * The most slides one submission may carry. This bounds a request, not a run:
+ * an endless board has no complete length, and this is far past the point where
+ * a session is still open.
+ */
+export const COLOR_MERGE_MAX_SLIDES = 4096;
 
 /** The board opens with two tiles, drawn from the seed like every later one. */
 export const COLOR_MERGE_OPENING_TILES = 2;
@@ -76,10 +89,12 @@ export const COLOR_MERGE_DIRECTIONS: readonly ColorMergeDirection[] = [
  * Why a run is over.
  *
  * `locked` — the board has no empty cell and no two neighbours that match, so no
- * slide can change it. `deck` — the forty-eighth slide was played. `null` while
- * the run is live.
+ * slide can change it. `limit` — the submission bound was reached; a request
+ * ceiling, not a final slide. `null` while the run is live.
+ *
+ * `deck` belonged to `color-merge@1` and is never produced by these rules.
  */
-export type ColorMergeEndReason = "locked" | "deck" | null;
+export type ColorMergeEndReason = "locked" | "limit" | "deck" | null;
 
 export type ColorMergeOutcome = "playing" | "over";
 
@@ -117,10 +132,16 @@ const LCG_INCREMENT = 1013904223n;
 // produce a constant sequence; mirrored so both sides treat a degenerate seed the
 // same way.
 const ZERO_STATE_FALLBACK = 2654435769n;
-// A tile is a shade with an occasional head start: one draw in ten opens at
-// shade two instead of shade one, which is what keeps the board from being a
-// uniform slog.
-const SHADE_TWO_ONE_IN = 10n;
+// The spawn ramp. Spawn `k` promotes a tile with a growing chance, and the shade
+// it arrives at climbs without cap: the first hundred and twenty spawns can only
+// promote to shade two, the next hundred and twenty to shade three, and so on.
+// The chance rises one point every five spawns from ten to sixty. The board is
+// what the ramp tightens: a promoted tile is harder to pair, so the space a run
+// can keep free shrinks as the slides go on.
+const PROMOTION_BASE = 10;
+const PROMOTION_PER_SPAWN = 5;
+const PROMOTION_MAX = 60;
+const PROMOTED_SHADE_SPAN = 120;
 
 function initialState(seed: string | number | bigint): bigint {
   const value = toBigInt(seed);
@@ -266,7 +287,7 @@ export function slideGain(board: readonly number[], direction: ColorMergeDirecti
 /** Whether a direction would change the board at all. */
 export function canSlide(run: ColorMergeRun, direction: ColorMergeDirection): boolean {
   if (run.outcome !== "playing") return false;
-  if (run.moves.length >= COLOR_MERGE_SLIDES) return false;
+  if (run.moves.length >= COLOR_MERGE_MAX_SLIDES) return false;
   if (!isDirection(direction)) return false;
   return !sameBoard(slideBoard(run.board, direction), run.board);
 }
@@ -306,6 +327,35 @@ export function isDirection(value: number): value is ColorMergeDirection {
 }
 
 /**
+ * How likely a spawn is to arrive promoted, as a whole percentage.
+ *
+ * Spawn one is 10%, matching the retired rules' opening feel, and the chance
+ * rises one point every five spawns to a 60% ceiling. The ceiling is what makes
+ * the ramp readable; it is not where difficulty stops, because the promoted
+ * shade keeps climbing.
+ */
+export function spawnPromotionPercent(index: number): number {
+  requireSpawnIndex(index);
+  return Math.min(PROMOTION_MAX, PROMOTION_BASE + Math.floor(index / PROMOTION_PER_SPAWN));
+}
+
+/**
+ * The shade a promoted spawn arrives at. It climbs by one every 120 spawns and
+ * has no cap, so the board keeps receiving larger tiles for as long as a run can
+ * last; a tile that cannot pair is space the player never gets back.
+ */
+export function spawnPromotedShade(index: number): number {
+  requireSpawnIndex(index);
+  return 2 + Math.floor(index / PROMOTED_SHADE_SPAN);
+}
+
+function requireSpawnIndex(index: number): void {
+  if (!Number.isInteger(index) || index < 1) {
+    throw new RangeError("a Color Merge spawn index starts at one");
+  }
+}
+
+/**
  * The board after spawn number `index` (1-based).
  *
  * Spawn `k` is a pure function of the seed and `k`: the generator is advanced `k`
@@ -313,6 +363,9 @@ export function isDirection(value: number): value is ColorMergeDirection {
  * reproducible) and once more to decide the shade. Keying the draw to `k` rather
  * than to a mutable generator means the verifier can reach spawn 20 without
  * replaying nineteen spawns, and the client cannot drift by one draw.
+ *
+ * The shade is the ramp: a spawn is promoted when the draw falls inside the
+ * spawn's promotion percentage, and the promoted shade grows with the index.
  *
  * A board with no empty cell comes back unchanged: a full board has nowhere to
  * put a tile, and that is a fact about the board rather than an error.
@@ -322,9 +375,7 @@ export function spawnBoard(
   index: number,
   board: readonly number[],
 ): number[] {
-  if (!Number.isInteger(index) || index < 1) {
-    throw new RangeError("a Color Merge spawn index starts at one");
-  }
+  requireSpawnIndex(index);
   const empties = board.flatMap((shade, cell) => (shade === 0 ? [cell] : []));
   if (empties.length === 0) return [...board];
 
@@ -333,7 +384,8 @@ export function spawnBoard(
 
   const cell = empties[Number(state % BigInt(empties.length))];
   const next = [...board];
-  next[cell] = advance(state) % SHADE_TWO_ONE_IN === 0n ? 2 : 1;
+  const draw = advance(state) % 100n;
+  next[cell] = draw < BigInt(spawnPromotionPercent(index)) ? spawnPromotedShade(index) : 1;
   return next;
 }
 
@@ -351,7 +403,7 @@ export function openingBoard(seed: string | number | bigint): number[] {
   return board;
 }
 
-/** A fresh run at the start of the deck. */
+/** A fresh run at the start of the board. */
 export function createRun(seed: string | number | bigint): ColorMergeRun {
   return {
     seed: toBigInt(seed).toString(),
@@ -389,17 +441,17 @@ export function slide(run: ColorMergeRun, direction: ColorMergeDirection): Color
   const moves = [...run.moves, direction];
   const score = run.score + slideGain(run.board, direction);
 
-  // The last slide of the deck ends the run before it would spawn: there is no
-  // next move to make with the tile, so dealing one would only change the board
-  // that gets displayed after the run is over.
-  if (moves.length >= COLOR_MERGE_SLIDES) {
+  // The submission bound ends the run before it would spawn: there is no next
+  // move to make with the tile, so dealing one would only change the board that
+  // gets displayed after the run is over. This is a request ceiling, not a level.
+  if (moves.length >= COLOR_MERGE_MAX_SLIDES) {
     return {
       ...run,
       board: moved,
       moves,
       score,
       outcome: "over",
-      endReason: "deck",
+      endReason: "limit",
     };
   }
 
@@ -435,15 +487,24 @@ export function submission(run: ColorMergeRun): ColorMergeSubmission {
   };
 }
 
-/** How far through the run the player is, for the progress readout. */
+/**
+ * How far through the run the player is, for the progress readout.
+ *
+ * There is no total because there is no deck. The last two fields are the ramp as
+ * it applies to the next tile: how likely it is to be promoted, and what it
+ * becomes when it is.
+ */
 export function progress(run: ColorMergeRun): {
   slides: number;
-  total: number;
   best: number;
+  promotionPercent: number;
+  promotedValue: number;
 } {
+  const nextSpawn = run.moves.length + COLOR_MERGE_OPENING_TILES + 1;
   return {
     slides: run.moves.length,
-    total: COLOR_MERGE_SLIDES,
     best: tileValue(bestShade(run.board)),
+    promotionPercent: spawnPromotionPercent(nextSpawn),
+    promotedValue: tileValue(spawnPromotedShade(nextSpawn)),
   };
 }
