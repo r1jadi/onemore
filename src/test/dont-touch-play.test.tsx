@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DontTouchRuntime } from "@/components/game/DontTouchRuntime";
 import { clearSession, signIn } from "@/lib/auth/session";
-import { DONT_TOUCH_ROWS, cellAt } from "@/lib/games/dont-touch";
+import { cellAt } from "@/lib/games/dont-touch";
 
 /**
  * Don't Touch the Black on screen.
@@ -27,7 +27,8 @@ import { DONT_TOUCH_ROWS, cellAt } from "@/lib/games/dont-touch";
  *   - only the row at the line is touchable, and a cleared tile is not touched
  *     twice;
  *   - a black tile ends the run, and the tap that ended it is submitted;
- *   - the deck's last row ends the run without a tap;
+ *   - there is no last row: the conveyor runs past the old twenty-row deck;
+ *   - the player can stop a run, and stopping keeps the whites cleared;
  *   - a score is never shown as verified before it is;
  *   - a failed submission keeps the run and can be retried.
  */
@@ -36,9 +37,9 @@ function sessionPayload(overrides: Record<string, unknown> = {}) {
   return {
     id: "11111111-2222-4333-8444-555555555555",
     gameSlug: "dont-touch-the-black",
-    rulesVersion: "dont-touch@1",
+    rulesVersion: "dont-touch@2",
     seed: "1",
-    tileCount: 60,
+    tileCount: 4095,
     startedAt: "2026-10-23T12:00:00.000Z",
     expiresAt: "2026-10-23T14:00:00.000Z",
     ranked: true,
@@ -137,7 +138,7 @@ function tile(row: number, lane: number) {
 }
 
 const WHITE_OPENING_TILE = cellAt(0, 2);
-const BLACK_OPENING_TILE = cellAt(0, 0);
+const BLACK_OPENING_TILE = cellAt(0, 1);
 
 afterEach(() => {
   vi.useRealTimers();
@@ -181,7 +182,7 @@ describe("starting a run", () => {
     const start = spy.mock.calls.find((call) => String(call[0]).endsWith("/api/v1/sessions"));
     expect(JSON.parse(String(start?.[1]?.body ?? "{}"))).toEqual({
       gameSlug: "dont-touch-the-black",
-      rulesVersion: "dont-touch@1",
+      rulesVersion: "dont-touch@2",
       client: "web/1.0",
     });
   });
@@ -194,14 +195,15 @@ describe("starting a run", () => {
       await screen.findByRole("heading", { name: "Tap white. Only white." }),
     ).toBeInTheDocument();
     expect(screen.getByText(/Never touch a black tile/)).toBeInTheDocument();
-    expect(screen.getByText(/Twenty rows/)).toBeInTheDocument();
+    expect(screen.getByText(/tightens the beat/)).toBeInTheDocument();
     expect(screen.getByText("Signed in: this run can be ranked")).toBeInTheDocument();
 
     await startRun();
 
-    expect(screen.getByText("Row 1/20")).toBeInTheDocument();
-    // Seed 1's opening row is black, black, white.
-    expect(tile(1, 1)).toHaveAccessibleName(/black/);
+    expect(screen.getByText("Row 1")).toBeInTheDocument();
+    expect(screen.getByText(/Black tiles: 25% of this row/)).toBeInTheDocument();
+    // Seed 1's opening row is white, black, white.
+    expect(tile(1, 1)).toHaveAccessibleName(/white/);
     expect(tile(1, 2)).toHaveAccessibleName(/black/);
     expect(tile(1, 3)).toHaveAccessibleName(/white/);
     expect(tile(1, 3)).toBeEnabled();
@@ -295,8 +297,8 @@ describe("tapping the row at the line", () => {
     await renderRuntime();
     await startRun();
 
-    fireEvent.keyDown(conveyor(), { key: "a" });
-    // Lane one of the opening row is black, so this is an ending, not a score.
+    fireEvent.keyDown(conveyor(), { key: "s" });
+    // Lane two of the opening row is black, so this is an ending, not a score.
     expect(await screen.findByText("You touched the black")).toBeInTheDocument();
   });
 
@@ -305,7 +307,7 @@ describe("tapping the row at the line", () => {
     await renderRuntime();
     await startRun();
 
-    fireEvent.click(tile(1, 1));
+    fireEvent.click(tile(1, 2));
 
     const finished = await screen.findByText("You touched the black");
     expect(finished).toBeInTheDocument();
@@ -313,7 +315,7 @@ describe("tapping the row at the line", () => {
     const completion = spy.mock.calls.find((call) => String(call[0]).includes("/complete"));
     const body = JSON.parse(String(completion?.[1]?.body ?? "{}"));
     expect(body.progress.actions).toEqual([BLACK_OPENING_TILE]);
-    expect(body.progress.rulesVersion).toBe("dont-touch@1");
+    expect(body.progress.rulesVersion).toBe("dont-touch@2");
     expect(body.score).toBe(0);
     // The verified number is the server's, not a local tally.
     expect(screen.getByText("990")).toBeInTheDocument();
@@ -325,7 +327,7 @@ describe("tapping the row at the line", () => {
     await startRun();
 
     fireEvent.click(tile(1, 3));
-    fireEvent.click(tile(1, 1));
+    fireEvent.click(tile(1, 2));
 
     await screen.findByText("You touched the black");
     const completion = spy.mock.calls.find((call) => String(call[0]).includes("/complete"));
@@ -335,52 +337,99 @@ describe("tapping the row at the line", () => {
   });
 });
 
-describe("the end of the deck", () => {
-  it("ends the run when the last row has passed", async () => {
-    const spy = mockPlayback({}, { score: 60, tilesPlaced: 6 });
-    await renderRuntime();
-    await screen.findByRole("button", { name: "Start run" });
-    // The session has arrived; from here the conveyor's clock is the only timer
-    // the test needs, so it is taken over and advanced rather than waited out.
-    vi.useFakeTimers();
-    fireEvent.click(screen.getByRole("button", { name: "Start run" }));
-
-    // Advance one row at a time: the next timer is scheduled by an effect after
-    // each render, so the clock has to give React a turn between them.
-    for (let row = 0; row < DONT_TOUCH_ROWS; row += 1) {
+describe("the endless conveyor", () => {
+  /**
+   * Moves the conveyor forward one row at a time. The next timer is scheduled by
+   * an effect after each render, so the clock has to give React a turn between
+   * rows rather than jumping straight to the end.
+   */
+  async function advance(rows: number) {
+    for (let row = 0; row < rows; row += 1) {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(1700);
       });
     }
+  }
+
+  /** Renders, takes over the clock, and presses Start. */
+  async function startOnFakeClock() {
+    await renderRuntime();
+    await screen.findByRole("button", { name: "Start run" });
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole("button", { name: "Start run" }));
+  }
+
+  it("keeps running past the old twenty-row deck", async () => {
+    const spy = mockPlayback();
+    await startOnFakeClock();
+
+    await advance(21);
+
+    // Row twenty-two exists, is at the line, and nothing has been submitted:
+    // the conveyor did not stop where the finite deck used to.
+    expect(screen.getByText("Row 22")).toBeInTheDocument();
+    expect(tile(22, 1)).toBeEnabled();
+    expect(spy.mock.calls.some((call) => String(call[0]).includes("/complete"))).toBe(false);
+  });
+
+  it("shows the black density rising with the rows", async () => {
+    mockPlayback();
+    await startOnFakeClock();
+
+    expect(screen.getByText(/Black tiles: 25% of this row/)).toBeInTheDocument();
+
+    await advance(10);
+
+    expect(screen.getByText("Row 11")).toBeInTheDocument();
+    expect(screen.getByText(/Black tiles: 26% of this row/)).toBeInTheDocument();
+  });
+
+  it("ends the run on a black tile deep into the conveyor", async () => {
+    const spy = mockPlayback();
+    await startOnFakeClock();
+
+    await advance(11);
+    // Seed 1's row twelve (cells 33-35) is white, white, black.
+    expect(tile(12, 3)).toHaveAccessibleName(/black/);
+    fireEvent.click(tile(12, 3));
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
 
-    expect(screen.getByText("Every row passed")).toBeInTheDocument();
+    expect(screen.getByText("You touched the black")).toBeInTheDocument();
+    const completion = spy.mock.calls.find((call) => String(call[0]).includes("/complete"));
+    const body = JSON.parse(String(completion?.[1]?.body ?? "{}"));
+    expect(body.progress.actions).toEqual([cellAt(11, 2)]);
+    expect(body.progress.rulesVersion).toBe("dont-touch@2");
+  });
+
+  it("lets the player stop a run and keeps the whites already cleared", async () => {
+    const spy = mockPlayback();
+    await renderRuntime();
+    await startRun();
+
+    fireEvent.click(tile(1, 3));
+    fireEvent.click(screen.getByRole("button", { name: "End run" }));
+
+    expect(await screen.findByText("Run ended")).toBeInTheDocument();
+    const completion = spy.mock.calls.find((call) => String(call[0]).includes("/complete"));
+    const body = JSON.parse(String(completion?.[1]?.body ?? "{}"));
+    expect(body.progress.actions).toEqual([WHITE_OPENING_TILE]);
+    expect(body.score).toBe(10);
+  });
+
+  it("submits a stopped run that cleared nothing, without inventing a score", async () => {
+    const spy = mockPlayback();
+    await renderRuntime();
+    await startRun();
+
+    fireEvent.click(screen.getByRole("button", { name: "End run" }));
+
+    expect(await screen.findByText("Run ended")).toBeInTheDocument();
     const completion = spy.mock.calls.find((call) => String(call[0]).includes("/complete"));
     const body = JSON.parse(String(completion?.[1]?.body ?? "{}"));
     expect(body.progress.actions).toEqual([]);
     expect(body.score).toBe(0);
-    expect(screen.getByText("60")).toBeInTheDocument();
-  });
-
-  it("stops accepting taps once the deck has passed", async () => {
-    mockPlayback();
-    await renderRuntime();
-    await screen.findByRole("button", { name: "Start run" });
-    vi.useFakeTimers();
-    fireEvent.click(screen.getByRole("button", { name: "Start run" }));
-
-    for (let row = 0; row < DONT_TOUCH_ROWS; row += 1) {
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1700);
-      });
-    }
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
-    });
-
-    expect(screen.queryByRole("button", { name: /^Row 1, lane 3/ })).not.toBeInTheDocument();
   });
 });
 
@@ -389,7 +438,7 @@ describe("after a run", () => {
     const spy = mockPlayback();
     await renderRuntime();
     await startRun();
-    fireEvent.click(tile(1, 1));
+    fireEvent.click(tile(1, 2));
     await screen.findByText("You touched the black");
 
     fireEvent.click(screen.getByRole("button", { name: /play again/i }));
@@ -413,7 +462,7 @@ describe("after a run", () => {
 
     await startRun();
     fireEvent.click(tile(1, 3));
-    fireEvent.click(tile(1, 1));
+    fireEvent.click(tile(1, 2));
     await screen.findByText("You touched the black");
 
     expect(
@@ -443,7 +492,7 @@ describe("after a run", () => {
 
     await renderRuntime();
     await startRun();
-    fireEvent.click(tile(1, 1));
+    fireEvent.click(tile(1, 2));
 
     await screen.findByText("Your run was not verified");
     expect(
@@ -482,7 +531,7 @@ describe("after a run", () => {
     const spy = mockPlayback();
     await renderRuntime();
     await startRun();
-    fireEvent.click(tile(1, 1));
+    fireEvent.click(tile(1, 2));
     await screen.findByText("You touched the black");
 
     const completion = spy.mock.calls.find((call) => String(call[0]).includes("/complete"));

@@ -1,16 +1,18 @@
 import { Link } from "@tanstack/react-router";
 import { Eye, Hand, Loader2, RotateCcw, ShieldCheck, Trophy, TriangleAlert } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ErrorState } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   DONT_TOUCH_LANES,
-  DONT_TOUCH_ROWS,
+  DONT_TOUCH_MAX_ROWS,
+  blackPercent,
   cellAt,
-  deck,
   progress,
+  rowAt,
+  rowWindow,
   type DontTouchRun,
 } from "@/lib/games/dont-touch";
 import {
@@ -26,8 +28,8 @@ import {
  * The conveyor is a view onto `useDontTouchRun`, which owns the whole lifecycle: a
  * session issued by the server, the deck dealt from its seed, and the score the
  * server derived from the submitted taps. The screen owns only the part the rules
- * cannot see — time. It decides which row is at the line and when the deck has
- * passed; it never decides what a tap is worth.
+ * cannot see — time. It decides which row is at the line; it never decides what a
+ * tap is worth.
  *
  * Three things the component refuses to do, because each would be a lie:
  *
@@ -40,13 +42,6 @@ import {
  *     the server's own message and a retry that re-sends the identical run, not a
  *     local "saved" that a reload would disprove.
  */
-
-/** How long the row at the line stays there, in milliseconds. */
-function rowWindow(step: number): number {
-  // The rows speed up as the run goes on: 1.6 seconds for the first, 0.75 for the
-  // last. The floor keeps the final rows hard rather than impossible.
-  return Math.max(750, 1600 - step * 45);
-}
 
 export function DontTouchRuntime({ slug, title }: { slug: string; title: string }) {
   const state = useDontTouchRun(slug);
@@ -106,8 +101,8 @@ export function DontTouchRuntime({ slug, title }: { slug: string; title: string 
   if (state.status === "playing" || state.status === "submitting") {
     return (
       <Conveyor
-        // A fresh conveyor per run: the deck always starts at row one, even when
-        // the next session deals the same seed.
+        // A fresh conveyor per run: it always starts at row one, even when the
+        // next session deals the same seed.
         key={state.session.id}
         run={state.run}
         session={state.session}
@@ -157,9 +152,6 @@ function Conveyor({
   const [started, setStarted] = useState(run.taps.length > 0);
   const [step, setStep] = useState(0);
   const boardRef = useRef<HTMLDivElement>(null);
-  // The deck is dealt once per seed: every step re-renders, and generating sixty
-  // cells on each of them would be work the rules already did.
-  const colours = useMemo(() => deck(run.seed), [run.seed]);
 
   // Pressing Start removes the button that had focus. Moving focus to the board
   // means a keyboard player lands on the lanes rather than at the top of the page.
@@ -180,17 +172,16 @@ function Conveyor({
     [accepting, onTap],
   );
 
-  // The clock. Each row gets its own window at the line; when the last one has
-  // had its window, the deck has passed and the run is finished. The timer is
-  // keyed on the step, so a tap — which does not advance the conveyor — cannot
-  // restart it.
+  // The clock. Each row gets its own window at the line; the conveyor never
+  // stops on its own. The one exception is the representable ceiling — a
+  // submission bound, not a level — where the run is ended and submitted rather
+  // than left to run past the cells the server can name.
   useEffect(() => {
     if (!started || !accepting) return;
-    if (step >= DONT_TOUCH_ROWS - 1) {
-      onFinish();
-      return;
-    }
-    const timer = window.setTimeout(() => setStep((current) => current + 1), rowWindow(step));
+    const timer = window.setTimeout(() => {
+      if (step + 1 >= DONT_TOUCH_MAX_ROWS) onFinish();
+      else setStep((current) => current + 1);
+    }, rowWindow(step));
     return () => window.clearTimeout(timer);
   }, [started, accepting, step, onFinish]);
 
@@ -231,8 +222,9 @@ function Conveyor({
               black tap ends the run on the spot.
             </p>
             <p>
-              <span className="font-medium text-foreground">Twenty rows</span>, and every row is
-              faster than the last. A white tile that passes is lost, not fatal — a black tap is.
+              <span className="font-medium text-foreground">No final row.</span> Every row tightens
+              the beat, and the longer you last the more of each row turns black. A white tile that
+              passes is lost, not fatal — a black tap is.
             </p>
           </div>
 
@@ -267,7 +259,8 @@ function Conveyor({
 
   const cleared = new Set(run.taps);
   const readout = progress(run);
-  const activeRow = Math.min(step, DONT_TOUCH_ROWS - 1);
+  const activeRow = step;
+  const blackShare = blackPercent(activeRow);
 
   return (
     <div
@@ -283,9 +276,7 @@ function Conveyor({
           <dd className="text-2xl font-semibold tabular">{run.score}</dd>
         </dl>
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <span className="tabular">
-            Row {activeRow + 1}/{DONT_TOUCH_ROWS}
-          </span>
+          <span className="tabular">Row {activeRow + 1}</span>
           <span className="tabular">{readout.cleared} cleared</span>
           {session.ranked ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-surface-2 px-2 py-1">
@@ -304,7 +295,7 @@ function Conveyor({
           : run.outcome === "over"
             ? run.endReason === "black"
               ? "You touched the black."
-              : "Every row passed."
+              : "Run ended."
             : "Tap the white tiles in the row at the line."}
       </p>
 
@@ -327,8 +318,11 @@ function Conveyor({
 
           {Array.from({ length: 5 }, (_, offset) => {
             const row = step + offset;
-            if (row >= DONT_TOUCH_ROWS) return null;
+            // At the representable ceiling there is no next row to name; the run
+            // ends on this tick, so the empty slots above the line are honest.
+            if (row >= DONT_TOUCH_MAX_ROWS) return null;
             const atLine = offset === 0;
+            const colours = rowAt(run.seed, row);
             return (
               <div
                 key={row}
@@ -337,7 +331,8 @@ function Conveyor({
               >
                 {Array.from({ length: DONT_TOUCH_LANES }, (_, lane) => {
                   const cell = cellAt(row, lane);
-                  const black = colours[cell];
+                  // `colours` is this row's three lanes, not the whole conveyor.
+                  const black = colours[lane];
                   const alreadyCleared = cleared.has(cell);
                   return (
                     <button
@@ -387,12 +382,18 @@ function Conveyor({
         ))}
       </div>
 
-      <p className="pt-2 text-center text-xs text-muted-foreground" aria-live="polite">
+      <div className="mx-auto flex w-full max-w-md justify-center pt-1">
+        <Button type="button" variant="ghost" size="sm" onClick={onFinish} disabled={!accepting}>
+          End run
+        </Button>
+      </div>
+
+      <p className="pt-1 text-center text-xs text-muted-foreground" aria-live="polite">
         {verifying
           ? "The taps you made are your score if the server agrees."
           : run.outcome === "over"
             ? "The run is over. Your result is on its way."
-            : `${readout.whites} white tiles in this deck. Black ends the run.`}
+            : `Black tiles: ${blackShare}% of this row. A black tap ends the run.`}
       </p>
     </div>
   );
@@ -441,7 +442,7 @@ function Finished({
           )}
         </div>
         <p className="text-sm text-muted-foreground">
-          {run.endReason === "black" ? "You touched the black" : "Every row passed"}
+          {run.endReason === "black" ? "You touched the black" : "Run ended"}
         </p>
         <p className="text-5xl font-semibold tabular">{result.score}</p>
         <p className="text-sm text-muted-foreground">

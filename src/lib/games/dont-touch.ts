@@ -3,27 +3,45 @@
  *
  * This module is the *client's* copy of the rules. The authority is the database:
  * `public.complete_dont_touch_run` in
- * `supabase/migrations/20261023120000_dont_touch_sessions.sql` replays the
+ * `supabase/migrations/20261027120000_endless_dont_touch.sql` replays the
  * submitted taps from the session's seed and derives the score itself. Two copies
  * of one ruleset is a real risk, so the copy is pinned in three ways:
  *
  *   - **The rules version is data.** A session carries the version it was started
- *     under (`dont-touch@1`), the server refuses to verify a version it does not
- *     implement, and this module declares the same string. A change to the rules
- *     is a change to the version, not an edit in place.
+ *     under (`dont-touch@2`), the server refuses to verify a version it does not
+ *     implement, and this module declares the same string. The server still
+ *     verifies the retired finite `dont-touch@1` runs that older sessions pinned.
  *   - **The state machine is total and pure.** `tap` takes a run and a cell and
  *     returns a run — no clock, no randomness, no I/O — so the same inputs produce
- *     the same run on both sides. The conveyor's speed lives in the screen, not in
- *     the rules: time decides when a tile can be touched, never what touching it
- *     is worth.
+ *     the same run on both sides. The conveyor's speed and the black density live
+ *     in `rowWindow` and `blackPercent`, which are also pure: time decides when a
+ *     row can be touched, never what touching it is worth.
  *   - **It is tested against the database's own numbers.** The vectors in
  *     `dont-touch.test.ts` are the ones `tests/security/rls_test.sql` asserts
- *     (seed 1's first rows, its whites and the score a run of them earns). See
- *     `docs/games/README.md`.
+ *     (seed 1's endless rows, a run that meets a black tile, a run that is
+ *     stopped). See `docs/games/README.md`.
  *
  * The client cannot invent a score even if this file is wrong: a wrong replay
  * produces a number the server's replay disagrees with, and the submission is
  * refused with `score_mismatch`.
+ *
+ * Endless rule: there is no final row. Rows rise forever; the row at the line is
+ * the only one that can be touched, and every white tile cleared scores ten
+ * points. A black tile ends the run on the spot. Two curves make it harder as the
+ * conveyor goes on:
+ *
+ *   - **Speed.** The window a row spends at the line starts at 1.6 s and falls to
+ *     0.7 s over the first twenty-one rows; after that it keeps easing toward
+ *     0.65 s, slowly but without ever stopping. There is no row at which the beat
+ *     becomes fixed.
+ *   - **Density.** The share of black tiles starts at 25% and rises by a
+ *     percentage point every ten rows to 45%. A row may be all black, which is a
+ *     row to let pass rather than a trap: missing whites is a lost opportunity,
+ *     not a loss.
+ *
+ * The player can also end a run deliberately (`finish`, the "End run" control).
+ * A stopped run is submitted with the whites it cleared; it does not need a black
+ * tap, because the score is what was cleared, and stopping cannot add to it.
  *
  * Storage rule: nothing here is persisted. A run lives in React state for as long
  * as the screen is open; losing it costs the player one run and never a score,
@@ -34,20 +52,22 @@
 export const DONT_TOUCH_RUNTIME = "dont-touch";
 
 /** The rules the server can verify. Sent with every run and pinned to a session. */
-export const DONT_TOUCH_RULES_VERSION = "dont-touch@1";
+export const DONT_TOUCH_RULES_VERSION = "dont-touch@2";
+
+/** The conveyor: three lanes per row, and a row for every step forward. */
+export const DONT_TOUCH_LANES = 3;
 
 /**
- * The deck: twenty rows of three lanes, dealt once, all at once.
+ * The most taps a submission may carry, and the cells those taps may address.
  *
- * A run is one pass of the deck. The deck is fixed in size so two scores always
- * measure the same board — a player cannot farm a lucky long run, and a short run
- * is a missed half of the same deck rather than a different game. Sixty cells is
- * also the most taps a submission can hold, which is the contract's existing
- * bound.
+ * These are request and replay bounds, not a final row: a run that reached them
+ * would have been played for many minutes, far past the point where a session is
+ * still open. `MAX_ROWS` rows × three lanes is the last full row a cell can name,
+ * and no run can tap a cell twice, so the two bounds are the same number.
  */
-export const DONT_TOUCH_ROWS = 20;
-export const DONT_TOUCH_LANES = 3;
-export const DONT_TOUCH_CELLS = DONT_TOUCH_ROWS * DONT_TOUCH_LANES;
+export const DONT_TOUCH_MAX_ROWS = 1365;
+export const DONT_TOUCH_MAX_CELLS = DONT_TOUCH_MAX_ROWS * DONT_TOUCH_LANES;
+export const DONT_TOUCH_MAX_ACTIONS = DONT_TOUCH_MAX_CELLS;
 
 /** A cleared white tile is worth ten points; a black one is worth nothing. */
 const TILE_SCORE = 10;
@@ -55,12 +75,13 @@ const TILE_SCORE = 10;
 // The generator, state for state as `complete_dont_touch_run` advances it: the
 // same 32-bit LCG the other games use, with the same zero-state fallback and the
 // same decimal-string seed handling, because a seed that differs by one bit
-// colours a different board.
+// colours a different conveyor.
 //
 // The colour is read from bits 16–17 rather than the low bits, and deliberately
 // so: this LCG's low bits cycle with a period of two to the power of the bit
 // width, and a colour read from them would repeat a fixed pattern regardless of
-// the seed. The higher bits have the full period, so each seed gets its own deck.
+// the seed. The higher bits have the full period, so each seed gets its own
+// conveyor.
 const SEED_MODULUS = 4294967296n;
 const LCG_MULTIPLIER = 1664525n;
 const LCG_INCREMENT = 1013904223n;
@@ -69,9 +90,24 @@ const LCG_INCREMENT = 1013904223n;
 // same way.
 const ZERO_STATE_FALLBACK = 2654435769n;
 const COLOUR_SHIFT = 16n;
-// One cell in four is black. A quarter is enough that a careless swipe finds one
-// and rare enough that a careful player can usually see a safe lane.
-const BLACK_ONE_IN = 4n;
+const PERCENT = 100n;
+
+// The black-density ramp: one percentage point every ten rows, from 25% to 45%.
+// 45% is where a row still usually has a white tile to take (55% of cells are
+// white, and an all-black row is simply let pass), while missing a white hurts.
+const BLACK_PERCENT_START = 25;
+const BLACK_PERCENT_STEP_ROWS = 10;
+const BLACK_PERCENT_MAX = 45;
+
+// The speed curve. The first twenty-one rows are linear; after that the window
+// eases toward its 650 ms floor without reaching it, so the beat never becomes
+// static. The floor is a readability limit: below it, three lanes cannot be
+// scanned fairly on a phone.
+const WINDOW_START_MS = 1600;
+const WINDOW_STEP_MS = 45;
+const WINDOW_LINEAR_ROWS = 20;
+const WINDOW_EASE_MS = 650;
+const WINDOW_EASE_SPAN = 7500;
 
 function initialState(seed: string | number | bigint): bigint {
   const value = toBigInt(seed);
@@ -99,29 +135,77 @@ function advance(state: bigint): bigint {
 }
 
 /**
- * The deck's colours, in board order: twenty rows, lane by lane.
+ * The share of black tiles in a row, as a whole percentage.
  *
- * Cell `k` is drawn after `k + 1` advances of the generator, so the first cell is
- * the same one the verifier reads and neither copy can drift by one draw. The
- * whole deck is a pure function of the seed, so the screen can show the rows that
- * are coming without keeping a generator in step.
+ * Row 0 is 25%; every ten rows adds one point, capped at 45% from row 200 on.
+ * Black density is what keeps the game getting harder after the row window has
+ * reached its readable floor.
  */
-export function deck(seed: string | number | bigint): boolean[] {
-  let state = initialState(seed);
-  const cells: boolean[] = [];
-  for (let cell = 0; cell < DONT_TOUCH_CELLS; cell += 1) {
-    state = advance(state);
-    cells.push((state >> COLOUR_SHIFT) % BLACK_ONE_IN === 0n);
-  }
-  return cells;
+export function blackPercent(row: number): number {
+  requireRow(row, "a row");
+  return Math.min(
+    BLACK_PERCENT_MAX,
+    BLACK_PERCENT_START + Math.floor(row / BLACK_PERCENT_STEP_ROWS),
+  );
 }
 
-/** Whether one cell is black. Throws for a cell that is not on the deck. */
-export function isBlack(seed: string | number | bigint, cell: number): boolean {
-  if (!Number.isInteger(cell) || cell < 0 || cell >= DONT_TOUCH_CELLS) {
-    throw new RangeError(`a Don't Touch the Black cell is 0 to ${DONT_TOUCH_CELLS - 1}`);
+/**
+ * How long a row stays at the line, in milliseconds.
+ *
+ * Row 0 is 1.6 s; the first twenty-one rows shorten linearly to 0.7 s, then the
+ * window eases toward 0.65 s. The curve is deterministic and non-increasing, so
+ * the conveyor never slows down and two players at the same row face the same
+ * beat.
+ */
+export function rowWindow(row: number): number {
+  requireRow(row, "a row");
+  if (row <= WINDOW_LINEAR_ROWS) {
+    return WINDOW_START_MS - WINDOW_STEP_MS * row;
   }
-  return deck(seed)[cell];
+  const beyond = row - WINDOW_LINEAR_ROWS;
+  return Math.round(WINDOW_EASE_MS + WINDOW_EASE_SPAN / (beyond + 150));
+}
+
+/**
+ * Whether cell `cell` is black on seed `seed`'s conveyor.
+ *
+ * Cell k is drawn after k + 1 advances of the generator, so the first cell is the
+ * same one the verifier reads and neither copy can drift by one draw. The colour
+ * is the state's high bits modulo 100 against the row's black percentage, which
+ * makes the density a property of the row rather than of the draw.
+ */
+export function isBlack(seed: string | number | bigint, cell: number): boolean {
+  requireCell(cell);
+  let state = initialState(seed);
+  for (let drawn = 0; drawn <= cell; drawn += 1) {
+    state = advance(state);
+  }
+  return Number((state >> COLOUR_SHIFT) % PERCENT) < blackPercent(rowOf(cell));
+}
+
+/**
+ * One row's three colours, in lane order.
+ *
+ * The runtime asks for the five rows it shows on every step, so this reads the
+ * generator once per row rather than three times. It is still a pure function of
+ * the seed and the row.
+ */
+export function rowAt(seed: string | number | bigint, row: number): boolean[] {
+  requireRow(row, "a row");
+  if (row >= DONT_TOUCH_MAX_ROWS) {
+    throw new RangeError(`a Don't Touch the Black row is 0 to ${DONT_TOUCH_MAX_ROWS - 1}`);
+  }
+  let state = initialState(seed);
+  for (let drawn = 0; drawn < row * DONT_TOUCH_LANES; drawn += 1) {
+    state = advance(state);
+  }
+  const percent = blackPercent(row);
+  const colours: boolean[] = [];
+  for (let lane = 0; lane < DONT_TOUCH_LANES; lane += 1) {
+    state = advance(state);
+    colours.push(Number((state >> COLOUR_SHIFT) % PERCENT) < percent);
+  }
+  return colours;
 }
 
 /** The row a cell belongs to. */
@@ -139,14 +223,26 @@ export function cellAt(row: number, lane: number): number {
   return row * DONT_TOUCH_LANES + lane;
 }
 
+function requireRow(row: number, what: string): void {
+  if (!Number.isInteger(row) || row < 0) {
+    throw new RangeError(`${what} must be a whole number of zero or more`);
+  }
+}
+
+function requireCell(cell: number): void {
+  if (!Number.isInteger(cell) || cell < 0 || cell >= DONT_TOUCH_MAX_CELLS) {
+    throw new RangeError(`a Don't Touch the Black cell is 0 to ${DONT_TOUCH_MAX_CELLS - 1}`);
+  }
+}
+
 /**
  * How a run ended.
  *
- * `black` — a black tile was touched, which is the ordinary ending. `deck` — every
- * row of the deck passed without a black tap, which is the run a careful player
- * gets. `null` while the run is live.
+ * `black` — a black tile was touched, which is the ordinary ending. `stop` — the
+ * player ended the run deliberately; the whites already cleared still count.
+ * `null` while the run is live.
  */
-export type DontTouchEndReason = "black" | "deck" | null;
+export type DontTouchEndReason = "black" | "stop" | null;
 
 export type DontTouchOutcome = "playing" | "over";
 
@@ -168,7 +264,7 @@ export type DontTouchRun = {
   readonly endReason: DontTouchEndReason;
 };
 
-/** A fresh run at the top of the deck. */
+/** A fresh run at the top of the conveyor. */
 export function createRun(seed: string | number | bigint): DontTouchRun {
   return {
     seed: toBigInt(seed).toString(),
@@ -182,16 +278,16 @@ export function createRun(seed: string | number | bigint): DontTouchRun {
 }
 
 /**
- * Whether a tap is playable: the run is live, the cell is on the deck, and it has
- * not been tapped already.
+ * Whether a tap is playable: the run is live and the cell is on the conveyor and
+ * has not been touched already.
  *
  * The screen calls this to decide whether a tile is pressable, so a tile that is
- * out of reach or already cleared is never offered — and `tap` checks it again,
+ * above the line or already cleared is never offered — and `tap` checks it again,
  * because a keyboard or programmatic path must not be able to make one either.
  */
 export function canTap(run: DontTouchRun, cell: number): boolean {
   if (run.outcome !== "playing") return false;
-  if (!Number.isInteger(cell) || cell < 0 || cell >= DONT_TOUCH_CELLS) return false;
+  if (!Number.isInteger(cell) || cell < 0 || cell >= DONT_TOUCH_MAX_CELLS) return false;
   return !run.taps.includes(cell);
 }
 
@@ -199,11 +295,11 @@ export function canTap(run: DontTouchRun, cell: number): boolean {
  * Taps a cell and returns the resulting run.
  *
  * A white tile clears and scores ten points. A black tile ends the run; the tap
- * that ended it is still part of the run and is submitted, the way Stack 10's
- * overflowing tile is, so the verifier can replay the ending rather than be told
- * about it. A tap that is impossible — a cell off the deck, or one already
- * tapped — is not a tap: the run comes back unchanged, which keeps this function
- * total and lets a stray event one frame after the run ended be harmless.
+ * that ended it is still part of the run and is submitted, the way the stopping
+ * tap of a Chain run is. A tap that is impossible — a cell off the conveyor, or
+ * one already tapped — is not a tap: the run comes back unchanged, which keeps
+ * this function total and lets a stray event one frame after the run ended be
+ * harmless.
  */
 export function tap(run: DontTouchRun, cell: number): DontTouchRun {
   if (!canTap(run, cell)) return run;
@@ -221,16 +317,16 @@ export function tap(run: DontTouchRun, cell: number): DontTouchRun {
 }
 
 /**
- * Ends the run because the deck has passed.
+ * Ends the run because the player asked to stop.
  *
- * The screen calls this when the last row has left the line; the verifier does not
- * need a marker for it, because a run that never touched a black tile is scored
- * from the cells it did touch either way. It is separate from `tap` so a run can
- * only end by the two things that end one — a black tile, or the deck running out.
+ * A stopped run is a real result: it is submitted with the whites it cleared, and
+ * the server accepts it without a black tap. It cannot inflate a score — the
+ * score is the whites already cleared — and it is the way out of a conveyor that
+ * has no natural last row. A run already over is returned unchanged.
  */
 export function finish(run: DontTouchRun): DontTouchRun {
   if (run.outcome !== "playing") return run;
-  return { ...run, outcome: "over", endReason: "deck" };
+  return { ...run, outcome: "over", endReason: "stop" };
 }
 
 /**
@@ -253,18 +349,17 @@ export function submission(run: DontTouchRun): DontTouchSubmission {
   };
 }
 
-/** How far through the deck the player is, for the progress readout. */
+/**
+ * The progression readout: how many whites were cleared, and how far down the
+ * conveyor the run got. There is no `total` because there is no final row.
+ */
 export function progress(run: DontTouchRun): {
-  rows: number;
-  totalRows: number;
   cleared: number;
-  whites: number;
+  row: number;
 } {
-  const colours = deck(run.seed);
+  const last = run.taps.at(-1);
   return {
-    rows: DONT_TOUCH_ROWS,
-    totalRows: DONT_TOUCH_ROWS,
     cleared: run.cleared,
-    whites: colours.filter((black) => !black).length,
+    row: last === undefined ? 0 : rowOf(last) + 1,
   };
 }

@@ -1344,11 +1344,16 @@ reset role;
 -- with 272 points; seed 15's line locks the board after forty-two slides for 184.
 \set color_merge_deck 'array[3,1,3,2,2,2,2,2,2,2,2,2,2,2,2,2,3,2,2,2,3,2,2,2,2,2,3,2,3,2,2,2,2,2,2,2,2,3,2,3,3,2,2,2,2,2,2,2]'
 \set color_merge_locked 'array[1,1,1,1,1,3,1,3,1,1,3,1,1,3,1,1,1,1,1,1,1,1,1,3,1,1,1,3,1,1,3,0,1,3,1,1,3,1,0,1,0,1]'
--- Seed 1's Don't Touch the Black deck: the forty-one whites in board order, and
+-- Seed 1's legacy dont-touch@1 deck: the forty-one whites in board order, and
 -- the nine whites of rows one to five followed by the black tile at cell 15.
 -- The perfect line scores 410; the cautious line scores 90.
 \set dont_touch_perfect 'array[2,3,6,7,9,10,12,13,14,16,17,18,19,20,21,22,23,24,25,27,29,30,31,32,33,34,36,37,38,39,40,41,42,43,45,51,52,54,55,57,59]'
 \set dont_touch_loss 'array[2,3,6,7,9,10,12,13,14,15]'
+-- Seed 1's endless conveyor: the fifty-six whites of rows one to twenty-five
+-- (560 points, and cells 60-74 are past the legacy deck), and its opening row —
+-- two whites, then the black tile at cell 1, for 20 points.
+\set dont_touch_endless 'array[0,2,3,6,7,8,9,11,13,15,18,19,20,21,23,25,27,28,30,32,33,34,36,37,38,40,41,42,43,44,46,47,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,68,69,70,71,73,74]'
+\set dont_touch_endless_loss 'array[0,2,1]'
 
 -- A published, playable game — the only kind a run can be started for — plus one
 -- that stays unpublished, so the refusal path has a subject. The sessions below
@@ -1397,6 +1402,9 @@ reset role;
 \set dont_touch_guest_session '77777777-4444-4444-8444-777777777777'
 \set dont_touch_old_session   '77777777-5555-4555-8555-777777777777'
 \set dont_touch_empty_session '77777777-6666-4666-8666-777777777777'
+\set dont_touch_endless_session       '77777777-3333-4333-8333-777777777777'
+\set dont_touch_endless_loss_session  '77777777-7777-4777-8777-777777777777'
+\set dont_touch_endless_empty_session '77777777-8888-4888-8888-777777777777'
 \set seven_second_game          '88888888-aaaa-4aaa-8aaa-888888888888'
 \set seven_second_session       '88888888-1111-4111-8111-888888888888'
 \set seven_second_line_session  '88888888-2222-4222-8222-888888888888'
@@ -1473,6 +1481,12 @@ insert into public.game_sessions (id, game_id, user_id, seed, rules_version, sta
   (:'dont_touch_guest_session', :'dont_touch_game', null,     1, 'dont-touch@1', now() - interval '5 minutes', now() + interval '2 hours', null),
   (:'dont_touch_old_session',   :'dont_touch_game', :'alice', 1, 'dont-touch@0', now() - interval '5 minutes', now() + interval '2 hours', null),
   (:'dont_touch_empty_session', :'dont_touch_game', :'alice', 1, 'dont-touch@1', now() - interval '5 minutes', now() + interval '2 hours', null),
+  -- Endless Don't Touch the Black fixtures. Alice plays seed 1 under dont-touch@2:
+  -- the whites of the first twenty-five rows, the opening row's black ending, and
+  -- an immediate stop.
+  (:'dont_touch_endless_session',       :'dont_touch_game', :'alice', 1, 'dont-touch@2', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'dont_touch_endless_loss_session',  :'dont_touch_game', :'alice', 1, 'dont-touch@2', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'dont_touch_endless_empty_session', :'dont_touch_game', :'alice', 1, 'dont-touch@2', now() - interval '5 minutes', now() + interval '2 hours', null),
   -- 7 Second fixtures. Seed 1's first four challenges want buttons 0, 0, 2, 1;
   -- the line [0,1,2,1] clears three of them for thirty points. The done session
   -- carries *today's* seed and is already completed, which is what consumes
@@ -1539,11 +1553,27 @@ select rls_test.ok(
 -- deck is the one the client engine computes and the verifier replays. A drift
 -- here is a drift in both copies, and every honest run would be refused.
 select rls_test.ok(
-  public.dont_touch_rows() = 20
+  public.dont_touch_rules_version() = 'dont-touch@2'
+  and public.dont_touch_rows() = 20
   and public.dont_touch_lanes() = 3
   and public.dont_touch_cells() = 60
+  and public.dont_touch_max_rows() = 1365
+  and public.dont_touch_max_cells() = 4095
   and public.dont_touch_tile_score() = 10,
-  'a Don''t Touch the Black deck is twenty rows of three lanes, ten points a white'
+  'the endless rules: three lanes, a legacy sixty-cell deck, and a 4095-cell submission bound'
+);
+select rls_test.ok(
+  public.dont_touch_black_percent(0) = 25
+  and public.dont_touch_black_percent(9) = 25
+  and public.dont_touch_black_percent(10) = 26
+  and public.dont_touch_black_percent(199) = 44
+  and public.dont_touch_black_percent(200) = 45
+  and public.dont_touch_black_percent(1364) = 45,
+  'the density ramp adds a black point every ten rows and stops at 45%'
+);
+select rls_test.raises(
+  $$select public.dont_touch_black_percent(1365)$$,
+  '22023', 'a row past the conveyor has no density'
 );
 select rls_test.ok(
   (select string_agg(case when public.dont_touch_black(1, cell) then 'B' else '.' end, '' order by cell)
@@ -1564,7 +1594,27 @@ select rls_test.ok(
 );
 select rls_test.raises(
   $$select public.dont_touch_black(1, 60)$$,
-  '22023', 'a sixty-first cell is not on the deck'
+  '22023', 'a sixty-first cell is not on the legacy deck'
+);
+select rls_test.ok(
+  (select array_agg(
+            (select string_agg(case when public.dont_touch_black_endless(1, cell) then 'B' else '.' end, '' order by cell)
+               from generate_series(row * public.dont_touch_lanes(), row * public.dont_touch_lanes() + public.dont_touch_lanes() - 1) as cell)
+          order by row)
+     from generate_series(0, 11) as row)
+  = array['.B.', '.BB', '...', '.B.', 'B.B', '.BB', '...', '.B.', 'B.B', '..B', '.B.', '..B']::text[],
+  'the endless generator colours seed 1''s opening twelve rows'
+);
+select rls_test.ok(
+  public.dont_touch_black_endless(1, 1)
+  and not public.dont_touch_black_endless(1, 0)
+  and public.dont_touch_black_endless(0, 41)
+  and not public.dont_touch_black(0, 41),
+  'the endless colour reads its row''s density, where the legacy colour is a flat 25%'
+);
+select rls_test.raises(
+  $$select public.dont_touch_black_endless(1, 4095)$$,
+  '22023', 'a cell past the endless conveyor is not addressable'
 );
 -- 7 Second's daily deck, asserted directly: the right button at a position is
 -- the one the client engine draws and the verifier replays. The seed function is
@@ -1834,14 +1884,24 @@ select rls_test.says_field(
   'game_slug', 'dont-touch-the-black', 'the shipped Don''t Touch the Black game issues a run like any other'
 );
 select rls_test.says_field(
+  $$public.start_game_session('dont-touch-the-black', 'dont-touch@2', 'test/1.0')$$,
+  'tile_count', '4095', 'an endless Don''t Touch the Black session reports the submission bound, not a final row'
+);
+-- A legacy session can still be started: a client deployed before the endless
+-- release keeps its exact rules and its sixty-cell count.
+select rls_test.says_field(
   $$public.start_game_session('dont-touch-the-black', 'dont-touch@1', 'test/1.0')$$,
-  'tile_count', '60', 'a Don''t Touch the Black session counts the cells a run can hold'
+  'tile_count', '60', 'a legacy Don''t Touch the Black session still counts its sixty cells'
 );
 -- The gate knows the sixth pair too, and refuses a game paired with another
 -- game's rules.
 select rls_test.says(
   $$public.start_game_session('fixture-dont-touch', 'dont-touch@1', 'test/1.0')$$,
-  'started', 'a guest can start a Don''t Touch the Black run'
+  'started', 'a guest can start a legacy Don''t Touch the Black run'
+);
+select rls_test.says(
+  $$public.start_game_session('fixture-dont-touch', 'dont-touch@2', 'test/1.0')$$,
+  'started', 'a guest can start an endless Don''t Touch the Black run'
 );
 select rls_test.says(
   $$public.start_game_session('fixture-dont-touch', 'color-merge@1', 'test/1.0')$$,
@@ -1850,6 +1910,10 @@ select rls_test.says(
 select rls_test.says(
   $$public.start_game_session('fixture-color-merge', 'dont-touch@1', 'test/1.0')$$,
   'unsupported_runtime', 'a Color Merge game cannot start a Don''t Touch the Black run'
+);
+select rls_test.says(
+  $$public.start_game_session('fixture-color-merge', 'dont-touch@2', 'test/1.0')$$,
+  'unsupported_runtime', 'a Color Merge game cannot start an endless Don''t Touch the Black run'
 );
 select rls_test.says(
   $$public.start_game_session('fixture-runnable', 'dont-touch@1', 'test/1.0')$$,
@@ -2473,12 +2537,15 @@ select rls_test.ok(
   'your Color Merge standing is your recorded best at its real rank'
 );
 
--- ── Don't Touch the Black: the same properties, replayed against a deck ──
+-- ── Don't Touch the Black: the same properties, replayed against a conveyor ──
 --
--- Seed 1's perfect line clears all forty-one whites for 410 points; the
--- cautious line clears nine whites and then touches the black tile at cell 15
--- for 90. The expected numbers are arithmetic from the seed, not values read
--- back.
+-- Two rulesets are verified against each other's fixtures. The dont-touch@1
+-- sessions from the previous migration are replayed exactly as they were: seed
+-- 1's perfect line clears all forty-one whites for 410 points, and the cautious
+-- line clears nine whites and then touches the black tile at cell 15 for 90.
+-- The dont-touch@2 fixtures are Bob's, and have no final row: the first
+-- twenty-five rows hold fifty-six whites (560 points, cells 60–74 among them),
+-- and an opening row of two whites then black scores 20.
 select rls_test.ok(
   (select r.outcome = 'recorded'
       and r.score = 410
@@ -2526,6 +2593,27 @@ select rls_test.says(
   $$public.complete_dont_touch_run('77777777-5555-4555-8555-777777777777'::uuid, array[2], 0, 45000)$$,
   'wrong_rules', 'a Don''t Touch the Black session pinned to other rules is refused by its own verifier'
 );
+-- Endless refusals, on a session that is still open.
+select rls_test.says(
+  format($$public.complete_dont_touch_run('77777777-7777-4777-8777-777777777777'::uuid, %s, 999, 45000)$$, :'dont_touch_endless_loss'),
+  'score_mismatch', 'an endless Don''t Touch the Black score the replay does not produce is refused'
+);
+select rls_test.says_field(
+  format($$public.complete_dont_touch_run('77777777-7777-4777-8777-777777777777'::uuid, %s, 999, 45000)$$, :'dont_touch_endless_loss'),
+  'score', '20', 'the endless Don''t Touch the Black replay is the score, and it is reported back'
+);
+select rls_test.says(
+  format($$public.complete_dont_touch_run('77777777-7777-4777-8777-777777777777'::uuid, %s || 3, 30, 45000)$$, :'dont_touch_endless_loss'),
+  'invalid_actions', 'an endless Don''t Touch the Black run cannot continue after the black tile'
+);
+select rls_test.says(
+  $$public.complete_dont_touch_run('77777777-7777-4777-8777-777777777777'::uuid, array[0,0], 20, 45000)$$,
+  'invalid_actions', 'an endless Don''t Touch the Black tile cleared twice is not two taps'
+);
+select rls_test.says(
+  $$public.complete_dont_touch_run('77777777-7777-4777-8777-777777777777'::uuid, array[4095], 0, 45000)$$,
+  'invalid_actions', 'a cell past the endless conveyor is impossible play'
+);
 -- The loss fixture is then played to its own end and recorded: nine whites are
 -- scored, the black tile is the ending, and both are submitted.
 select rls_test.ok(
@@ -2545,11 +2633,46 @@ select rls_test.ok(
 );
 select rls_test.ok(
   (select verified_score = 410 from public.game_sessions where id = '77777777-1111-4111-8111-777777777777'),
-  'a player can read the verified score on their own Don''t Touch the Black session'
+  'a player can read the verified score on their own legacy Don''t Touch the Black session'
+);
+-- The endless conveyor: a run that cleared twenty-five rows rather than stopping
+-- at a final one, including cells past the legacy sixty-cell deck.
+select rls_test.ok(
+  (select r.outcome = 'recorded'
+      and r.score = 560
+      and r.cleared_columns = 56
+      and r.tiles_placed = 56
+     from public.complete_dont_touch_run(
+       '77777777-3333-4333-8333-777777777777'::uuid, :dont_touch_endless, 560, 45000) r),
+  'an endless Don''t Touch the Black run is recorded past the old twenty-row deck'
+);
+select rls_test.says(
+  format($$public.complete_dont_touch_run('77777777-3333-4333-8333-777777777777'::uuid, %s, 560, 45000)$$, :'dont_touch_endless'),
+  'duplicate', 'a retry of the same endless Don''t Touch the Black run is safe to repeat'
 );
 select rls_test.ok(
-  (select rank = 1 and score = 410 from public.game_standing('fixture-dont-touch', '11111111-1111-4111-8111-111111111111', null)),
-  'your Don''t Touch the Black standing is your recorded best at its real rank'
+  (select verified_score = 560 from public.game_sessions where id = '77777777-3333-4333-8333-777777777777'),
+  'a player can read the verified score on their own endless session'
+);
+-- The black tile still ends an endless run, and the tap that ended it is part of
+-- the submission.
+select rls_test.ok(
+  (select r.outcome = 'recorded' and r.score = 20 and r.cleared_columns = 2 and r.tiles_placed = 3
+     from public.complete_dont_touch_run(
+       '77777777-7777-4777-8777-777777777777'::uuid, :dont_touch_endless_loss, 20, 45000) r),
+  'a black tile ends the endless conveyor, and the ending tap is recorded'
+);
+-- Stopping at once is a real run: an endless game has no last row to reach, so
+-- the explicit stop is the ending and zero points is the truthful score.
+select rls_test.ok(
+  (select r.outcome = 'recorded' and r.score = 0 and r.tiles_placed = 0
+     from public.complete_dont_touch_run(
+       '77777777-8888-4888-8888-777777777777'::uuid, array[]::integer[], 0, 45000) r),
+  'an immediately stopped Don''t Touch the Black run is recorded at zero'
+);
+select rls_test.ok(
+  (select rank = 1 and score = 560 from public.game_standing('fixture-dont-touch', '11111111-1111-4111-8111-111111111111', null)),
+  'your Don''t Touch the Black standing is your recorded best, endless run included'
 );
 
 -- 7 Second as a signed-in player: the same replay, but the recorded run earns a

@@ -51,32 +51,38 @@ const Name = "game-sessions"
 
 const (
 	// maxBodyBytes bounds a request body: a finite run is a few hundred bytes, and
-	// the longest endless Chain run a submission may carry is 4096 moves — about
-	// 8 KiB of JSON — so the ceiling has room without inviting an absurd body.
+	// the longest endless run a submission may carry is 4096 moves — about 20 KiB
+	// of JSON — so the ceiling has room without inviting an absurd body.
 	maxBodyBytes = 64 * 1024
 	// maxActions bounds the moves in an ordinary run: sixty tiles for Stack 10,
 	// fifty-five taps for a perfect Memory Flash or legacy Chain run, twelve taps
 	// for a perfect One Move run, forty-eight slides for Color Merge, sixty cell
-	// taps for a complete Don't Touch the Black deck, and sixty answers for
+	// taps for a complete legacy Don't Touch the Black deck, and sixty answers for
 	// 7 Second. The verifier enforces its own game's bound too; this only keeps an
 	// absurd body from reaching the database at all.
 	maxActions = 60
-	// chainMaxActions is the endless Chain submission bound. It is a request
-	// ceiling rather than a complete-run length, and it is the only game that
-	// gets it: every other runtime keeps the bound its own verifier owns.
-	chainMaxActions = 4096
+	// The endless games' submission bounds. These are request ceilings rather
+	// than complete-run lengths: chain@2 carries at most 4096 taps, and
+	// dont-touch@2 at most 4095 cell taps (a cell can be tapped once). Every
+	// other runtime keeps the bound its own verifier owns.
+	chainMaxActions     = 4096
+	dontTouchMaxActions = 4095
 	// The bounds a move has to fit. Stack 10 addresses a column and Chain a pad,
 	// both 0 to 3; Color Merge addresses one of its four directions, also 0 to 3;
 	// Memory Flash addresses one of the sixteen cells of its 4×4 board; One Move
 	// addresses one of the twenty-five cells of its largest 5×5 board; Don't
-	// Touch the Black addresses the sixty cells of its deck. The pinned rules
-	// version picks the bound, because the games live behind one endpoint.
+	// Touch the Black addresses its deck's cells — sixty for the legacy rules,
+	// 4095 for the endless conveyor. The pinned rules version picks the bound,
+	// because the games live behind one endpoint.
 	stackChainPositions  = 4
 	colorMergeDirections = 4
 	memoryFlashCells     = 16
 	oneMoveCells         = 25
-	dontTouchCells       = 60
-	sevenSecondChoices   = 3
+	// dontTouchCells is the legacy dont-touch@1 deck; dont-touch@2 addresses the
+	// endless conveyor's 4095 cells.
+	dontTouchCells     = 60
+	dontTouchMaxCells  = 4095
+	sevenSecondChoices = 3
 )
 
 // Patterns mirror the database constraints, so a bad request is a 400 that names
@@ -305,8 +311,11 @@ func (s *service) completeSession(w http.ResponseWriter, r *http.Request) {
 
 	actions := body.Progress.Actions
 	limit := maxActions
-	if rules == "chain@2" {
+	switch {
+	case rules == "chain@2":
 		limit = chainMaxActions
+	case strings.HasPrefix(rules, "dont-touch@") && rules != "dont-touch@1":
+		limit = dontTouchMaxActions
 	}
 	if len(actions) > limit {
 		httpx.WriteError(w, r, httpx.NewError(httpx.CodeBadRequest,
@@ -404,8 +413,10 @@ func boardSize(rulesVersion string) int {
 		return oneMoveCells
 	case strings.HasPrefix(rulesVersion, "color-merge@"):
 		return colorMergeDirections
-	case strings.HasPrefix(rulesVersion, "dont-touch@"):
+	case rulesVersion == "dont-touch@1":
 		return dontTouchCells
+	case strings.HasPrefix(rulesVersion, "dont-touch@"):
+		return dontTouchMaxCells
 	case strings.HasPrefix(rulesVersion, "seven-second@"):
 		return sevenSecondChoices
 	default:

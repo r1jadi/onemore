@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -42,8 +43,9 @@ const (
 	colorMergeRun   = "[3,2]"
 	// Seed 1's opening row is black, black, white: clearing the white and then
 	// touching the black scores ten and ends the run with both taps submitted.
-	dontTouchRules = "dont-touch@1"
-	dontTouchRun   = "[2,0]"
+	dontTouchRules        = "dont-touch@1"
+	dontTouchEndlessRules = "dont-touch@2"
+	dontTouchRun          = "[2,0]"
 	// Seed 1's first four challenges each have one right button: 0, 0, 2, 1.
 	// Answering 0, 1, 2, 1 clears three of them for thirty points.
 	sevenSecondRules = "seven-second@1"
@@ -816,6 +818,64 @@ func TestCompleteSessionVerifiesADontTouchRun(t *testing.T) {
 	}
 	if len(backend.lastRun.Actions) != 2 || backend.lastRun.Actions[1] != 0 {
 		t.Fatalf("actions = %v, want the submitted taps", backend.lastRun.Actions)
+	}
+}
+
+func TestCompleteSessionAcceptsADontTouchRunPastTheLegacyDeck(t *testing.T) {
+	backend := testBackend()
+	started := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+	backend.result = supabaseplay.Result{
+		Outcome:      "recorded",
+		SessionID:    sessionID,
+		GameSlug:     "dont-touch-the-black",
+		Score:        ptr(int64(2060)),
+		TilesPlaced:  ptr(206),
+		DurationMS:   ptr(21000),
+		Ranked:       ptr(true),
+		RecordedAt:   &started,
+		PersonalBest: ptr(int64(2060)),
+		Rank:         ptr(int64(1)),
+	}
+	server := testServer(t, backend)
+
+	// Cell 60 is past the legacy sixty-cell deck, and 61 taps are past the legacy
+	// action bound: both are ordinary play on the endless conveyor.
+	actions := make([]string, 0, 61)
+	for cell := 60; cell < 121; cell++ {
+		actions = append(actions, fmt.Sprint(cell))
+	}
+	status, body := post(t, server,
+		"/api/v1/sessions/"+sessionID+"/complete",
+		completeBodyRules(dontTouchEndlessRules, "2060", "21000",
+			"["+strings.Join(actions, ",")+"]"), "")
+
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%#v)", status, body)
+	}
+	if len(backend.lastRun.Actions) != 61 || backend.lastRun.Actions[0] != 60 {
+		t.Fatalf("actions = %v, want the submitted taps", backend.lastRun.Actions)
+	}
+	if backend.lastRun.RulesVersion != dontTouchEndlessRules {
+		t.Fatalf("rules version = %q, want dont-touch@2", backend.lastRun.RulesVersion)
+	}
+}
+
+func TestCompleteSessionRejectsADontTouchCellPastTheEndlessConveyor(t *testing.T) {
+	backend := testBackend()
+	server := testServer(t, backend)
+
+	status, body := post(t, server,
+		"/api/v1/sessions/"+sessionID+"/complete",
+		completeBodyRules(dontTouchEndlessRules, "0", "45000", "[4095]"), "")
+
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (%#v)", status, body)
+	}
+	if errorCode(t, body) != "bad_request" {
+		t.Fatalf("code = %s, want bad_request", errorCode(t, body))
+	}
+	if backend.runCalls != 0 {
+		t.Fatal("a cell outside the conveyor reached the verifier")
 	}
 }
 

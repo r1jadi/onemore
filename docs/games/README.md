@@ -4,8 +4,9 @@ How Unbored's games work: the rules, who is allowed to decide a score, and how a
 game earns the right to be called playable.
 
 Seven games are implemented today: **Stack 10**, **Chain** (Don't Break the
-Chain, and the one endless game), **Memory Flash**, **One Move**, **Color Merge**,
-**Don't Touch the Black** and **7 Second**. Every catalogue record is playable, and each one names the
+Chain), **Memory Flash**, **One Move**, **Color Merge**, **Don't Touch the Black**
+and **7 Second**. Two of them — Chain and Don't Touch the Black — are endless, with
+no final round or row. Every catalogue record is playable, and each one names the
 runtime that plays it; the "no runtime yet" screen remains for any future entry
 that is published before its runtime ships.
 
@@ -691,46 +692,88 @@ drifts, one of the two suites fails.
 ## Don't Touch the Black
 
 Rows of tiles rise to a line. Tap the white ones; touch a black one and the run is
-over. A run is one pass of a **twenty-row deck**, and every row is faster than the
-one before it.
+over. **There is no final row**: the conveyor keeps coming, getting faster and
+blacker, until the player slips or chooses to stop.
 
 ### The board
 
-| Thing   | Value                                                |
-| ------- | ---------------------------------------------------- |
-| Rows    | 20, each three lanes wide                            |
-| Cells   | 60 per deck — one tap per cell, at most              |
-| Tile    | White (safe, 10 points) or black (ends the run)      |
-| Rules   | `dont-touch@1`                                       |
-| Runtime | `dont-touch` (the catalogue's `games.runtime` value) |
+| Thing   | Value                                                                  |
+| ------- | ---------------------------------------------------------------------- |
+| Rows    | Endless — no final row, no complete deck                               |
+| Lanes   | 3 per row                                                              |
+| Cells   | 4095 addressable — the most taps one submission can carry              |
+| Tile    | White (safe, 10 points) or black (ends the run)                        |
+| Rules   | `dont-touch@2` (endless); `dont-touch@1` (the retired twenty-row deck) |
+| Runtime | `dont-touch` (the catalogue's `games.runtime` value)                   |
 
-A cell is addressed by its index in the deck, in board order: row one's lanes are
-cells 0–2, row two's are 3–5, and so on. That index is the move — no column of the
-UI ever reaches the verifier.
+A cell is addressed by its index on the conveyor, in board order: row one's lanes
+are cells 0–2, row two's are 3–5, and so on. That index is the move — no column of
+the UI ever reaches the verifier.
 
-### The deck
+### Difficulty
+
+Two curves make the game harder, and both are functions of the row alone, so they
+are deterministic and identical for every player at the same point.
+
+**Speed** — how long a row stays at the line before the next one takes its place:
+
+| Row | Window  |
+| --- | ------- |
+| 1   | 1600 ms |
+| 11  | 1150 ms |
+| 21  | 700 ms  |
+| 31  | 697 ms  |
+| 61  | 689 ms  |
+
+The first twenty-one rows shorten linearly by 45 ms each. After that the window
+eases toward a 650 ms floor and never reaches it: below 650 ms three lanes cannot be
+scanned fairly on a phone, so the floor bounds readability, not progression. The
+client's `rowWindow(row)` is the same curve the board's timers use.
+
+**Density** — the share of black tiles in a row:
+
+| Rows  | Black                   |
+| ----- | ----------------------- |
+| 1–10  | 25%                     |
+| 11–20 | 26%                     |
+| …     | +1 point every ten rows |
+| 201+  | 45%                     |
+
+The ramp caps at 45% where a row still usually has a white to take (55% of its cells
+are white), while missing whites costs real points. Density is what keeps the game
+getting harder after the beat has reached its readable floor, and a row may be all
+black — that is a row to let pass, not a trap, because missing whites is a lost
+opportunity rather than a loss.
+
+Neither curve ever steps backwards, so the conveyor never slows down, and no two
+players face a different beat at the same row.
+
+### The conveyor
 
 The colours are not random at play time: they are a function of the run's seed,
-which the **server** chooses when it issues the session. The client must deal
-exactly the same deck or its submission is refused, so the generator is written out
-in full:
+which the **server** chooses when it issues the session. The client must deal exactly
+the same conveyor or its submission is refused, so the generator is written out in
+full:
 
 ```
 state₀ = ((seed mod 2³²) + 2³²) mod 2³²        // the seed is a bigint, reduced to 32 bits
 if state₀ = 0 then state₀ = 2654435769         // 0x9E3779B9: a zero state would be degenerate
 stateₙ = (stateₙ₋₁ × 1664525 + 1013904223) mod 2³²
 
-// cell k, 0-based: advance k + 1 times
-black(k) = ((state >> 16) mod 4) = 0
+// cell k, 0-based: advance k + 1 times, then read
+draw(k)  = state >> 16
+black(k) = (draw(k) mod 100) < blackPercent(k / 3)
 ```
 
-The colour is read from bits 16–17 rather than the low bits on purpose: this LCG's
-low bits cycle with a period of two to the power of the bit width, so a colour read
-from them would repeat a fixed pattern regardless of the seed. The higher bits have
-the full period, so each seed colours its own deck.
+The colour is read from bits 16 and above rather than the low bits on purpose: this
+LCG's low bits cycle with a period of two to the power of the bit width, so a colour
+read from them would repeat a fixed pattern regardless of the seed. The shift is
+shared with the retired rules, which read `draw(k) mod 4 = 0`; the endless rules read
+the same draw modulo 100 against the row's density. Because the generator is
+infinite, so is the conveyor.
 
-The seed travels as a **decimal string** for the same reason the other games' do:
-it is a `bigint` column, and parsing it as a double would colour a different deck
+The seed travels as a **decimal string** for the same reason the other games' do: it
+is a `bigint` column, and parsing it as a double would colour a different conveyor
 and reject every honest run.
 
 ### A tap
@@ -738,42 +781,54 @@ and reject every honest run.
 A tap is a **cell number**. A white tile clears and scores ten points; a black tile
 ends the run, and the tap that touched it is part of the submission so the verifier
 replays the ending rather than being told about it. A cell can be touched once, a
-cell off the deck is not a cell, and a tap after the black tile is impossible play.
+cell past the conveyor is not a cell, and a tap after the black tile is impossible
+play.
 
 The rules deliberately do not know about time. The conveyor decides _when_ a row is
-in reach — that is the screen's job — while the submitted list says only which
-cells were touched. A run that never touched a black tile is legal however many
-whites it cleared: whether the player saw the whole deck is a fact about the
-conveyor's clock, not about the action list, and refusing a short run would refuse
-every honest player who let a row pass.
+in reach — that is the screen's job — while the submitted list says only which cells
+were touched. Whether a player saw every row is a fact about the conveyor's clock,
+not about the action list.
 
 ### Scoring and endings
 
 Each white tile is worth **10 points**; a black tile is worth nothing, because its
-cost is the run. A run ends on the first black tap, or when the last row has passed
-the line. Both endings leave the score exactly as the cleared whites earned it.
+cost is the run. A run ends in one of two ways:
+
+| Ending  | When                                                         |
+| ------- | ------------------------------------------------------------ |
+| Black   | A black tile was touched. The tap is submitted and replayed. |
+| Stopped | The player ended the run. The cleared whites are the score.  |
+
+An endless game has no natural last row, so stopping is the ordinary way out of a
+good run, and it cannot inflate a score: the score is the whites already cleared.
+The first twenty-row `dont-touch@1` deck also ended when its last row passed; that
+ending belongs to the retired rules and is never produced under `dont-touch@2`.
 
 ### Verified scores
 
-**The database decides the score**, under the same rules as the other five: see
-`supabase/migrations/20261023120000_dont_touch_sessions.sql` for the code.
+**The database decides the score**, under the same rules as the other six: see
+`supabase/migrations/20261027120000_endless_dont_touch.sql` for the endless branch and
+`supabase/migrations/20261023120000_dont_touch_sessions.sql` for the original.
 
-- `public.dont_touch_black(seed, cell)` is the colour of one cell. It is an
-  internal: execute is not granted to a client, because a player already holds the
-  seed their own deck grows from, and the verifier is the only caller.
-- `public.start_game_session(slug, rules, client)` issues the run with the seed,
-  the pinned version and the expiry. Its gate is a pair — (`stack-10`,
-  `stack-10@1`), (`chain`, `chain@1` or `chain@2`), (`memory-flash`, `memory-flash@1`),
-  (`one-move`, `one-move@1`), (`color-merge`, `color-merge@1`) or (`dont-touch`,
-  `dont-touch@1`) — and anything else is `unsupported_runtime`. A Don't Touch the
-  Black session's `tile_count` is 60: the field counts the moves a complete run can
-  hold, and its moves are cell taps.
-- `public.complete_dont_touch_run(session, actions, score, duration)` replays the
-  taps from the seed, derives the score, compares it with the claim, and only then
-  closes the session and records it. Its outcome vocabulary (`recorded`,
+- `public.dont_touch_black(seed, cell)` is the colour of one cell under the retired
+  rules, and `public.dont_touch_black_endless(seed, cell)` is the colour under the
+  endless ones. Both are internals: execute is not granted to a client, because a
+  player already holds the seed their own conveyor grows from, and the verifier is
+  the only caller.
+- `public.start_game_session(slug, rules, client)` issues the run with the seed, the
+  pinned version and the expiry. Its gate accepts (`dont-touch`, `dont-touch@1` or
+  `dont-touch@2`) and refuses anything else as `unsupported_runtime`. A `dont-touch@2`
+  session's `tile_count` is 4095: the most taps one submission may carry, not a
+  complete-run length, because an endless run has no complete length. A legacy
+  `dont-touch@1` session still reports 60.
+- `public.complete_dont_touch_run(session, actions, score, duration)` picks its branch
+  from the pinned version, replays the taps from the seed, derives the score, compares
+  it with the claim, and only then closes the session and records it. The 4095-cell
+  bound is a request ceiling, not a level: at the 650 ms floor it is more than a
+  quarter of an hour of perfect play. Its outcome vocabulary (`recorded`,
   `duplicate`, `score_mismatch`, …) and its ledger behaviour are identical to the
-  other five verifiers, and the Go service maps them onto HTTP the same way —
-  routing at the verifier the pinned rules version names and accepting cells 0–59.
+  other six verifiers, and the Go service maps them onto HTTP the same way — routing
+  at the verifier the pinned rules version names and accepting cells 0–4094.
 
 A guest can play. Their run is verified and closed exactly like a signed-in
 player's, and it is never ranked.
@@ -783,31 +838,41 @@ player's, and it is never ranked.
 Each vector is asserted by both the SQL suite and the client engine; if either side
 drifts, one of the two suites fails.
 
-1. **Seed 1's deck** — sixty cells, `B` for black and `.` for white:
+1. **Seed 1's retired deck** — the sixty cells of `dont-touch@1`, `B` for black and
+   `.` for white:
 
    ```
    BB..BB..B..B...B..........B.B......B........B.BBBBB..B..B.B.
    ```
 
    Nineteen of the sixty cells are black, so a careful run has 41 whites to clear.
-   Asserted in
+   The old generator is still asserted exactly, which is what proves a session issued
+   before the endless release replays to the same score.
+
+2. **Seed 1's opening rows, endless** — rows 1–12 on the `dont-touch@2` conveyor:
+
+   ```
+   .B. .BB ... .B. B.B .BB ... .B. B.B ..B .B. ..B
+   ```
+
+   The endless rules do not reproduce the retired deck: the colour is read modulo
+   100 against the row's density rather than modulo 4, and the ramp begins at row
+   eleven. Asserted in
    [`tests/security/rls_test.sql`](../../tests/security/rls_test.sql) and in
    [`src/lib/games/dont-touch.test.ts`](../../src/lib/games/dont-touch.test.ts).
 
-2. **Seed 1's perfect deck** — every white cell, in board order:
-   `2,3,6,7,9,10,12,13,14,16,…`, forty-one taps. It scores **410** and never
-   touches a black tile, which is the run that pins the deck ending. Asserted in
-   both suites.
+3. **Seed 1's twenty-five rows** — the whites of rows one to twenty-five in board
+   order: `0,2,3,6,…,74`, **56 whites, 560 points**, and cells 60–74 are past the old
+   deck. The run is still playing when it stops, which is the point: the conveyor did
+   not end at twenty rows. Asserted in both suites.
 
-3. **Seed 1's cautious line** — the nine whites of rows one to five, then the black
-   tile at cell 15:
+4. **Seed 1's opening loss** — `0,2,1`: clear the row's two whites, then touch the
+   black tile at cell 1. It scores **20**, and the black tap is recorded as the ending
+   rather than scored. Asserted in both suites.
 
-   ```
-   2,3,6,7,9,10,12,13,14,15
-   ```
-
-   It scores **90**: the black tap is recorded as the ending rather than scored,
-   and the run is a complete submission. Asserted in both suites.
+5. **Seed 0, density** — cell 41 (row fourteen) draws 25: white at the opening 25%,
+   black from the moment that row's density is 26%. This is the vector that catches a
+   client whose ramp never reaches the verifier. Asserted in both suites.
 
 ## 7 Second
 
