@@ -3,8 +3,10 @@ import { Loader2, RotateCcw, ShieldCheck, Trophy, TriangleAlert } from "lucide-r
 import { useEffect, useState } from "react";
 
 import { ErrorState } from "@/components/common";
+import { ExitGameLink } from "@/components/game/ExitGameLink";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useReportRunProgress } from "@/lib/games/run-progress";
 import {
   playErrorMessage,
   useChainRun,
@@ -86,9 +88,9 @@ export function ChainRuntime({ slug, title }: { slug: string; title: string }) {
             Start a new run
           </Button>
           <Button asChild variant="ghost" size="lg">
-            <Link to="/games/$id" params={{ id: slug }}>
+            <ExitGameLink slug={slug}>
               {title}
-            </Link>
+            </ExitGameLink>
           </Button>
         </div>
       </div>
@@ -168,6 +170,10 @@ function Board({
   }, [round, seed]);
 
   const accepting = !showing && !verifying && run.outcome === "playing";
+
+  // From the first showing beat the run is live: leaving loses it.
+  useReportRunProgress(!verifying && run.outcome === "playing");
+
   // Taps taken in this round so far: the round replays the sequence from its
   // start, so this is also the position the next tap is checked against.
   const taken = run.taps.length - totalTapsThrough(round - 1);

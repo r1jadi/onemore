@@ -12,6 +12,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ErrorState } from "@/components/common";
+import { ExitGameLink } from "@/components/game/ExitGameLink";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -23,6 +24,7 @@ import {
   SEVEN_SECOND_PENALTY_MS,
   type SevenSecondRun,
 } from "@/lib/games/seven-second";
+import { useReportRunProgress } from "@/lib/games/run-progress";
 import {
   playErrorMessage,
   useSevenSecondRun,
@@ -108,9 +110,9 @@ export function SevenSecondRuntime({ slug, title }: { slug: string; title: strin
             Start a new run
           </Button>
           <Button asChild variant="ghost" size="lg">
-            <Link to="/games/$id" params={{ id: slug }}>
+            <ExitGameLink slug={slug}>
               {title}
-            </Link>
+            </ExitGameLink>
           </Button>
         </div>
       </div>
@@ -184,6 +186,9 @@ function Table({
 
   const live = started && !verifying && run.outcome === "playing";
   const accepting = live && remaining > 0;
+
+  // A started, unverified run is progress the player would lose by leaving.
+  useReportRunProgress(live);
   const challenge = currentChallenge(run);
   const stats = progress(run);
 
@@ -297,9 +302,9 @@ function Table({
               Start run
             </Button>
             <Button asChild variant="ghost" size="lg">
-              <Link to="/games/$id" params={{ id: slug }}>
+              <ExitGameLink slug={slug}>
                 Back to {title}
-              </Link>
+              </ExitGameLink>
             </Button>
           </div>
 
@@ -552,9 +557,9 @@ function DailyDone({ slug, title, message }: { slug: string; title: string; mess
           </Link>
         </Button>
         <Button asChild variant="ghost" size="lg">
-          <Link to="/games/$id" params={{ id: slug }}>
+          <ExitGameLink slug={slug}>
             Back to {title}
-          </Link>
+          </ExitGameLink>
         </Button>
       </div>
     </div>

@@ -14,6 +14,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ErrorState } from "@/components/common";
+import { ExitGameLink } from "@/components/game/ExitGameLink";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -29,6 +30,7 @@ import {
   type ColorMergeDirection,
   type ColorMergeRun,
 } from "@/lib/games/color-merge";
+import { useReportRunProgress } from "@/lib/games/run-progress";
 import {
   playErrorMessage,
   useColorMergeRun,
@@ -103,9 +105,9 @@ export function ColorMergeRuntime({ slug, title }: { slug: string; title: string
             Start a new run
           </Button>
           <Button asChild variant="ghost" size="lg">
-            <Link to="/games/$id" params={{ id: slug }}>
+            <ExitGameLink slug={slug}>
               {title}
-            </Link>
+            </ExitGameLink>
           </Button>
         </div>
       </div>
@@ -174,6 +176,9 @@ function Board({
 
   const accepting = !verifying && run.outcome === "playing";
 
+  // A started, unverified run is progress the player would lose by leaving.
+  useReportRunProgress(started && accepting);
+
   const slide = useCallback(
     (direction: ColorMergeDirection) => {
       if (!accepting) return;
@@ -239,9 +244,9 @@ function Board({
               Start run
             </Button>
             <Button asChild variant="ghost" size="lg">
-              <Link to="/games/$id" params={{ id: slug }}>
+              <ExitGameLink slug={slug}>
                 Back to {title}
-              </Link>
+              </ExitGameLink>
             </Button>
           </div>
 

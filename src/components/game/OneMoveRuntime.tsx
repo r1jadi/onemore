@@ -3,9 +3,11 @@ import { Grid2x2, Loader2, RotateCcw, ShieldCheck, Trophy, TriangleAlert } from 
 import { useEffect, useRef, useState } from "react";
 
 import { ErrorState } from "@/components/common";
+import { ExitGameLink } from "@/components/game/ExitGameLink";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ONE_MOVE_LEVELS, boardPattern, type OneMoveRun } from "@/lib/games/one-move";
+import { useReportRunProgress } from "@/lib/games/run-progress";
 import {
   playErrorMessage,
   useOneMoveRun,
@@ -73,9 +75,9 @@ export function OneMoveRuntime({ slug, title }: { slug: string; title: string })
             Start a new run
           </Button>
           <Button asChild variant="ghost" size="lg">
-            <Link to="/games/$id" params={{ id: slug }}>
+            <ExitGameLink slug={slug}>
               {title}
-            </Link>
+            </ExitGameLink>
           </Button>
         </div>
       </div>
@@ -141,6 +143,9 @@ function Board({
     if (started) firstCell.current?.focus();
   }, [started]);
 
+  // A started, unverified run is progress the player would lose by leaving.
+  useReportRunProgress(started && !verifying && run.outcome === "playing");
+
   if (!started) {
     return (
       <div className="flex flex-1 flex-col justify-center px-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
@@ -175,9 +180,9 @@ function Board({
               Start run
             </Button>
             <Button asChild variant="ghost" size="lg">
-              <Link to="/games/$id" params={{ id: slug }}>
+              <ExitGameLink slug={slug}>
                 Back to {title}
-              </Link>
+              </ExitGameLink>
             </Button>
           </div>
 

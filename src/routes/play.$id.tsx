@@ -1,12 +1,25 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Clock, X } from "lucide-react";
+import { useState } from "react";
+
 import { ChainRuntime } from "@/components/game/ChainRuntime";
 import { ColorMergeRuntime } from "@/components/game/ColorMergeRuntime";
 import { DontTouchRuntime } from "@/components/game/DontTouchRuntime";
+import { ExitGameLink } from "@/components/game/ExitGameLink";
 import { MemoryFlashRuntime } from "@/components/game/MemoryFlashRuntime";
 import { OneMoveRuntime } from "@/components/game/OneMoveRuntime";
 import { SevenSecondRuntime } from "@/components/game/SevenSecondRuntime";
 import { Stack10Runtime } from "@/components/game/Stack10Runtime";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { titleFromSlug, useGame } from "@/lib/games/catalog";
 import { CHAIN_RUNTIME } from "@/lib/games/chain";
@@ -14,6 +27,7 @@ import { COLOR_MERGE_RUNTIME } from "@/lib/games/color-merge";
 import { DONT_TOUCH_RUNTIME } from "@/lib/games/dont-touch";
 import { MEMORY_FLASH_RUNTIME } from "@/lib/games/memory-flash";
 import { ONE_MOVE_RUNTIME } from "@/lib/games/one-move";
+import { RunProgressContext } from "@/lib/games/run-progress";
 import { SEVEN_SECOND_RUNTIME } from "@/lib/games/seven-second";
 import { STACK10_RUNTIME } from "@/lib/games/stack10";
 
@@ -50,6 +64,30 @@ export const Route = createFileRoute("/play/$id")({
  */
 function PlayScreen() {
   const { id } = Route.useParams();
+  return <Play id={id} />;
+}
+
+/**
+ * The play screen for a slug, with the reporter that tells its quit control
+ * whether leaving would cost the player a run. Exported so the navigation tests
+ * can mount the real composition without the generated route tree.
+ */
+export function Play({ id }: { id: string }) {
+  // Whether a run is live, reported by the runtime below.
+  const [progress, setProgress] = useState(false);
+
+  return (
+    <RunProgressContext.Provider value={setProgress}>
+      <PlaySurface id={id} progress={progress} />
+    </RunProgressContext.Provider>
+  );
+}
+
+/**
+ * The screen itself, given the slug and whether a run is live. The quit control
+ * and every exit from here are the navigation contract this file owns.
+ */
+export function PlaySurface({ id, progress }: { id: string; progress: boolean }) {
   const state = useGame(id);
   const title = state.status === "ready" ? state.game.title : titleFromSlug(id);
   const playable = state.status === "ready" && state.game.playable && !!state.game.runtime;
@@ -65,13 +103,26 @@ function PlayScreen() {
       state.game.runtime === DONT_TOUCH_RUNTIME ||
       state.game.runtime === SEVEN_SECOND_RUNTIME);
 
+  const nav = useNavigate();
+  const [confirming, setConfirming] = useState(false);
+
+  // Leaving replaces this screen instead of stacking on top of it: the feed is
+  // where the player asked to be, and Back from it must not land back in the
+  // game they just quit.
+  function quit() {
+    void nav({ to: "/", replace: true });
+  }
+
   return (
     <div className="fixed inset-0 flex flex-col bg-background">
       <header className="flex items-center gap-3 px-4 pt-[calc(0.75rem+env(safe-area-inset-top))] pb-3">
-        <Button asChild variant="glass" size="icon" aria-label="Quit game">
-          <Link to="/games/$id" params={{ id }}>
-            <X />
-          </Link>
+        <Button
+          variant="glass"
+          size="icon"
+          aria-label="Quit game"
+          onClick={() => (progress ? setConfirming(true) : quit())}
+        >
+          <X />
         </Button>
         <div className="flex-1 text-center">
           <p className="text-xs text-muted-foreground">{title}</p>
@@ -123,9 +174,7 @@ function PlayScreen() {
             part of the catalogue.
           </p>
           <Button asChild variant="play" size="lg" className="mt-2">
-            <Link to="/games/$id" params={{ id }}>
-              Back to the game
-            </Link>
+            <ExitGameLink slug={id}>Back to the game</ExitGameLink>
           </Button>
         </div>
       )}
@@ -158,6 +207,23 @@ function PlayScreen() {
           </Button>
         </div>
       )}
+
+      {/* A started run is real progress, so leaving it is a decision the player
+          makes deliberately rather than by a mis-tap on the way out. */}
+      <AlertDialog open={confirming} onOpenChange={setConfirming}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Leave this run?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Your run is still going. Leaving now discards it, and it will not be scored.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep playing</AlertDialogCancel>
+            <AlertDialogAction onClick={quit}>Leave run</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

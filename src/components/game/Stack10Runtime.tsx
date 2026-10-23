@@ -3,8 +3,10 @@ import { Link } from "@tanstack/react-router";
 import { useEffect } from "react";
 
 import { ErrorState } from "@/components/common";
+import { ExitGameLink } from "@/components/game/ExitGameLink";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useReportRunProgress } from "@/lib/games/run-progress";
 import {
   playErrorMessage,
   useStack10Run,
@@ -45,6 +47,9 @@ export function Stack10Runtime({ slug, title }: { slug: string; title: string })
   // Number keys play a column, which is how the board is usable without a pointer.
   // Only while a run is live: during verification a keypress must do nothing.
   const live = state.status === "playing";
+
+  // A live run is progress the player would lose by leaving.
+  useReportRunProgress(live);
   useEffect(() => {
     if (!live) return;
     const onKey = (event: KeyboardEvent) => {
@@ -101,9 +106,9 @@ export function Stack10Runtime({ slug, title }: { slug: string; title: string })
             Start a new run
           </Button>
           <Button asChild variant="ghost" size="lg">
-            <Link to="/games/$id" params={{ id: slug }}>
+            <ExitGameLink slug={slug}>
               {title}
-            </Link>
+            </ExitGameLink>
           </Button>
         </div>
       </div>

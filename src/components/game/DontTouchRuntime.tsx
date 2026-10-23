@@ -3,6 +3,7 @@ import { Eye, Hand, Loader2, RotateCcw, ShieldCheck, Trophy, TriangleAlert } fro
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ErrorState } from "@/components/common";
+import { ExitGameLink } from "@/components/game/ExitGameLink";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -15,6 +16,7 @@ import {
   rowWindow,
   type DontTouchRun,
 } from "@/lib/games/dont-touch";
+import { useReportRunProgress } from "@/lib/games/run-progress";
 import {
   playErrorMessage,
   useDontTouchRun,
@@ -89,9 +91,9 @@ export function DontTouchRuntime({ slug, title }: { slug: string; title: string 
             Start a new run
           </Button>
           <Button asChild variant="ghost" size="lg">
-            <Link to="/games/$id" params={{ id: slug }}>
+            <ExitGameLink slug={slug}>
               {title}
-            </Link>
+            </ExitGameLink>
           </Button>
         </div>
       </div>
@@ -160,6 +162,9 @@ function Conveyor({
   }, [started]);
 
   const accepting = !verifying && run.outcome === "playing";
+
+  // A started, unverified run is progress the player would lose by leaving.
+  useReportRunProgress(started && accepting);
 
   const tap = useCallback(
     (cell: number) => {
@@ -233,9 +238,9 @@ function Conveyor({
               Start run
             </Button>
             <Button asChild variant="ghost" size="lg">
-              <Link to="/games/$id" params={{ id: slug }}>
+              <ExitGameLink slug={slug}>
                 Back to {title}
-              </Link>
+              </ExitGameLink>
             </Button>
           </div>
 
