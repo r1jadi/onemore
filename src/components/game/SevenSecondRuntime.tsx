@@ -110,9 +110,7 @@ export function SevenSecondRuntime({ slug, title }: { slug: string; title: strin
             Start a new run
           </Button>
           <Button asChild variant="ghost" size="lg">
-            <ExitGameLink slug={slug}>
-              {title}
-            </ExitGameLink>
+            <ExitGameLink slug={slug}>{title}</ExitGameLink>
           </Button>
         </div>
       </div>
@@ -302,9 +300,7 @@ function Table({
               Start run
             </Button>
             <Button asChild variant="ghost" size="lg">
-              <ExitGameLink slug={slug}>
-                Back to {title}
-              </ExitGameLink>
+              <ExitGameLink slug={slug}>Back to {title}</ExitGameLink>
             </Button>
           </div>
 
@@ -557,9 +553,7 @@ function DailyDone({ slug, title, message }: { slug: string; title: string; mess
           </Link>
         </Button>
         <Button asChild variant="ghost" size="lg">
-          <ExitGameLink slug={slug}>
-            Back to {title}
-          </ExitGameLink>
+          <ExitGameLink slug={slug}>Back to {title}</ExitGameLink>
         </Button>
       </div>
     </div>

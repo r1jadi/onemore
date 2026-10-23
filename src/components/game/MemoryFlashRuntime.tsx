@@ -88,9 +88,7 @@ export function MemoryFlashRuntime({ slug, title }: { slug: string; title: strin
             Start a new run
           </Button>
           <Button asChild variant="ghost" size="lg">
-            <ExitGameLink slug={slug}>
-              {title}
-            </ExitGameLink>
+            <ExitGameLink slug={slug}>{title}</ExitGameLink>
           </Button>
         </div>
       </div>

@@ -75,9 +75,7 @@ export function OneMoveRuntime({ slug, title }: { slug: string; title: string })
             Start a new run
           </Button>
           <Button asChild variant="ghost" size="lg">
-            <ExitGameLink slug={slug}>
-              {title}
-            </ExitGameLink>
+            <ExitGameLink slug={slug}>{title}</ExitGameLink>
           </Button>
         </div>
       </div>
@@ -180,9 +178,7 @@ function Board({
               Start run
             </Button>
             <Button asChild variant="ghost" size="lg">
-              <ExitGameLink slug={slug}>
-                Back to {title}
-              </ExitGameLink>
+              <ExitGameLink slug={slug}>Back to {title}</ExitGameLink>
             </Button>
           </div>
 
