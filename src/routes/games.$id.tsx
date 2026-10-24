@@ -20,6 +20,7 @@ import {
   type Game,
 } from "@/lib/games/catalog";
 import { useGameEngagement } from "@/lib/social/engagement";
+import { useDocumentTitle } from "@/lib/document-title";
 import { breadcrumbJsonLd, seo, videoGameJsonLd } from "@/lib/seo";
 
 export const Route = createFileRoute("/games/$id")({
@@ -45,6 +46,13 @@ export const Route = createFileRoute("/games/$id")({
 function GameDetails() {
   const { id } = Route.useParams();
   const state = useGame(id);
+  useDocumentTitle(
+    state.status === "ready"
+      ? state.game.title
+      : state.status === "missing"
+        ? "Game not found"
+        : undefined,
+  );
 
   if (state.status === "loading") {
     return (

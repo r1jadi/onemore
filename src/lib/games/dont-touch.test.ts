@@ -10,8 +10,10 @@ import {
   cellAt,
   createRun,
   finish,
+  hasUnclearedWhite,
   isBlack,
   laneOf,
+  miss,
   progress,
   rowAt,
   rowOf,
@@ -302,6 +304,33 @@ describe("the end of a run", () => {
     expect(run.outcome).toBe("over");
     expect(run.endReason).toBe("black");
     expect(run.taps.at(-1)).toBe(1);
+  });
+
+  it("ends the run when a row leaves the line with a white tile on it", () => {
+    // Seed 1's opening row is ".B.": whites in lanes one and three.
+    const partial = play([0]);
+    expect(hasUnclearedWhite(partial, 0)).toBe(true);
+
+    const missed = miss(partial, 0);
+    expect(missed.outcome).toBe("over");
+    expect(missed.endReason).toBe("miss");
+    // No tap is added, so the submission replays exactly as a stopped run.
+    expect(missed.taps).toEqual([0]);
+    expect(missed.score).toBe(10);
+    expect(submission(missed)).toEqual(submission(finish(partial)));
+  });
+
+  it("lets a row pass once every white tile in it is cleared", () => {
+    const cleared = play([0, 2]);
+    expect(hasUnclearedWhite(cleared, 0)).toBe(false);
+    expect(miss(cleared, 0)).toBe(cleared);
+  });
+
+  it("does not let a miss replace an ending that already happened", () => {
+    const lost = play(LOSS_LINE);
+    expect(miss(lost, 0)).toBe(lost);
+    const stopped = finish(createRun("1"));
+    expect(miss(stopped, 0)).toBe(stopped);
   });
 
   it("never scores more than it cleared", () => {

@@ -349,7 +349,10 @@ describe("presentation helpers", () => {
 
   it("renders a slug as a readable heading", () => {
     expect(titleFromSlug("stack-10")).toBe("Stack 10");
-    expect(titleFromSlug("dont-break-the-chain")).toBe("Dont Break The Chain");
+    expect(titleFromSlug("dont-break-the-chain")).toBe("Don't Break the Chain");
+    expect(titleFromSlug("dont-touch-the-black")).toBe("Don't Touch the Black");
+    expect(titleFromSlug("7-second")).toBe("7 Second");
+    expect(titleFromSlug("the-end")).toBe("The End");
   });
 });
 

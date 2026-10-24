@@ -133,6 +133,32 @@ describe("apiFetch", () => {
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
+  it("retries a write the server deduplicates when the caller says so", async () => {
+    let calls = 0;
+    const spy = mockFetch(() => {
+      calls += 1;
+      return calls === 1
+        ? new Response("", { status: 502 })
+        : new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+
+    await expect(
+      apiFetch("/sessions/s1/complete", { method: "POST", body: {}, retryable: true }),
+    ).resolves.toEqual({ ok: true });
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it("explains a bare gateway failure instead of quoting its status", async () => {
+    mockFetch(() => new Response("", { status: 502 }));
+
+    const error = (await apiFetch("/sessions", { method: "POST", body: {} }).catch(
+      (e: unknown) => e,
+    )) as ApiError;
+
+    expect(error.status).toBe(502);
+    expect(error.message).toBe("The server is busy right now. Try again in a moment.");
+  });
+
   it("reports the outage once every retry has failed", async () => {
     const spy = mockFetch(() => new Response("<html>503</html>", { status: 503 }));
 

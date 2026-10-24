@@ -11,6 +11,7 @@ import {
   DONT_TOUCH_MAX_ROWS,
   blackPercent,
   cellAt,
+  hasUnclearedWhite,
   progress,
   rowAt,
   rowWindow,
@@ -109,6 +110,8 @@ export function DontTouchRuntime({ slug, title }: { slug: string; title: string 
         verifying={state.status === "submitting"}
         onTap={state.tap}
         onFinish={state.finish}
+        onMiss={state.miss}
+        onBegin={state.begin}
         slug={slug}
         title={title}
       />
@@ -136,6 +139,8 @@ function Conveyor({
   verifying,
   onTap,
   onFinish,
+  onMiss,
+  onBegin,
   slug,
   title,
 }: {
@@ -144,6 +149,10 @@ function Conveyor({
   verifying: boolean;
   onTap: (cell: number) => void;
   onFinish: () => void;
+  /** Ends the run because a white tile in this row passed the line uncleared. */
+  onMiss: (row: number) => void;
+  /** Starts the run's clock; the time spent on the rules is not the run's. */
+  onBegin: () => void;
   slug: string;
   title: string;
 }) {
@@ -175,18 +184,25 @@ function Conveyor({
     [accepting, onTap],
   );
 
-  // The clock. Each row gets its own window at the line; the conveyor never
-  // stops on its own. The one exception is the representable ceiling — a
-  // submission bound, not a level — where the run is ended and submitted rather
-  // than left to run past the cells the server can name.
+  // The latest run, read when a row's window closes. Keeping it out of the
+  // clock's dependencies means a tap does not restart the row's window.
+  const runRef = useRef(run);
+  runRef.current = run;
+
+  // The clock. Each row gets its own window at the line. When the window closes,
+  // a row that still has an uncleared white tile ends the run — letting a white
+  // pass is a loss, not just a missed point. Otherwise the conveyor moves on. The
+  // representable ceiling — a submission bound, not a level — ends the run
+  // rather than running past the cells the server can name.
   useEffect(() => {
     if (!started || !accepting) return;
     const timer = window.setTimeout(() => {
-      if (step + 1 >= DONT_TOUCH_MAX_ROWS) onFinish();
+      if (hasUnclearedWhite(runRef.current, step)) onMiss(step);
+      else if (step + 1 >= DONT_TOUCH_MAX_ROWS) onFinish();
       else setStep((current) => current + 1);
     }, rowWindow(step));
     return () => window.clearTimeout(timer);
-  }, [started, accepting, step, onFinish]);
+  }, [started, accepting, step, onFinish, onMiss]);
 
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
@@ -209,7 +225,7 @@ function Conveyor({
           <div className="space-y-2">
             <h1 className="text-2xl font-semibold">Tap white. Only white.</h1>
             <p className="text-sm text-muted-foreground">
-              Rows rise to the line. Clear their white tiles before they pass.
+              Rows rise to the line. Clear every white tile before the row passes.
             </p>
           </div>
 
@@ -225,14 +241,25 @@ function Conveyor({
               black tap ends the run on the spot.
             </p>
             <p>
+              <span className="font-medium text-foreground">Don&apos;t let a white tile pass.</span>{" "}
+              A row that leaves the line with a white tile still on it ends the run too.
+            </p>
+            <p>
               <span className="font-medium text-foreground">No final row.</span> Every row tightens
-              the beat, and the longer you last the more of each row turns black. A white tile that
-              passes is lost, not fatal — a black tap is.
+              the beat, and the longer you last the more of each row turns black.
             </p>
           </div>
 
           <div className="flex w-full flex-col gap-2">
-            <Button variant="play" size="lg" onClick={() => setStarted(true)} autoFocus>
+            <Button
+              variant="play"
+              size="lg"
+              onClick={() => {
+                onBegin();
+                setStarted(true);
+              }}
+              autoFocus
+            >
               Start run
             </Button>
             <Button asChild variant="ghost" size="lg">
@@ -296,7 +323,9 @@ function Conveyor({
           : run.outcome === "over"
             ? run.endReason === "black"
               ? "You touched the black."
-              : "Run ended."
+              : run.endReason === "miss"
+                ? "A white tile got past the line."
+                : "Run ended."
             : "Tap the white tiles in the row at the line."}
       </p>
 
@@ -394,7 +423,7 @@ function Conveyor({
           ? "The taps you made are your score if the server agrees."
           : run.outcome === "over"
             ? "The run is over. Your result is on its way."
-            : `Black tiles: ${blackShare}% of this row. A black tap ends the run.`}
+            : `Black tiles: ${blackShare}% of this row. Clear every white; never touch black.`}
       </p>
     </div>
   );
@@ -443,12 +472,20 @@ function Finished({
           )}
         </div>
         <p className="text-sm text-muted-foreground">
-          {run.endReason === "black" ? "You touched the black" : "Run ended"}
+          {run.endReason === "black"
+            ? "You touched the black"
+            : run.endReason === "miss"
+              ? "A white tile got past"
+              : "Run ended"}
         </p>
         <p className="text-5xl font-semibold tabular">{result.score}</p>
         <p className="text-sm text-muted-foreground">
           {run.cleared} {run.cleared === 1 ? "white tile" : "white tiles"} cleared
-          {run.endReason === "black" ? " before the black one." : "."}
+          {run.endReason === "black"
+            ? " before the black one."
+            : run.endReason === "miss"
+              ? " before one slipped past."
+              : "."}
         </p>
       </div>
 

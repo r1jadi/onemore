@@ -198,9 +198,54 @@ export function titleFromSlug(slug: string): string {
   return slug
     .split("-")
     .filter(Boolean)
-    .map((word) => word[0].toUpperCase() + word.slice(1))
+    .map((word, index) => {
+      const lower = word.toLowerCase();
+      // A slug drops apostrophes, so "dont" is put back as "Don't".
+      const restored = CONTRACTIONS[lower] ?? lower;
+      // Title case keeps short joining words lower-case, except as the first word:
+      // "Don't Break the Chain", the way the catalogue writes it.
+      if (index > 0 && SMALL_WORDS.has(restored)) return restored;
+      return restored[0].toUpperCase() + restored.slice(1);
+    })
     .join(" ");
 }
+
+const CONTRACTIONS: Record<string, string> = {
+  dont: "don't",
+  doesnt: "doesn't",
+  didnt: "didn't",
+  cant: "can't",
+  wont: "won't",
+  isnt: "isn't",
+  arent: "aren't",
+  wasnt: "wasn't",
+  shouldnt: "shouldn't",
+  couldnt: "couldn't",
+  wouldnt: "wouldn't",
+  im: "i'm",
+  ive: "i've",
+  youre: "you're",
+  thats: "that's",
+  lets: "let's",
+};
+
+const SMALL_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "as",
+  "at",
+  "but",
+  "by",
+  "for",
+  "in",
+  "of",
+  "on",
+  "or",
+  "the",
+  "to",
+  "vs",
+]);
 
 /**
  * The message to show a person when a catalogue call fails.

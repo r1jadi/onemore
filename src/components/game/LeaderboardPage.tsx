@@ -3,6 +3,7 @@ import { useState } from "react";
 import { LeaderboardList } from "./Leaderboard";
 import { Page, PageHeader } from "@/components/common";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useDocumentTitle } from "@/lib/document-title";
 import { DEFAULT_PAGE_SIZE, useGames } from "@/lib/games/catalog";
 import type { BoardPeriod, BoardScope } from "@/lib/games/sessions";
 import { cn } from "@/lib/utils";
@@ -26,6 +27,7 @@ export function LeaderboardPage({ gameId }: { gameId?: string }) {
   const [period, setPeriod] = useState<BoardPeriod>("all");
   const { status, items } = useGames({ limit: DEFAULT_PAGE_SIZE });
   const game = items.find((g) => g.slug === gameId);
+  useDocumentTitle(game ? `${game.title} leaderboard` : undefined);
 
   return (
     <Page>

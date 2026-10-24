@@ -21,6 +21,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { useDocumentTitle } from "@/lib/document-title";
 import { titleFromSlug, useGame } from "@/lib/games/catalog";
 import { CHAIN_RUNTIME } from "@/lib/games/chain";
 import { COLOR_MERGE_RUNTIME } from "@/lib/games/color-merge";
@@ -90,6 +91,13 @@ export function Play({ id }: { id: string }) {
 export function PlaySurface({ id, progress }: { id: string; progress: boolean }) {
   const state = useGame(id);
   const title = state.status === "ready" ? state.game.title : titleFromSlug(id);
+  useDocumentTitle(
+    state.status === "ready"
+      ? state.game.title
+      : state.status === "missing"
+        ? "Game not found"
+        : undefined,
+  );
   const playable = state.status === "ready" && state.game.playable && !!state.game.runtime;
   // A runtime this bundle ships: anything else renders the honest
   // "no runtime yet" screen below rather than a board with foreign rules.

@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { Bookmark, Clock, Heart, Info, MessageCircle, Play, Share2, Trophy } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -82,19 +82,21 @@ export function FeedItem({ game }: { game: Game }) {
   const [comments, setComments] = useState(false);
   const [share, setShare] = useState(false);
   const nav = useNavigate();
+  // Where the visitor is now — the feed they were scrolling, with its query.
+  const here = useRouterState({ select: (s) => s.location.href });
   const engagement = useGameEngagement(game.slug);
 
   const category = categoryName(game);
 
   // Liking and saving need an account. Anonymous visitors are sent to sign in
-  // with a redirect back to this game, instead of watching a toggle that
-  // cannot persist.
+  // with a redirect back to the feed they were on, instead of watching a toggle
+  // that cannot persist.
   async function guarded(action: () => Promise<void>) {
     try {
       await action();
     } catch (error) {
       if (error instanceof ApiError && error.code === "unauthorized") {
-        nav({ to: "/login", search: { redirect: `/games/${game.slug}` } });
+        nav({ to: "/login", search: { redirect: here } });
         return;
       }
       toast.error(error instanceof ApiError ? error.message : "Something went wrong.");

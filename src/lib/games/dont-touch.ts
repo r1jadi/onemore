@@ -36,8 +36,13 @@
  *     becomes fixed.
  *   - **Density.** The share of black tiles starts at 25% and rises by a
  *     percentage point every ten rows to 45%. A row may be all black, which is a
- *     row to let pass rather than a trap: missing whites is a lost opportunity,
- *     not a loss.
+ *     row to let pass rather than a trap.
+ *
+ * A white tile that reaches the top of the line uncleared ends the run (`miss`).
+ * That is the screen's call, because only the screen has a clock: it ends the run
+ * the same way "End run" does, so the submission is the same list of taps and the
+ * server's replay — which never needed a clock — verifies it unchanged. Ending a
+ * run early can only lower a score, never raise one.
  *
  * The player can also end a run deliberately (`finish`, the "End run" control).
  * A stopped run is submitted with the whites it cleared; it does not need a black
@@ -240,9 +245,9 @@ function requireCell(cell: number): void {
  *
  * `black` — a black tile was touched, which is the ordinary ending. `stop` — the
  * player ended the run deliberately; the whites already cleared still count.
- * `null` while the run is live.
+ * `miss` — a white tile passed the line uncleared. `null` while the run is live.
  */
-export type DontTouchEndReason = "black" | "stop" | null;
+export type DontTouchEndReason = "black" | "miss" | "stop" | null;
 
 export type DontTouchOutcome = "playing" | "over";
 
@@ -327,6 +332,28 @@ export function tap(run: DontTouchRun, cell: number): DontTouchRun {
 export function finish(run: DontTouchRun): DontTouchRun {
   if (run.outcome !== "playing") return run;
   return { ...run, outcome: "over", endReason: "stop" };
+}
+
+/**
+ * Ends the run because a white tile in row `row` passed the line uncleared.
+ *
+ * The screen calls this when a row's window closes. A row with no untouched white
+ * tile (all black, or every white cleared) is not a miss, and the run comes back
+ * unchanged. Like `finish`, it adds no tap, so the submission is exactly the taps
+ * that were made.
+ */
+export function miss(run: DontTouchRun, row: number): DontTouchRun {
+  if (run.outcome !== "playing") return run;
+  if (!hasUnclearedWhite(run, row)) return run;
+  return { ...run, outcome: "over", endReason: "miss" };
+}
+
+/** Whether row `row` still has a white tile the run has not cleared. */
+export function hasUnclearedWhite(run: DontTouchRun, row: number): boolean {
+  requireRow(row, "a row");
+  if (row >= DONT_TOUCH_MAX_ROWS) return false;
+  const colours = rowAt(run.seed, row);
+  return colours.some((black, lane) => !black && !run.taps.includes(cellAt(row, lane)));
 }
 
 /**

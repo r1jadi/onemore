@@ -477,7 +477,9 @@ describe("the end of a run", () => {
     const spy = mockFetch((url) => {
       if (!url.includes("/complete")) return jsonResponse(sessionPayload(), 201);
       calls += 1;
-      return calls === 1
+      // The client retries a deduplicated completion through a 503 twice on its
+      // own; the third refusal is the one the player sees.
+      return calls <= 3
         ? jsonResponse(
             {
               error: {
@@ -499,8 +501,9 @@ describe("the end of a run", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(12000);
     });
+    // Room for the client's own retries, which wait between attempts.
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(1000);
     });
 
     expect(screen.getByText("Your run was not verified")).toBeInTheDocument();
@@ -517,8 +520,8 @@ describe("the end of a run", () => {
     const bodies = spy.mock.calls
       .filter((call) => String(call[0]).includes("/complete"))
       .map((call) => String(call[1]?.body ?? ""));
-    expect(bodies).toHaveLength(2);
-    expect(bodies[0]).toBe(bodies[1]);
+    expect(bodies).toHaveLength(4);
+    expect(new Set(bodies).size).toBe(1);
   });
 
   it("tells a ranked player the day's attempt is spent instead of offering a replay", async () => {

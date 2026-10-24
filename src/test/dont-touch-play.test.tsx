@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DontTouchRuntime } from "@/components/game/DontTouchRuntime";
 import { clearSession, signIn } from "@/lib/auth/session";
-import { cellAt } from "@/lib/games/dont-touch";
+import { DONT_TOUCH_LANES, cellAt, rowAt } from "@/lib/games/dont-touch";
 
 /**
  * Don't Touch the Black on screen.
@@ -27,6 +27,7 @@ import { cellAt } from "@/lib/games/dont-touch";
  *   - only the row at the line is touchable, and a cleared tile is not touched
  *     twice;
  *   - a black tile ends the run, and the tap that ended it is submitted;
+ *   - a white tile that passes the line uncleared ends the run too;
  *   - there is no last row: the conveyor runs past the old twenty-row deck;
  *   - the player can stop a run, and stopping keeps the whites cleared;
  *   - a score is never shown as verified before it is;
@@ -338,13 +339,28 @@ describe("tapping the row at the line", () => {
 });
 
 describe("the endless conveyor", () => {
+  /** Seed 1's white cells in rows `0` to `rows - 1`, in the order a player clears them. */
+  function whitesBefore(rows: number): number[] {
+    const cells: number[] = [];
+    for (let row = 0; row < rows; row += 1) {
+      rowAt("1", row).forEach((black, lane) => {
+        if (!black) cells.push(cellAt(row, lane));
+      });
+    }
+    return cells;
+  }
+
   /**
-   * Moves the conveyor forward one row at a time. The next timer is scheduled by
-   * an effect after each render, so the clock has to give React a turn between
-   * rows rather than jumping straight to the end.
+   * Plays the conveyor forward one row at a time, clearing each row's white
+   * tiles first — a row that leaves the line with a white on it ends the run.
+   * The next timer is scheduled by an effect after each render, so the clock has
+   * to give React a turn between rows rather than jumping straight to the end.
    */
   async function advance(rows: number) {
     for (let row = 0; row < rows; row += 1) {
+      for (let lane = 0; lane < DONT_TOUCH_LANES; lane += 1) {
+        if (!rowAt("1", row)[lane]) fireEvent.click(tile(row + 1, lane + 1));
+      }
       await act(async () => {
         await vi.advanceTimersByTimeAsync(1700);
       });
@@ -399,8 +415,26 @@ describe("the endless conveyor", () => {
     expect(screen.getByText("You touched the black")).toBeInTheDocument();
     const completion = spy.mock.calls.find((call) => String(call[0]).includes("/complete"));
     const body = JSON.parse(String(completion?.[1]?.body ?? "{}"));
-    expect(body.progress.actions).toEqual([cellAt(11, 2)]);
+    expect(body.progress.actions).toEqual([...whitesBefore(11), cellAt(11, 2)]);
     expect(body.progress.rulesVersion).toBe("dont-touch@2");
+  });
+
+  it("ends the run when a white tile passes the line uncleared", async () => {
+    const spy = mockPlayback();
+    await startOnFakeClock();
+
+    // Seed 1's opening row has two whites. Clear one, let the row go by.
+    fireEvent.click(tile(1, 3));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1700);
+    });
+
+    expect(screen.getByText("A white tile got past")).toBeInTheDocument();
+    const completion = spy.mock.calls.find((call) => String(call[0]).includes("/complete"));
+    const body = JSON.parse(String(completion?.[1]?.body ?? "{}"));
+    // Exactly the taps that were made: nothing is invented for the miss.
+    expect(body.progress.actions).toEqual([WHITE_OPENING_TILE]);
+    expect(body.score).toBe(10);
   });
 
   it("lets the player stop a run and keeps the whites already cleared", async () => {

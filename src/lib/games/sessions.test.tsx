@@ -10,11 +10,13 @@ import {
   useChainRun,
   useLeaderboard,
   useMemoryFlashRun,
+  useOneMoveRun,
   useStack10Run,
   type PlaySession,
   type RunResult,
 } from "@/lib/games/sessions";
 import { submission } from "@/lib/games/stack10";
+import { winningCell } from "@/lib/games/one-move";
 
 /**
  * The session client and the run lifecycle.
@@ -390,7 +392,9 @@ describe("useStack10Run", () => {
     const spy = mockFetch((url) => {
       if (!url.includes("/complete")) return jsonResponse(sessionPayload({ seed: "1" }), 201);
       completions += 1;
-      return completions === 1
+      // Three refusals: the client's own retries of a deduplicated write, then
+      // the failure the player sees and retries by hand.
+      return completions <= 3
         ? errorResponse(503, "service_unavailable", "Play sessions are not available right now.")
         : jsonResponse(resultPayload());
     });
@@ -414,9 +418,11 @@ describe("useStack10Run", () => {
     const sends = spy.mock.calls
       .map((call, index) => ({ call, index }))
       .filter(({ call }) => String(call[0]).includes("/complete"));
-    expect(sends).toHaveLength(2);
+    expect(sends).toHaveLength(4);
     // Same run, same body: a retry cannot become a second, different score.
-    expect(requestBody(spy, sends[0].index)).toEqual(requestBody(spy, sends[1].index));
+    for (const send of sends.slice(1)) {
+      expect(requestBody(spy, send.index)).toEqual(requestBody(spy, sends[0].index));
+    }
     // And no new session was started to do it.
     const sessionCalls = spy.mock.calls.filter((call) =>
       String(call[0]).endsWith("/api/v1/sessions"),
@@ -677,7 +683,9 @@ describe("useChainRun", () => {
     const spy = mockFetch((url) => {
       if (!url.includes("/complete")) return jsonResponse(chainSessionPayload(), 201);
       completions += 1;
-      return completions === 1
+      // Three refusals: the client's own retries of a deduplicated write, then
+      // the failure the player sees and retries by hand.
+      return completions <= 3
         ? errorResponse(503, "service_unavailable", "Play sessions are not available right now.")
         : jsonResponse(chainResultPayload());
     });
@@ -701,9 +709,11 @@ describe("useChainRun", () => {
     const sends = spy.mock.calls
       .map((call, index) => ({ call, index }))
       .filter(({ call }) => String(call[0]).includes("/complete"));
-    expect(sends).toHaveLength(2);
+    expect(sends).toHaveLength(4);
     // Same run, same body: a retry cannot become a second, different score.
-    expect(requestBody(spy, sends[0].index)).toEqual(requestBody(spy, sends[1].index));
+    for (const send of sends.slice(1)) {
+      expect(requestBody(spy, send.index)).toEqual(requestBody(spy, sends[0].index));
+    }
     // And no new session was started to do it.
     const sessionCalls = spy.mock.calls.filter((call) =>
       String(call[0]).endsWith("/api/v1/sessions"),
@@ -834,7 +844,9 @@ describe("useMemoryFlashRun", () => {
     const spy = mockFetch((url) => {
       if (!url.includes("/complete")) return jsonResponse(memoryFlashSessionPayload(), 201);
       completions += 1;
-      return completions === 1
+      // Three refusals: the client's own retries of a deduplicated write, then
+      // the failure the player sees and retries by hand.
+      return completions <= 3
         ? errorResponse(503, "service_unavailable", "Play sessions are not available right now.")
         : jsonResponse(memoryFlashResultPayload());
     });
@@ -858,9 +870,11 @@ describe("useMemoryFlashRun", () => {
     const sends = spy.mock.calls
       .map((call, index) => ({ call, index }))
       .filter(({ call }) => String(call[0]).includes("/complete"));
-    expect(sends).toHaveLength(2);
+    expect(sends).toHaveLength(4);
     // Same run, same body: a retry cannot become a second, different score.
-    expect(requestBody(spy, sends[0].index)).toEqual(requestBody(spy, sends[1].index));
+    for (const send of sends.slice(1)) {
+      expect(requestBody(spy, send.index)).toEqual(requestBody(spy, sends[0].index));
+    }
     // And no new session was started to do it.
     const sessionCalls = spy.mock.calls.filter((call) =>
       String(call[0]).endsWith("/api/v1/sessions"),
@@ -870,6 +884,33 @@ describe("useMemoryFlashRun", () => {
 });
 
 // ── Boards ──────────────────────────────────────────────────────────────────
+
+describe("useOneMoveRun", () => {
+  it("times the run from Start, not from the session arriving", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    const spy = mockFetch((url) =>
+      url.includes("/complete")
+        ? jsonResponse(resultPayload())
+        : jsonResponse(sessionPayload({ seed: "1", rulesVersion: "one-move@2" }), 201),
+    );
+
+    const hook = renderHook(() => useOneMoveRun("one-move"));
+    await waitFor(() => expect(hook.result.status).toBe("playing"));
+
+    // A minute on the rules screen, then Start.
+    now.mockReturnValue(61_000);
+    act(() => hook.result.begin());
+
+    // Five seconds of play, ending on a wrong tap.
+    now.mockReturnValue(66_000);
+    const wrong = winningCell("1", 1) === 0 ? 1 : 0;
+    act(() => hook.result.tap(wrong));
+
+    await waitFor(() => expect(hook.result.status).toBe("finished"));
+    const send = spy.mock.calls.findIndex((call) => String(call[0]).includes("/complete"));
+    expect(requestBody(spy, send).durationMs).toBe(5_000);
+  });
+});
 
 describe("useLeaderboard", () => {
   it("reports an empty board as ready, because no scores is an answer", async () => {

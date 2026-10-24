@@ -52,6 +52,7 @@ import {
 import {
   createRun as createDontTouchRun,
   finish as finishDontTouchRun,
+  miss as missDontTouchRow,
   submission as dontTouchSubmission,
   tap as tapDontTouchTile,
   DONT_TOUCH_RULES_VERSION,
@@ -224,6 +225,10 @@ export function completeRun(
     },
     token,
     signal: options.signal,
+    // The server recognises an identical resubmission as the run it already
+    // recorded (`duplicate`), so a completion that hit a cold or restarting
+    // gateway is safe to send again without asking the player.
+    retryable: true,
   });
 }
 
@@ -703,6 +708,11 @@ export type OneMoveRunState =
     };
 
 export type OneMoveRunControls = OneMoveRunState & {
+  /**
+   * Marks the moment the player pressed Start, so the submitted duration is the
+   * run's and not the time spent reading the rules.
+   */
+  begin: () => void;
   /** Taps a cell. Ignored unless the run is live. */
   tap: (cell: number) => void;
   /** Starts a fresh run, replacing whatever is on the board. */
@@ -753,7 +763,8 @@ export function useOneMoveRun(gameSlug: string): OneMoveRunControls {
     startSession(gameSlug, { signal: controller.signal, rulesVersion: ONE_MOVE_RULES_VERSION })
       .then((session) => {
         if (controller.signal.aborted) return;
-        startedAt.current = Date.now();
+        // The clock starts when the player presses Start (`begin`), not when the
+        // session arrives: reading the rules is not part of the run.
         setState({ status: "playing", session, run: createOneMoveRun(session.seed) });
       })
       .catch((error: unknown) => {
@@ -772,6 +783,9 @@ export function useOneMoveRun(gameSlug: string): OneMoveRunControls {
     submitting.current = true;
 
     const { session, run } = state;
+    // Defensive: every run is begun before it can end, but a missing mark must
+    // never turn into a duration measured from the epoch.
+    if (startedAt.current === 0) startedAt.current = Date.now();
     if (endedAt.current === 0) endedAt.current = Date.now();
     const durationMs = Math.max(1, Math.round(endedAt.current - startedAt.current));
     setState({ status: "submitting", session, run });
@@ -804,6 +818,10 @@ export function useOneMoveRun(gameSlug: string): OneMoveRunControls {
     });
   }, []);
 
+  const begin = useCallback(() => {
+    if (startedAt.current === 0) startedAt.current = Date.now();
+  }, []);
+
   const restart = useCallback(() => setAttempt((n) => n + 1), []);
 
   const retry = useCallback(() => {
@@ -822,7 +840,7 @@ export function useOneMoveRun(gameSlug: string): OneMoveRunControls {
     setAttempt((n) => n + 1);
   }, [state]);
 
-  return { ...state, tap, restart, retry };
+  return { ...state, begin, tap, restart, retry };
 }
 
 // ── A run of Color Merge, from session to score ────────────────────────────
@@ -843,6 +861,11 @@ export type ColorMergeRunState =
     };
 
 export type ColorMergeRunControls = ColorMergeRunState & {
+  /**
+   * Marks the moment the player pressed Start, so the submitted duration is the
+   * run's and not the time spent reading the rules.
+   */
+  begin: () => void;
   /** Slides the board. Ignored unless the run is live and the slide changes it. */
   slide: (direction: ColorMergeDirection) => void;
   /** Starts a fresh run, replacing whatever is on the board. */
@@ -893,7 +916,8 @@ export function useColorMergeRun(gameSlug: string): ColorMergeRunControls {
     startSession(gameSlug, { signal: controller.signal, rulesVersion: COLOR_MERGE_RULES_VERSION })
       .then((session) => {
         if (controller.signal.aborted) return;
-        startedAt.current = Date.now();
+        // The clock starts when the player presses Start (`begin`), not when the
+        // session arrives: reading the rules is not part of the run.
         setState({ status: "playing", session, run: createColorMergeRun(session.seed) });
       })
       .catch((error: unknown) => {
@@ -912,6 +936,9 @@ export function useColorMergeRun(gameSlug: string): ColorMergeRunControls {
     submitting.current = true;
 
     const { session, run } = state;
+    // Defensive: every run is begun before it can end, but a missing mark must
+    // never turn into a duration measured from the epoch.
+    if (startedAt.current === 0) startedAt.current = Date.now();
     if (endedAt.current === 0) endedAt.current = Date.now();
     const durationMs = Math.max(1, Math.round(endedAt.current - startedAt.current));
     setState({ status: "submitting", session, run });
@@ -944,6 +971,10 @@ export function useColorMergeRun(gameSlug: string): ColorMergeRunControls {
     });
   }, []);
 
+  const begin = useCallback(() => {
+    if (startedAt.current === 0) startedAt.current = Date.now();
+  }, []);
+
   const restart = useCallback(() => setAttempt((n) => n + 1), []);
 
   const retry = useCallback(() => {
@@ -962,7 +993,7 @@ export function useColorMergeRun(gameSlug: string): ColorMergeRunControls {
     setAttempt((n) => n + 1);
   }, [state]);
 
-  return { ...state, slide, restart, retry };
+  return { ...state, begin, slide, restart, retry };
 }
 
 // ── A run of Don't Touch the Black, from session to score ──────────────────
@@ -983,10 +1014,17 @@ export type DontTouchRunState =
     };
 
 export type DontTouchRunControls = DontTouchRunState & {
+  /**
+   * Marks the moment the player pressed Start, so the submitted duration is the
+   * run's and not the time spent reading the rules.
+   */
+  begin: () => void;
   /** Taps one tile. Ignored unless the run is live and the tile is untapped. */
   tap: (cell: number) => void;
-  /** Ends the run because every row of the deck has passed. */
+  /** Ends the run because the player stopped, or the conveyor hit its ceiling. */
   finish: () => void;
+  /** Ends the run if row `row` still has an uncleared white tile as it leaves the line. */
+  miss: (row: number) => void;
   /** Starts a fresh run, replacing whatever is on the conveyor. */
   restart: () => void;
   /** Retries whichever step failed — a new session, or the same submission. */
@@ -1042,7 +1080,8 @@ export function useDontTouchRun(gameSlug: string): DontTouchRunControls {
     })
       .then((session) => {
         if (controller.signal.aborted) return;
-        startedAt.current = Date.now();
+        // The clock starts when the player presses Start (`begin`), not when the
+        // session arrives: reading the rules is not part of the run.
         setState({ status: "playing", session, run: createDontTouchRun(session.seed) });
       })
       .catch((error: unknown) => {
@@ -1061,6 +1100,9 @@ export function useDontTouchRun(gameSlug: string): DontTouchRunControls {
     submitting.current = true;
 
     const { session, run } = state;
+    // Defensive: every run is begun before it can end, but a missing mark must
+    // never turn into a duration measured from the epoch.
+    if (startedAt.current === 0) startedAt.current = Date.now();
     if (endedAt.current === 0) endedAt.current = Date.now();
     const durationMs = Math.max(1, Math.round(endedAt.current - startedAt.current));
     setState({ status: "submitting", session, run });
@@ -1101,6 +1143,18 @@ export function useDontTouchRun(gameSlug: string): DontTouchRunControls {
     });
   }, []);
 
+  const miss = useCallback((row: number) => {
+    setState((current) => {
+      if (current.status !== "playing") return current;
+      const next = missDontTouchRow(current.run, row);
+      return next === current.run ? current : { ...current, run: next };
+    });
+  }, []);
+
+  const begin = useCallback(() => {
+    if (startedAt.current === 0) startedAt.current = Date.now();
+  }, []);
+
   const restart = useCallback(() => setAttempt((n) => n + 1), []);
 
   const retry = useCallback(() => {
@@ -1119,7 +1173,7 @@ export function useDontTouchRun(gameSlug: string): DontTouchRunControls {
     setAttempt((n) => n + 1);
   }, [state]);
 
-  return { ...state, tap, finish, restart, retry };
+  return { ...state, begin, tap, finish, miss, restart, retry };
 }
 
 // ── A run of 7 Second, from session to score ───────────────────────────────

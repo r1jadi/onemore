@@ -69,6 +69,12 @@ export type ApiRequestOptions = {
   signal?: AbortSignal;
   /** Defaults to 15s. Long-running work should be a job, not a slow request. */
   timeoutMs?: number;
+  /**
+   * Retry a 502/503/504 or a dropped connection even though this is not a GET.
+   * Only for writes the server deduplicates — sending the identical body twice
+   * must be recorded once — such as a run's completion.
+   */
+  retryable?: boolean;
 };
 
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -77,8 +83,8 @@ const DEFAULT_TIMEOUT_MS = 15_000;
  * A gateway that is starting up (or briefly unreachable) answers 502/503/504.
  * Those are worth retrying for a read, because the same request a moment later
  * is served — a cold service is not a failure the visitor should have to undo
- * by hand. Mutations are never retried here: a duplicated write is worse than a
- * visible error, and the UI offers its own retry for those.
+ * by hand. Mutations are not retried here unless the caller says the write is
+ * idempotent (`retryable`): a duplicated write is worse than a visible error.
  */
 const RETRYABLE_STATUSES = new Set([502, 503, 504]);
 // The first retry is immediate: a gateway that was starting has usually finished
@@ -126,7 +132,15 @@ function timeoutSignal(timeoutMs: number, signal?: AbortSignal): AbortSignal | u
  * @throws ApiError for any non-2xx response, timeout or malformed payload.
  */
 export async function apiFetch<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
-  const { method = "GET", body, token, query, signal, timeoutMs = DEFAULT_TIMEOUT_MS } = options;
+  const {
+    method = "GET",
+    body,
+    token,
+    query,
+    signal,
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    retryable = false,
+  } = options;
 
   const headers: Record<string, string> = {
     Accept: "application/json",
@@ -135,7 +149,7 @@ export async function apiFetch<T>(path: string, options: ApiRequestOptions = {})
   if (token) headers["Authorization"] = `Bearer ${token}`;
   if (body !== undefined) headers["Content-Type"] = "application/json";
 
-  const idempotent = method === "GET";
+  const idempotent = method === "GET" || retryable;
   const url = buildUrl(path, query);
 
   let response: Response | undefined;
@@ -182,19 +196,21 @@ export async function apiFetch<T>(path: string, options: ApiRequestOptions = {})
     // A gateway that stayed unavailable through every attempt keeps its own
     // status, so callers can still tell an outage (503) from a refusal (4xx).
     const envelope = (payload ?? {}) as ApiErrorEnvelope;
-    throw new ApiError(
-      envelope.error?.message ?? `Request failed with status ${response.status}.`,
-      {
-        code: envelope.error?.code ?? "http_error",
-        status: response.status,
-        requestId:
-          envelope.error?.request_id ??
-          envelope.error?.requestId ??
-          response.headers.get("X-Request-ID") ??
-          undefined,
-        details: envelope.error?.details ?? [],
-      },
-    );
+    // A bare 502/503/504 comes from the platform in front of the API, not from
+    // the API, so it has no message of its own to pass through.
+    const fallback = RETRYABLE_STATUSES.has(response.status)
+      ? "The server is busy right now. Try again in a moment."
+      : `Request failed with status ${response.status}.`;
+    throw new ApiError(envelope.error?.message ?? fallback, {
+      code: envelope.error?.code ?? "http_error",
+      status: response.status,
+      requestId:
+        envelope.error?.request_id ??
+        envelope.error?.requestId ??
+        response.headers.get("X-Request-ID") ??
+        undefined,
+      details: envelope.error?.details ?? [],
+    });
   }
 
   if (payload === undefined) {

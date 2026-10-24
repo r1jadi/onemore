@@ -1,6 +1,6 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Clock, Search as SearchIcon, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Avatar,
   EmptyState,
@@ -20,7 +20,27 @@ import { seo } from "@/lib/seo";
 import { readWithLegacy, safeLocalStorage } from "@/lib/storage";
 import { cn } from "@/lib/utils";
 
+type SearchTab = "top" | "games" | "people";
+
+type SearchParams = {
+  /** The search term, so a search can be linked to and survives Back. */
+  q?: string;
+  /** The result tab, when it is not the default "top". */
+  tab?: Exclude<SearchTab, "top">;
+};
+
 export const Route = createFileRoute("/search")({
+  // Lenient on purpose: a hand-edited or old link should open the search page,
+  // not an error. The router parses `?q=123` as a number, so that is accepted too.
+  validateSearch: (search: Record<string, unknown>): SearchParams => {
+    const { q: rawQ, tab: rawTab } = search;
+    const q = typeof rawQ === "string" ? rawQ : typeof rawQ === "number" ? String(rawQ) : undefined;
+    const tab = rawTab === "games" || rawTab === "people" ? rawTab : undefined;
+    return {
+      ...(q && q.trim() !== "" ? { q } : {}),
+      ...(tab ? { tab } : {}),
+    };
+  },
   head: () => seo("Search", "Search games, creators and players."),
   component: SearchPage,
 });
@@ -61,12 +81,44 @@ function writeRecent(entries: string[]): void {
 }
 
 function SearchPage() {
-  const [q, setQ] = useState("");
-  const [tab, setTab] = useState<"top" | "games" | "people">("top");
+  const search = Route.useSearch();
+  const navigate = useNavigate({ from: "/search" });
+  const [q, setQ] = useState(search.q ?? "");
+  const tab: SearchTab = search.tab ?? "top";
   const [recent, setRecent] = useState<string[]>(() =>
     typeof window === "undefined" ? [] : readRecent(),
   );
   const term = useDebounced(q.trim());
+
+  // The settled term is written to the address bar, replacing the entry rather
+  // than adding one per keystroke: the URL can be shared, and Back from a result
+  // returns to this search. `written` remembers what this page put there, so the
+  // effect below can tell its own update from a Back/Forward or a new link.
+  const written = useRef(search.q ?? "");
+  useEffect(() => {
+    if (term === written.current) return;
+    written.current = term;
+    void navigate({
+      search: (prev) => ({ ...prev, q: term === "" ? undefined : term }),
+      replace: true,
+    });
+  }, [term, navigate]);
+
+  // A change that did not come from typing — Back/Forward between searches, or
+  // following a link to `/search?q=…` while already here — sets the box.
+  useEffect(() => {
+    const incoming = search.q ?? "";
+    if (incoming === written.current) return;
+    written.current = incoming;
+    setQ(incoming);
+  }, [search.q]);
+
+  function setTab(next: SearchTab) {
+    void navigate({
+      search: (prev) => ({ ...prev, tab: next === "top" ? undefined : next }),
+      replace: true,
+    });
+  }
 
   function remember(value: string) {
     const next = [value, ...recent.filter((x) => x !== value)].slice(0, 8);

@@ -1,5 +1,5 @@
 import { Link2, Mail, MessageCircle, Send, Trash2 } from "lucide-react";
-import { Link } from "@tanstack/react-router";
+import { Link, useRouterState } from "@tanstack/react-router";
 import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { Avatar, ErrorState } from "@/components/common";
@@ -34,7 +34,6 @@ export function CommentsSheet({
   open,
   onOpenChange,
   gameId,
-  gameSlug,
   count,
 }: {
   open: boolean;
@@ -49,6 +48,9 @@ export function CommentsSheet({
   count?: number | null;
 }) {
   const auth = useAuth();
+  // Signing in from here returns to the page the sheet was opened on — the feed
+  // or the game page — not always the game page.
+  const here = useRouterState({ select: (s) => s.location.href });
   const profile = getProfileState();
   const avatar = profile.status === "ready" ? avatarUrl(profile.profile) : undefined;
   const name = profile.status === "ready" ? profile.profile.username : "";
@@ -157,7 +159,7 @@ export function CommentsSheet({
             <p className="text-sm text-muted-foreground">
               <Link
                 to="/login"
-                search={{ redirect: `/games/${gameSlug}` }}
+                search={{ redirect: here }}
                 className="font-medium text-foreground underline underline-offset-4"
               >
                 Log in

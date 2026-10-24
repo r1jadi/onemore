@@ -16,7 +16,8 @@ import { Analytics } from "@vercel/analytics/react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
-import { rootSeo } from "../lib/seo";
+import { rootSeo, SITE_NAME } from "../lib/seo";
+import { useDocumentTitle } from "@/lib/document-title";
 import { AppShell } from "@/components/layout/AppShell";
 import { SafeAreaDiagnostics } from "@/components/dev/SafeAreaDiagnostics";
 import { Toaster } from "@/components/ui/sonner";
@@ -57,6 +58,7 @@ const UNFINISHED_SIGNUP_PATHS = [
 ];
 
 function NotFoundComponent() {
+  useDocumentTitle("Page not found");
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
@@ -122,9 +124,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     // the matched pathname, so each route only states its own title/description
     // and private routes are excluded from indexing in exactly one place.
     const page = rootSeo(matches[matches.length - 1]?.pathname ?? "/");
+    // A route's own title wins over this one. Only the root matched means no
+    // route did, and the 404 page needs a title of its own rather than none.
+    const notFound = matches.length <= 1 || matches.some((match) => match.status === "notFound");
     return {
       meta: [
         { charSet: "utf-8" },
+        { title: notFound ? `Page not found — ${SITE_NAME}` : SITE_NAME },
         { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" },
         { name: "theme-color", content: "#16171b" },
         { name: "apple-mobile-web-app-capable", content: "yes" },

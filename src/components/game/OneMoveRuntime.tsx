@@ -92,6 +92,7 @@ export function OneMoveRuntime({ slug, title }: { slug: string; title: string })
         session={state.session}
         verifying={state.status === "submitting"}
         onTap={state.tap}
+        onBegin={state.begin}
         slug={slug}
         title={title}
       />
@@ -118,6 +119,7 @@ function Board({
   session,
   verifying,
   onTap,
+  onBegin,
   slug,
   title,
 }: {
@@ -125,6 +127,8 @@ function Board({
   session: PlaySession;
   verifying: boolean;
   onTap: (cell: number) => void;
+  /** Starts the run's clock; the time spent on the rules is not the run's. */
+  onBegin: () => void;
   slug: string;
   title: string;
 }) {
@@ -175,7 +179,15 @@ function Board({
           </div>
 
           <div className="flex w-full flex-col gap-2">
-            <Button variant="play" size="lg" onClick={() => setStarted(true)} autoFocus>
+            <Button
+              variant="play"
+              size="lg"
+              onClick={() => {
+                onBegin();
+                setStarted(true);
+              }}
+              autoFocus
+            >
               Start run
             </Button>
             <Button asChild variant="ghost" size="lg">
