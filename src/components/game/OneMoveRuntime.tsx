@@ -252,7 +252,13 @@ function Board({
         <div
           className={cn(
             "flex max-h-full w-full",
+<<<<<<< HEAD
             board.size > 12 ? "justify-start overflow-auto rounded-xl p-1" : "justify-center",
+=======
+            board.size > 12
+              ? "justify-start overflow-auto rounded-xl p-1"
+              : "justify-center",
+>>>>>>> f78c17c6b1b1f86b03de59f1387ffb7a0927479a
           )}
         >
           <div
