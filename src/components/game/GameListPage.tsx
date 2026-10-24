@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { EmptyState, ErrorState, GridSkeleton, Page, PageHeader } from "@/components/common";
 import { GameCard } from "./GameCard";
 import { Button } from "@/components/ui/button";
-import { catalogErrorMessage, useGames, type GameQuery } from "@/lib/games/catalog";
+import { catalogErrorMessage, useGames, type Game, type GameQuery } from "@/lib/games/catalog";
 
 /**
  * A grid of catalogue games.
@@ -21,6 +21,7 @@ export function GameListPage({
   subtitle,
   query,
   ranked,
+  arrange,
   empty = { title: "Nothing here yet", body: "Check back soon — new games are added every week." },
   children,
   action,
@@ -30,6 +31,12 @@ export function GameListPage({
   /** The catalogue query this page lists. Omit it when `children` supplies the body. */
   query?: GameQuery;
   ranked?: boolean;
+  /**
+   * Reorders (or narrows) the loaded games, such as by plays. A page that
+   * arranges its games shows one page only: "Load more" would append games
+   * that were never part of the ordering.
+   */
+  arrange?: (games: readonly Game[]) => Game[];
   empty?: { title: string; body?: string };
   /** Rendered instead of a list, for a page whose data does not exist yet. */
   children?: ReactNode;
@@ -39,7 +46,7 @@ export function GameListPage({
     <Page className="max-w-5xl">
       <PageHeader back title={title} subtitle={subtitle} actions={action} />
       {query ? (
-        <CatalogueList query={query} ranked={ranked} empty={empty} />
+        <CatalogueList query={query} ranked={ranked} arrange={arrange} empty={empty} />
       ) : (
         <div className="px-4 md:px-0">{children}</div>
       )}
@@ -51,10 +58,12 @@ export function GameListPage({
 function CatalogueList({
   query,
   ranked,
+  arrange,
   empty,
 }: {
   query: GameQuery;
   ranked?: boolean;
+  arrange?: (games: readonly Game[]) => Game[];
   empty: { title: string; body?: string };
 }) {
   const { status, items, nextCursor, loadingMore, error, loadMoreError, retry, loadMore } =
@@ -68,14 +77,16 @@ function CatalogueList({
     );
   }
 
-  if (items.length === 0) {
+  const shown = arrange ? arrange(items) : items;
+
+  if (shown.length === 0) {
     return <EmptyState title={empty.title} body={empty.body} />;
   }
 
   return (
     <>
       <div className="grid grid-cols-2 gap-x-3 gap-y-5 px-4 md:grid-cols-3 md:px-0 lg:grid-cols-4">
-        {items.map((game, i) => (
+        {shown.map((game, i) => (
           <GameCard key={game.slug} game={game} rank={ranked ? i + 1 : undefined} />
         ))}
       </div>
@@ -84,7 +95,7 @@ function CatalogueList({
           {catalogErrorMessage(loadMoreError)}
         </p>
       )}
-      {nextCursor && (
+      {nextCursor && !arrange && (
         <div className="mt-6 flex justify-center">
           <Button variant="secondary" onClick={loadMore} disabled={loadingMore}>
             {loadingMore ? "Loading…" : "Load more"}

@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { GameListPage } from "@/components/game/GameListPage";
+import { Link } from "@tanstack/react-router";
 import { EmptyState } from "@/components/common";
+import { Button } from "@/components/ui/button";
 import { seo } from "@/lib/seo";
 
 export const Route = createFileRoute("/trending")({
@@ -21,8 +23,13 @@ function Trending() {
   return (
     <GameListPage title="Trending games" subtitle="What everyone is playing right now.">
       <EmptyState
-        title="Trending is not available yet"
-        body="A trend ranks plays over a window of time. Plays are recorded, but no game is ranked from them yet. Browse the newest games instead."
+        title="Trending is coming soon"
+        body="Until then, see which games people have played the most."
+        action={
+          <Button asChild variant="secondary">
+            <Link to="/popular">See popular games</Link>
+          </Button>
+        }
       />
     </GameListPage>
   );

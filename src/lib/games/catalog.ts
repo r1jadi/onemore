@@ -39,6 +39,20 @@ const GAME_ASSET_BUCKET = "game-assets";
 
 /** The contract's default and maximum page size. */
 export const DEFAULT_PAGE_SIZE = 20;
+
+/**
+ * Games ordered by completed runs, most first, leaving out games nobody has
+ * finished. `plays` is counted by the database, so this is a real ranking of the
+ * games it is given; ties keep the catalogue's own (newest-first) order.
+ */
+export function mostPlayed(games: readonly Game[]): Game[] {
+  return games
+    .filter((game) => game.plays > 0)
+    .map((game, index) => ({ game, index }))
+    .sort((a, b) => b.game.plays - a.game.plays || a.index - b.index)
+    .map(({ game }) => game);
+}
+
 export const MAX_PAGE_SIZE = 100;
 
 /** The only order the catalogue can compute from real data. */

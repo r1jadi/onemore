@@ -1,5 +1,11 @@
-import { CircleSlash } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { CircleSlash, Users } from "lucide-react";
+import { useEffect, useState } from "react";
+
 import { Avatar, EmptyState, ErrorState, ListSkeleton } from "@/components/common";
+import { Button } from "@/components/ui/button";
+import { useAuth } from "@/lib/auth/session";
+import { fetchProfilesByIds, listFollowees } from "@/lib/social/follows";
 import {
   playErrorMessage,
   useLeaderboard,
@@ -23,8 +29,9 @@ import {
  *     answer, so it gets the empty state rather than an error or a zero.
  *   - **error** — the read failed. Retryable, and never silently replaced with a
  *     blank board.
- *   - **following** — no friends board exists, because there is no following graph
- *     to compute one from. The tab stays so the feature is visible, and says so.
+ *   - **following** — the global board narrowed to the caller and the people they
+ *     follow. Ranks stay the global ones, so a row never claims a place it does
+ *     not hold; see `FollowingBoard`.
  */
 export function LeaderboardList({
   gameSlug,
@@ -40,8 +47,7 @@ export function LeaderboardList({
   scope?: BoardScope;
   showMe?: boolean;
 }) {
-  // A following board cannot be computed, so no request is made for one rather
-  // than a request that is refused.
+  // The following board reads the global board itself, so this one is not asked for.
   const state = useLeaderboard(scope === "friends" ? "" : (gameSlug ?? ""), {
     scope,
     period,
@@ -59,13 +65,7 @@ export function LeaderboardList({
   }
 
   if (scope === "friends") {
-    return (
-      <EmptyState
-        icon={CircleSlash}
-        title="No following board yet"
-        body="A friends board needs a following graph, which does not exist yet. Switch to Global for the real ranking."
-      />
-    );
+    return <FollowingBoard gameSlug={gameSlug} period={period} />;
   }
 
   if (state.status === "loading") return <ListSkeleton rows={limit ?? 7} />;
@@ -126,5 +126,143 @@ export function LeaderboardList({
         </div>
       )}
     </div>
+  );
+}
+
+/** How many rows of the global board the following view looks through. */
+const FOLLOWING_SCAN = 100;
+
+type FollowedState =
+  | { status: "loading" }
+  | { status: "ready"; usernames: Set<string>; following: number }
+  | { status: "error" };
+
+/** The usernames of the signed-in player and everyone they follow. */
+function useFollowedUsernames(userId: string | undefined): FollowedState & { retry: () => void } {
+  const [attempt, setAttempt] = useState(0);
+  const [state, setState] = useState<FollowedState>({ status: "loading" });
+
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    setState({ status: "loading" });
+    listFollowees(userId)
+      .then(async (ids) => {
+        const profiles = await fetchProfilesByIds([userId, ...ids]);
+        if (cancelled) return;
+        setState({
+          status: "ready",
+          usernames: new Set(profiles.map((profile) => profile.username)),
+          following: ids.length,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setState({ status: "error" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, attempt]);
+
+  return { ...state, retry: () => setAttempt((n) => n + 1) };
+}
+
+/**
+ * You and the people you follow, on one game's board.
+ *
+ * It is the global board narrowed down, not a separate ranking: each row keeps
+ * the rank it holds globally, so "#4" means the same thing on both tabs. Only the
+ * top of the global board is looked through, which is where a comparison between
+ * friends is interesting.
+ */
+function FollowingBoard({ gameSlug, period }: { gameSlug: string; period: BoardPeriod }) {
+  const auth = useAuth();
+  const userId = auth.status === "authenticated" ? auth.session.userId : undefined;
+  const followed = useFollowedUsernames(userId);
+  const board = useLeaderboard(userId ? gameSlug : "", {
+    scope: "global",
+    period,
+    limit: FOLLOWING_SCAN,
+  });
+
+  if (auth.status === "restoring") return <ListSkeleton rows={5} />;
+
+  if (!userId) {
+    return (
+      <EmptyState
+        icon={Users}
+        title="See how the people you follow did"
+        body="Sign in, follow a few players, and their scores show up here next to yours."
+        action={
+          <Button asChild variant="secondary">
+            <Link to="/login" search={{ redirect: `/leaderboards/${gameSlug}` }}>
+              Log in
+            </Link>
+          </Button>
+        }
+      />
+    );
+  }
+
+  if (followed.status === "error" || board.status === "error") {
+    return (
+      <ErrorState
+        title="Couldn't load the leaderboard"
+        body={board.status === "error" ? playErrorMessage(board.error) : undefined}
+        onRetry={() => {
+          followed.retry();
+          if (board.status === "error") board.retry();
+        }}
+      />
+    );
+  }
+
+  if (followed.status === "loading" || board.status === "loading") {
+    return <ListSkeleton rows={5} />;
+  }
+
+  if (followed.following === 0) {
+    return (
+      <EmptyState
+        icon={Users}
+        title="You're not following anyone yet"
+        body="Follow players from their profiles or from search, and their best scores show up here."
+        action={
+          <Button asChild variant="secondary">
+            <Link to="/search">Find people</Link>
+          </Button>
+        }
+      />
+    );
+  }
+
+  const rows = board.board.entries.filter((row) => followed.usernames.has(row.username));
+
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        icon={CircleSlash}
+        title={period === "all" ? "No scores yet" : "No scores in this window"}
+        body="Nobody you follow is on this board yet. Their best runs show up here once they're verified."
+      />
+    );
+  }
+
+  return (
+    <ol className="divide-y divide-border">
+      {rows.map((row) => (
+        <li
+          key={`${row.rank}-${row.username}`}
+          className="enter flex items-center gap-3 px-4 py-2.5 md:rounded-lg md:px-2"
+        >
+          <span className="w-6 text-center font-mono text-sm tabular text-muted-foreground">
+            {row.rank}
+          </span>
+          <Avatar name={row.username || "player"} size="sm" />
+          <span className="flex-1 truncate text-sm">@{row.username}</span>
+          <span className="font-semibold tabular">{row.score}</span>
+        </li>
+      ))}
+    </ol>
   );
 }

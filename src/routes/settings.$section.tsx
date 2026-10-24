@@ -25,12 +25,15 @@ import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/settings/$section")({
   head: ({ params }) => {
-    const t = allSettings.find((s) => s.slug === params.section)?.title;
+    const item = allSettings.find((s) => s.slug === params.section);
+    const t = item?.title;
     // An unknown section has no name of its own; without the guard the title
-    // reads "Settings settings — Unbored".
+    // reads "Settings settings — Unbored". Pages that are not settings as such
+    // (Help, the legal pages, About) carry their own `pageTitle`.
+    const pageTitle = item ? (item.pageTitle ?? `${item.title} settings`) : "Settings";
     return {
       meta: [
-        { title: t ? `${t} settings — Unbored` : "Settings — Unbored" },
+        { title: `${pageTitle} — Unbored` },
         {
           name: "description",
           content: t ? `Manage ${t.toLowerCase()} on Unbored.` : "Manage your Unbored settings.",
@@ -317,10 +320,6 @@ function Body({ section }: { section: string }) {
               {language === option.code && <Check className="size-4 text-primary" />}
             </button>
           ))}
-          <p className="text-xs text-muted-foreground">
-            Navigation labels change immediately. The rest of the interface is still English; more
-            copy is translated as the translations are completed.
-          </p>
         </div>
       );
     case "appearance": {
@@ -406,8 +405,7 @@ function Body({ section }: { section: string }) {
           </Group>
           <div className="mt-4 px-4 md:px-0">
             <p className="text-sm text-muted-foreground">
-              Still stuck? Report a problem on the project&apos;s issue tracker — it is the real
-              support channel for this deployment.
+              Still stuck, or found a bug? Tell us on our issue tracker and we&apos;ll take a look.
             </p>
             <Button asChild size="lg" className="mt-3 w-full md:w-auto">
               <a href="https://github.com/r1jadi/unbored/issues" target="_blank" rel="noreferrer">

@@ -47,25 +47,28 @@ function Categories() {
       )}
       {state.status === "ready" && (
         <div className="grid grid-cols-2 gap-3 px-4 md:grid-cols-3 md:px-0">
-          {state.items.map((c) => {
-            const Icon = icons[c.slug] ?? Puzzle;
-            return (
-              <Link
-                key={c.slug}
-                to="/categories/$slug"
-                params={{ slug: c.slug }}
-                className="press enter flex flex-col gap-6 rounded-xl border border-border bg-surface p-4 hover:bg-surface-2"
-              >
-                <Icon className="size-5 text-muted-foreground" strokeWidth={1.75} />
-                <div>
-                  <p className="font-medium">{c.name}</p>
-                  <p className="text-xs text-muted-foreground tabular">
-                    {c.gameCount} {c.gameCount === 1 ? "game" : "games"}
-                  </p>
-                </div>
-              </Link>
-            );
-          })}
+          {/* A category with no published game is a dead end, so it waits until it has one. */}
+          {state.items
+            .filter((c) => c.gameCount > 0)
+            .map((c) => {
+              const Icon = icons[c.slug] ?? Puzzle;
+              return (
+                <Link
+                  key={c.slug}
+                  to="/categories/$slug"
+                  params={{ slug: c.slug }}
+                  className="press enter flex flex-col gap-6 rounded-xl border border-border bg-surface p-4 hover:bg-surface-2"
+                >
+                  <Icon className="size-5 text-muted-foreground" strokeWidth={1.75} />
+                  <div>
+                    <p className="font-medium">{c.name}</p>
+                    <p className="text-xs text-muted-foreground tabular">
+                      {c.gameCount} {c.gameCount === 1 ? "game" : "games"}
+                    </p>
+                  </div>
+                </Link>
+              );
+            })}
         </div>
       )}
     </Page>

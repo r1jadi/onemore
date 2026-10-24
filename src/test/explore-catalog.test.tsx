@@ -56,8 +56,9 @@ async function renderExplore() {
   });
 }
 
-function gamePayload(slug: string, title: string) {
+function gamePayload(slug: string, title: string, plays = 0) {
   return {
+    plays,
     slug,
     title,
     tagline: "One move. One solution.",
@@ -144,24 +145,56 @@ describe("Explore's catalogue sections", () => {
     expect(screen.queryByText("7 Second")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Puzzle" })).not.toBeInTheDocument();
 
-    // Trending and Popular are honest absences rather than failures, and they
-    // stay that way whether or not the catalogue answered.
-    expect(screen.getByText("Trending is not available yet")).toBeInTheDocument();
+    // No ranking sections are shown when there is nothing to rank.
+    expect(screen.queryByRole("heading", { name: "Trending" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Popular" })).not.toBeInTheDocument();
   });
 
-  /**
-   * The bug this guards against: the unfilled sections said "nothing records
-   * plays yet" while the catalogue was showing play counts from real sessions.
-   * The absence is the ranking, so the copy has to name that instead.
-   */
-  it("does not claim plays go unrecorded", async () => {
-    catalogFetch(false);
+  it("ranks Popular by completed runs and hides empty categories", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/categories")) {
+          return jsonResponse({
+            items: [
+              { slug: "logic", name: "Logic", description: null, gameCount: 1 },
+              { slug: "word", name: "Word", description: null, gameCount: 0 },
+            ],
+          });
+        }
+        if (url.includes("category=daily")) {
+          return jsonResponse({ items: [gamePayload("7-second", "7 Second")], nextCursor: null });
+        }
+        return jsonResponse({
+          items: [
+            gamePayload("stack-10", "Stack 10", 3),
+            gamePayload("one-move", "One Move", 25),
+            gamePayload("color-merge", "Color Merge", 0),
+          ],
+          nextCursor: null,
+        });
+      }),
+    );
 
     await renderExplore();
 
-    expect(screen.queryByText(/nothing records plays/i)).toBeNull();
-    // Both unfilled sections say the same thing: the plays exist, the ranking does not.
-    expect(screen.getAllByText(/does not rank them yet/i)).toHaveLength(2);
+    const heading = await screen.findByRole("heading", { name: "Popular" });
+    const section = heading.closest("section");
+    if (!section) throw new Error("no Popular section");
+    const titles = within(section)
+      .getAllByRole("link")
+      .map((link) => link.textContent ?? "")
+      .filter((text) => text.includes("One Move") || text.includes("Stack 10"));
+    // Most played first; a game nobody has finished is not listed at all.
+    expect(titles[0]).toContain("One Move");
+    expect(titles[1]).toContain("Stack 10");
+    expect(within(section).queryByText("Color Merge")).not.toBeInTheDocument();
+
+    // No Trending section, and no chip for a category without games.
+    expect(screen.queryByRole("heading", { name: "Trending" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Logic" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Word" })).not.toBeInTheDocument();
   });
 
   it("recovers a failed section from its own retry, with no reload", async () => {

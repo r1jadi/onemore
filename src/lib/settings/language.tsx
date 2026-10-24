@@ -90,13 +90,20 @@ const dictionaries = {
 
 export type TranslationKey = keyof (typeof dictionaries)["en"];
 
+/** Whether a language can be chosen today. See `offeredLanguages`. */
+function isOffered(code: Language): boolean {
+  return offeredLanguages.some((option) => option.code === code);
+}
+
 function readStored(): Language {
   const raw = readWithLegacy(safeLocalStorage(), STORAGE_KEY, LEGACY_STORAGE_KEY);
-  if (raw === "pl") return "pl";
+  // A stored choice of a language that is no longer offered falls back to
+  // English rather than leaving someone in a half-translated interface.
+  if (raw === "pl") return isOffered("pl") ? "pl" : "en";
   if (raw === "en") return "en";
   try {
     const nav = navigator.language.toLowerCase();
-    if (nav.startsWith("pl")) return "pl";
+    if (nav.startsWith("pl") && isOffered("pl")) return "pl";
   } catch {
     // Ignore locale detection failures.
   }
@@ -154,10 +161,13 @@ export function useLanguage(): {
   return { language, setLanguage, t: (key) => dictionaries[language][key] };
 }
 
-/** All offered languages. Add one only with a complete dictionary above. */
+/**
+ * The languages a player can choose. Polish is held back: its dictionary covers
+ * the navigation labels only, and offering it would switch the menus while every
+ * screen stays English. Add it back here once the whole interface is translated.
+ */
 export const offeredLanguages: Array<{ code: Language; label: string; native: string }> = [
   { code: "en", label: "English", native: "English" },
-  { code: "pl", label: "Polish", native: "Polski" },
 ];
 
 /** Fails when a dictionary is missing a key, so partial translations cannot ship. */

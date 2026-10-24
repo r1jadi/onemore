@@ -195,9 +195,9 @@ function Board({
         <p className="text-center text-xs text-muted-foreground tabular" aria-live="polite">
           {readout.pressurePercent === 0
             ? placed < STACK10_TILES
-              ? "The opening sixty tiles are the retired deck"
-              : "Pressure 0% — the ramp starts on the next tile"
-            : `Pressure ${readout.pressurePercent}% · promoted tiles arrive +${readout.heavyBonus}`}
+              ? `Warm-up: heavier tiles start after tile ${STACK10_TILES}`
+              : "Heavier tiles can start arriving now"
+            : `Heavier tile chance ${readout.pressurePercent}% · up to +${readout.heavyBonus}`}
         </p>
       </div>
 

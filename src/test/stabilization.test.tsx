@@ -14,7 +14,9 @@ afterEach(() => {
 
 describe("language support is genuine", () => {
   it("offers only fully translated languages", () => {
-    expect(offeredLanguages.map((l) => l.code).sort()).toEqual(["en", "pl"]);
+    // Polish covers the menus only, so it is not offered until the whole
+    // interface is translated.
+    expect(offeredLanguages.map((l) => l.code).sort()).toEqual(["en"]);
     expect(assertDictionariesComplete()).toEqual([]);
   });
 });

@@ -5,7 +5,8 @@ import { EmptyState, GridSkeleton, Page, PageHeader, Section } from "@/component
 import { GameArt } from "@/components/game/GameArt";
 import { GameCard } from "@/components/game/GameCard";
 import { Button } from "@/components/ui/button";
-import { useCategories, useGames } from "@/lib/games/catalog";
+import { useAuth } from "@/lib/auth/session";
+import { MAX_PAGE_SIZE, mostPlayed, useCategories, useGames } from "@/lib/games/catalog";
 import { seo } from "@/lib/seo";
 
 export const Route = createFileRoute("/explore")({
@@ -48,18 +49,22 @@ function SectionError({ children, onRetry }: { children: ReactNode; onRetry: () 
 /**
  * Explore.
  *
- * The daily challenge and the category list are real. "Trending" and "Popular"
- * are not, and say so rather than reusing the newest games under a ranking
- * heading: both need a ranking of recorded plays over a window, and the catalogue
- * has no ranking endpoint. Plays themselves are recorded (each finished run is a
- * play), so the absence is the ranking, not the data. Showing the catalogue in
- * publication order under "Trending" would be a fabricated ranking.
+ * Every section is real. "Popular" orders the catalogue by completed runs, which
+ * the database counts, and leaves out games nobody has finished. There is no
+ * Trending section: a trend needs plays over a window of time, which nothing
+ * computes yet, and an empty section explaining that is noise for a player.
+ * Categories with no published game are not offered either.
  */
 export function Explore() {
   const daily = useGames({ category: "daily", limit: 1 });
   const newest = useGames({ limit: 5 });
+  const catalogue = useGames({ limit: MAX_PAGE_SIZE });
+  const popular = mostPlayed(catalogue.items).slice(0, 5);
   const categories = useCategories();
+  const withGames =
+    categories.status === "ready" ? categories.items.filter((c) => c.gameCount > 0) : [];
   const challenge = daily.items[0];
+  const signedIn = useAuth().status === "authenticated";
 
   return (
     <Page className="max-w-5xl">
@@ -98,7 +103,11 @@ export function Explore() {
               <p className="text-xs font-medium text-primary">Today's challenge</p>
               <p className="mt-1 text-lg font-semibold">{challenge.title}</p>
               <p className="text-sm text-muted-foreground">
-                {challenge.playable ? "One attempt." : "Not playable yet."}
+                {!challenge.playable
+                  ? "Not playable yet."
+                  : signedIn
+                    ? "One ranked attempt a day."
+                    : "Practise as often as you like."}
               </p>
             </div>
             <GameArt id={challenge.slug} className="size-24 shrink-0 rounded-xl" />
@@ -119,7 +128,7 @@ export function Explore() {
           </div>
         ) : (
           <div className="no-scrollbar flex gap-2 overflow-x-auto px-4 md:flex-wrap md:px-0">
-            {categories.items.map((c) => (
+            {withGames.map((c) => (
               <Link
                 key={c.slug}
                 to="/categories/$slug"
@@ -153,26 +162,22 @@ export function Explore() {
         )}
       </Section>
 
-      {(
-        [
-          [
-            "Trending",
-            "/trending",
-            "Trending needs plays ranked over time. Plays are recorded, but the catalogue does not rank them yet, so no game can be listed here.",
-          ],
-          [
-            "Popular",
-            "/popular",
-            "Popularity needs plays counted and ranked. Plays are recorded, but the catalogue does not rank them yet, so no game can be listed here.",
-          ],
-        ] as const
-      ).map(([title, to, body]) => (
-        <Section key={title} title={title} action={<More to={to} />}>
-          <div className="px-4 md:px-0">
-            <EmptyState title={`${title} is not available yet`} body={body} />
+      {/* Hidden until something has been played: an empty "Popular" row says
+          nothing a player can use. */}
+      {catalogue.status === "ready" && popular.length > 0 && (
+        <Section title="Popular" action={<More to="/popular" />}>
+          <div className="no-scrollbar flex gap-3 overflow-x-auto px-4 md:grid md:grid-cols-4 md:px-0 lg:grid-cols-5">
+            {popular.map((game, i) => (
+              <GameCard
+                key={game.slug}
+                game={game}
+                rank={i + 1}
+                className="w-36 shrink-0 md:w-auto"
+              />
+            ))}
           </div>
         </Section>
-      ))}
+      )}
     </Page>
   );
 }

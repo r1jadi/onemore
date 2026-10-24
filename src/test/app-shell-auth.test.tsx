@@ -240,30 +240,17 @@ describe("session restoration on boot", () => {
   });
 });
 
-describe("language selection changes the interface", () => {
-  it("renders the stored language's navigation labels without a reload", async () => {
+describe("language selection", () => {
+  // Polish is held back until the whole interface is translated, so a visitor who
+  // chose it earlier is shown English rather than English screens under Polish menus.
+  it("falls back to English for a stored language that is no longer offered", async () => {
     window.localStorage.setItem("unbored-language", "pl");
     await renderShell();
 
     const sidebar = desktopSidebar();
-    expect(within(sidebar).getByRole("link", { name: "Dla Ciebie" })).toHaveAttribute("href", "/");
-    expect(within(sidebar).getByRole("link", { name: "Rankingi" })).toHaveAttribute(
-      "href",
-      "/leaderboards",
-    );
-    expect(within(sidebar).queryByRole("link", { name: "For You" })).toBeNull();
-    expect(document.documentElement.lang).toBe("pl");
-  });
-
-  it("keeps a language chosen before the rename and moves it forward", async () => {
-    window.localStorage.setItem("onemore-language", "pl");
-    await renderShell();
-
-    const sidebar = desktopSidebar();
-    expect(within(sidebar).getByRole("link", { name: "Dla Ciebie" })).toHaveAttribute("href", "/");
-    // The value moved to the current key, so the fallback runs once per visitor.
-    expect(window.localStorage.getItem("onemore-language")).toBeNull();
-    expect(window.localStorage.getItem("unbored-language")).toBe("pl");
+    expect(within(sidebar).getByRole("link", { name: "For You" })).toHaveAttribute("href", "/");
+    expect(within(sidebar).queryByRole("link", { name: "Dla Ciebie" })).toBeNull();
+    expect(document.documentElement.lang).toBe("en");
   });
 });
 

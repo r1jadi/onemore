@@ -1,7 +1,6 @@
 import {
   Accessibility,
   Bell,
-  Globe,
   HelpCircle,
   Info,
   Link2,
@@ -15,11 +14,29 @@ import {
   ScrollText,
 } from "lucide-react";
 
-export const settingsGroups = [
+/**
+ * One settings page. `pageTitle` is the browser tab's name when "<title> settings"
+ * would read badly ("Help settings", "Blocked users settings").
+ */
+export type SettingsItem = {
+  slug: string;
+  title: string;
+  desc: string;
+  icon: typeof User;
+  pageTitle?: string;
+};
+
+export const settingsGroups: { label: string; items: SettingsItem[] }[] = [
   {
     label: "Account",
     items: [
-      { slug: "account", title: "Account", desc: "Email, phone, password", icon: User },
+      {
+        slug: "account",
+        title: "Email & password",
+        desc: "How you sign in",
+        icon: User,
+        pageTitle: "Email & password",
+      },
       { slug: "profile", title: "Profile", desc: "Photo, name, username, bio", icon: UserCircle },
       {
         slug: "security",
@@ -27,7 +44,13 @@ export const settingsGroups = [
         desc: "Two-step verification, sessions",
         icon: Shield,
       },
-      { slug: "connected", title: "Connected accounts", desc: "Google", icon: Link2 },
+      {
+        slug: "connected",
+        title: "Connected accounts",
+        desc: "Google",
+        icon: Link2,
+        pageTitle: "Connected accounts",
+      },
     ],
   },
   {
@@ -35,7 +58,6 @@ export const settingsGroups = [
     items: [
       { slug: "privacy", title: "Privacy", desc: "Who can see your activity", icon: Lock },
       { slug: "notifications", title: "Notifications", desc: "Push and email", icon: Bell },
-      { slug: "language", title: "Language", desc: "English, Polski", icon: Globe },
       { slug: "appearance", title: "Appearance", desc: "Dark, light, system", icon: Palette },
       {
         slug: "accessibility",
@@ -43,16 +65,40 @@ export const settingsGroups = [
         desc: "Motion, contrast, text size",
         icon: Accessibility,
       },
-      { slug: "blocked", title: "Blocked users", desc: "People you've blocked", icon: ShieldOff },
+      {
+        slug: "blocked",
+        title: "Blocked users",
+        desc: "People you've blocked",
+        icon: ShieldOff,
+        pageTitle: "Blocked users",
+      },
     ],
   },
   {
     label: "Support",
     items: [
-      { slug: "help", title: "Help", desc: "FAQ and contact", icon: HelpCircle },
-      { slug: "terms", title: "Terms & Conditions", desc: "", icon: ScrollText },
-      { slug: "privacy-policy", title: "Privacy Policy", desc: "", icon: FileText },
-      { slug: "about", title: "About", desc: "Version and source", icon: Info },
+      { slug: "help", title: "Help", desc: "FAQ and contact", icon: HelpCircle, pageTitle: "Help" },
+      {
+        slug: "terms",
+        title: "Terms & Conditions",
+        desc: "",
+        icon: ScrollText,
+        pageTitle: "Terms & Conditions",
+      },
+      {
+        slug: "privacy-policy",
+        title: "Privacy Policy",
+        desc: "",
+        icon: FileText,
+        pageTitle: "Privacy Policy",
+      },
+      {
+        slug: "about",
+        title: "About",
+        desc: "Version and source",
+        icon: Info,
+        pageTitle: "About Unbored",
+      },
     ],
   },
 ];

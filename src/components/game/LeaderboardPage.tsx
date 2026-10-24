@@ -1,7 +1,7 @@
-import { Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { LeaderboardList } from "./Leaderboard";
-import { Page, PageHeader } from "@/components/common";
+import { EmptyState, ListSkeleton, Page, PageHeader } from "@/components/common";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useDocumentTitle } from "@/lib/document-title";
 import { DEFAULT_PAGE_SIZE, useGames } from "@/lib/games/catalog";
@@ -20,7 +20,9 @@ import { cn } from "@/lib/utils";
  * The all-time window is the default because it is the one that can show every
  * recorded score; the shorter windows are real filters over the same data.
  *
- * `gameId` is a catalogue slug, matching the URL the game pages use.
+ * `gameId` is a catalogue slug, matching the URL the game pages use. Scores belong
+ * to a game, so `/leaderboards` on its own opens the first game's board rather
+ * than an empty "pick a game" screen.
  */
 export function LeaderboardPage({ gameId }: { gameId?: string }) {
   const [scope, setScope] = useState<BoardScope>("global");
@@ -28,6 +30,13 @@ export function LeaderboardPage({ gameId }: { gameId?: string }) {
   const { status, items } = useGames({ limit: DEFAULT_PAGE_SIZE });
   const game = items.find((g) => g.slug === gameId);
   useDocumentTitle(game ? `${game.title} leaderboard` : undefined);
+
+  const navigate = useNavigate();
+  const first = items[0]?.slug;
+  useEffect(() => {
+    if (gameId || !first) return;
+    void navigate({ to: "/leaderboards/$id", params: { id: first }, replace: true });
+  }, [gameId, first, navigate]);
 
   return (
     <Page>
@@ -37,17 +46,6 @@ export function LeaderboardPage({ gameId }: { gameId?: string }) {
         subtitle="Verified scores only."
       />
       <div className="no-scrollbar flex gap-2 overflow-x-auto px-4 pb-3 md:px-0">
-        <Link
-          to="/leaderboards"
-          className={cn(
-            "press shrink-0 rounded-full px-3.5 py-1.5 text-sm",
-            !gameId
-              ? "bg-foreground font-medium text-background"
-              : "bg-surface text-muted-foreground",
-          )}
-        >
-          All games
-        </Link>
         {items.map((g) => (
           <Link
             key={g.slug}
@@ -87,7 +85,13 @@ export function LeaderboardPage({ gameId }: { gameId?: string }) {
           <option value="all">All time</option>
         </select>
       </div>
-      <LeaderboardList gameSlug={gameId} scope={scope} period={period} showMe />
+      {gameId ? (
+        <LeaderboardList gameSlug={gameId} scope={scope} period={period} showMe />
+      ) : status === "error" ? null : status === "loading" || first ? (
+        <ListSkeleton rows={7} />
+      ) : (
+        <EmptyState title="No games yet" body="Leaderboards appear once a game is published." />
+      )}
     </Page>
   );
 }

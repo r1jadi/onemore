@@ -164,8 +164,8 @@ describe("starting a run", () => {
     expect(screen.getByText("1")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /^Column \d,/ })).toHaveLength(4);
     expect(screen.getByText("Tile 1")).toBeInTheDocument();
-    // The opening sixty are the retired deck, so the ramp has not started yet.
-    expect(screen.getByText(/opening sixty tiles are the retired deck/)).toBeInTheDocument();
+    // The opening sixty are the warm-up, so the ramp has not started yet.
+    expect(screen.getByText("Warm-up: heavier tiles start after tile 60")).toBeInTheDocument();
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
@@ -275,7 +275,7 @@ describe("playing the board", () => {
     });
 
     expect(screen.getByText("Tile 61")).toBeInTheDocument();
-    expect(screen.getByText(/the ramp starts on the next tile/)).toBeInTheDocument();
+    expect(screen.getByText("Heavier tiles can start arriving now")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /play again/i })).not.toBeInTheDocument();
 
     await act(async () => {
@@ -284,7 +284,7 @@ describe("playing the board", () => {
 
     // Four tiles into the ramp the chance is real, and the board says so.
     expect(screen.getByText("Tile 65")).toBeInTheDocument();
-    expect(screen.getByText(/Pressure 1% · promoted tiles arrive \+1/)).toBeInTheDocument();
+    expect(screen.getByText("Heavier tile chance 1% · up to +1")).toBeInTheDocument();
     expect(spy.mock.calls.some((call) => String(call[0]).includes("/complete"))).toBe(false);
   });
 
