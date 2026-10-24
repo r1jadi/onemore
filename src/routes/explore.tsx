@@ -101,10 +101,7 @@ export function Explore() {
                 {challenge.playable ? "One attempt." : "Not playable yet."}
               </p>
             </div>
-            <GameArt
-              id={challenge.slug}
-              className="size-24 shrink-0 rounded-xl [&_span.text-6xl]:text-2xl [&>div>div]:size-20 [&>div>div]:border-4 [&>div>span]:hidden"
-            />
+            <GameArt id={challenge.slug} className="size-24 shrink-0 rounded-xl" />
           </Link>
         ) : null}
       </div>

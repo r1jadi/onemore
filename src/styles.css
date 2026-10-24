@@ -90,6 +90,8 @@
   --warning: oklch(0.8 0.14 85);
   --info: oklch(0.72 0.11 235);
   --glass: oklch(0.2 0.006 270 / 0.62);
+  --scrim: oklch(0.12 0.006 270 / 0.92);
+  --scrim-clear: oklch(0.12 0.006 270 / 0);
   --glass-border: oklch(1 0 0 / 0.09);
   --border: oklch(1 0 0 / 0.08);
   --input: oklch(1 0 0 / 0.12);
@@ -163,8 +165,11 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The fade behind text laid over art. It follows the theme: dark behind light
+   text in dark mode, light behind dark text in light mode, so the copy on top
+   keeps its contrast either way. */
 @utility scrim-bottom {
-  background: linear-gradient(to top, oklch(0.12 0.006 270 / 0.92), oklch(0.12 0.006 270 / 0));
+  background: linear-gradient(to top, var(--scrim), var(--scrim-clear));
 }
 
 @utility no-scrollbar {
@@ -216,6 +221,8 @@
   --accent: oklch(0.9 0.004 270);
   --accent-foreground: oklch(0.2 0.006 270);
   --glass: oklch(1 0 0 / 0.72);
+  --scrim: oklch(0.98 0.002 270 / 0.94);
+  --scrim-clear: oklch(0.98 0.002 270 / 0);
   --glass-border: oklch(0.2 0.006 270 / 0.1);
   --border: oklch(0.2 0.006 270 / 0.1);
   --input: oklch(0.2 0.006 270 / 0.12);

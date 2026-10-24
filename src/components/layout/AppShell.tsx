@@ -151,7 +151,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         aria-label="Main"
         className={cn(
           "fixed inset-x-0 bottom-0 z-40 safe-bottom md:hidden",
-          feed ? "bg-background/80 backdrop-blur-xl" : "glass border-x-0 border-b-0",
+          // Solid outside the feed: a translucent bar over a page of text lets the
+          // text show through behind the labels and reads as a rendering bug.
+          feed ? "bg-background/80 backdrop-blur-xl" : "border-t border-border bg-background",
         )}
       >
         <ul className="mx-auto grid h-16 max-w-md grid-cols-5">

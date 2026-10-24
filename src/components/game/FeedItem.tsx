@@ -113,12 +113,16 @@ export function FeedItem({ game }: { game: Game }) {
         <Link
           to={game.playable ? "/play/$id" : "/games/$id"}
           params={{ id: game.slug }}
-          className="group relative flex-1"
+          className="group relative flex-1 bg-surface"
           aria-label={game.playable ? `Play ${game.title}` : `View ${game.title}`}
         >
-          <GameArt id={game.slug} className="absolute inset-0" />
-          <div className="absolute inset-0 flex items-center justify-center">
-            <span className="press flex items-center gap-2 rounded-full glass px-5 py-3 text-sm font-semibold group-hover:bg-surface-2">
+          {/* The art gets the space the overlays leave free: below the badges,
+              above the title block, and — on a phone — left of the action rail.
+              The "Tap to play" pill sits under the board rather than on it, so
+              nothing covers the picture. */}
+          <div className="absolute inset-0 flex flex-col items-center gap-3 pt-[max(7rem,calc(env(safe-area-inset-top)+6rem))] pr-[4.5rem] pb-[calc(18.5rem+env(safe-area-inset-bottom))] pl-4 md:px-4 md:pt-14 md:pb-[13.5rem]">
+            <GameArt id={game.slug} className="min-h-0 w-full flex-1" />
+            <span className="press flex shrink-0 items-center gap-2 rounded-full glass px-5 py-3 text-sm font-semibold group-hover:bg-surface-2">
               {game.playable ? (
                 <>
                   <Play className="size-4 fill-current" /> Tap to play

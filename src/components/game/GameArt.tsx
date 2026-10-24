@@ -24,6 +24,11 @@ export const hueClass = (hue: string) => hueBg[hue] ?? "bg-primary";
  * game's art.
  *
  * Purely visual: no game logic runs here.
+ *
+ * The art scales to its box, not to the screen: the root is a size container, and
+ * every board is sized in container units against the *shorter* side
+ * (`min(…cqw, …cqh)`), so a tall feed card, a 4:5 Explore tile and a 96px
+ * thumbnail all show the whole picture rather than cropping it.
  */
 export function GameArt({
   id,
@@ -37,7 +42,7 @@ export function GameArt({
   return (
     <div
       className={cn(
-        "relative flex items-center justify-center overflow-hidden bg-surface",
+        "relative flex items-center justify-center overflow-hidden bg-surface [container-type:size]",
         className,
       )}
       aria-hidden
@@ -82,7 +87,7 @@ function Generated({ seed }: { seed: string }) {
     return (bits + i * 37) % 3;
   });
   return (
-    <div className="grid w-2/3 max-w-72 grid-cols-4 gap-2">
+    <div className="grid w-[min(66cqw,66cqh)] max-w-72 grid-cols-4 gap-[min(2cqw,2cqh,0.5rem)]">
       {cells.map((shade, i) => (
         <div
           key={i}
@@ -101,16 +106,16 @@ function Generated({ seed }: { seed: string }) {
 function Stack10() {
   const cols = [[3, 4, 2], [5, 1], [6, 2, 1], [7]];
   return (
-    <div className="flex h-3/5 items-end gap-[6%] w-3/4">
+    <div className="flex h-[min(60cqh,75cqw)] w-[min(75cqw,80cqh)] items-end gap-[6%]">
       {cols.map((c, i) => (
         <div
           key={i}
-          className="flex flex-1 flex-col-reverse gap-1.5 rounded-lg border border-glass-border p-1.5 h-full"
+          className="flex h-full flex-1 flex-col-reverse gap-[min(1.5cqw,0.375rem)] rounded-lg border border-glass-border p-[min(1.5cqw,0.375rem)]"
         >
           {c.map((n, j) => (
             <div
               key={j}
-              className="flex aspect-square items-center justify-center rounded-md bg-game-1/80 font-mono text-lg font-semibold text-background tabular"
+              className="flex aspect-square items-center justify-center rounded-md bg-game-1/80 font-mono text-[length:min(5cqw,1.125rem)] font-semibold text-background tabular"
             >
               {n}
             </div>
@@ -124,7 +129,7 @@ function Stack10() {
 function ColorMerge() {
   const o = [20, 45, 70, 100, 0, 45, 20, 70, 100, 70, 0, 20, 45, 20, 100, 45];
   return (
-    <div className="grid w-3/4 max-w-80 grid-cols-4 gap-2">
+    <div className="grid w-[min(75cqw,75cqh)] max-w-80 grid-cols-4 gap-[min(2cqw,2cqh,0.5rem)]">
       {o.map((v, i) => (
         <div
           key={i}
@@ -165,7 +170,7 @@ function OneMove() {
   const cells = Array.from({ length: 25 }, (_, i) => i);
   const filled = new Set([6, 7, 8, 11, 13, 16, 17]);
   return (
-    <div className="grid w-2/3 max-w-72 grid-cols-5 gap-1.5">
+    <div className="grid w-[min(66cqw,66cqh)] max-w-72 grid-cols-5 gap-[min(1.5cqw,1.5cqh,0.375rem)]">
       {cells.map((i) => (
         <div
           key={i}
@@ -185,12 +190,12 @@ function OneMove() {
 
 function Chain() {
   return (
-    <div className="flex w-3/4 flex-wrap items-center justify-center gap-3">
+    <div className="flex w-[min(75cqw,90cqh)] flex-wrap items-center justify-center gap-[min(3cqw,3cqh,0.75rem)]">
       {[1, 2, 3, 4, 5, 6, 7].map((i) => (
         <div
           key={i}
           className={cn(
-            "size-12 rounded-full border-2 border-game-5",
+            "size-[min(15cqw,18cqh,3rem)] rounded-full border-2 border-game-5",
             i < 5 && "bg-game-5",
             i === 5 && "bg-game-5/40",
           )}
@@ -203,7 +208,7 @@ function Chain() {
 function MemoryFlash() {
   const lit = new Set([0, 5, 6, 10, 15, 13]);
   return (
-    <div className="grid w-2/3 max-w-72 grid-cols-4 gap-2">
+    <div className="grid w-[min(66cqw,66cqh)] max-w-72 grid-cols-4 gap-[min(2cqw,2cqh,0.5rem)]">
       {Array.from({ length: 16 }, (_, i) => (
         <div
           key={i}
@@ -216,11 +221,16 @@ function MemoryFlash() {
 
 function Seven() {
   return (
-    <div className="flex flex-col items-center gap-3">
-      <div className="flex size-40 items-center justify-center rounded-full border-[6px] border-game-7/30">
-        <span className="font-mono text-6xl font-semibold text-game-7 tabular">7.00</span>
+    <div className="flex flex-col items-center gap-[min(3cqw,3cqh,0.75rem)]">
+      <div className="flex size-[min(64cqw,56cqh,10rem)] items-center justify-center rounded-full border-[length:min(1.5cqw,1.5cqh,6px)] border-game-7/30">
+        <span className="font-mono text-[length:min(15cqw,13cqh,3.75rem)] leading-none font-semibold text-game-7 tabular">
+          7.00
+        </span>
       </div>
-      <span className="text-xs font-medium uppercase text-muted-foreground">Daily challenge</span>
+      {/* Only where there is room for it to be read: a thumbnail shows the dial. */}
+      <span className="text-[length:min(4cqw,0.75rem)] font-medium whitespace-nowrap text-muted-foreground uppercase @max-[9rem]:hidden">
+        Daily challenge
+      </span>
     </div>
   );
 }
