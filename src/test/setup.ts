@@ -1,5 +1,18 @@
 import "@testing-library/jest-dom/vitest";
 
+// The query cache and the engagement batcher are app-wide singletons. Each test
+// starts from an empty cache so one test's answers are never another's. Imported
+// lazily: a static import would load the app's config before the env stubs
+// below are in place.
+afterEach(async () => {
+  const [{ getQueryClient }, { resetEngagementBatching }] = await Promise.all([
+    import("@/lib/query"),
+    import("@/lib/social/engagement"),
+  ]);
+  getQueryClient().clear();
+  resetEngagementBatching();
+});
+
 // Public configuration has to be deterministic: a local `.env.local` is not
 // present on a fresh checkout or in CI, and code that builds a Supabase URL (an
 // avatar, for instance) needs a value a test can assert against.

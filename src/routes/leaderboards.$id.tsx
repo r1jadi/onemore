@@ -1,8 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { LeaderboardPage } from "@/components/game/LeaderboardPage";
 import { titleFromSlug } from "@/lib/games/catalog";
+import { prefetchLeaderboard } from "@/lib/prefetch";
 
 export const Route = createFileRoute("/leaderboards/$id")({
+  loader: ({ context, params }) => prefetchLeaderboard(context.queryClient, params.id),
   head: ({ params }) => {
     const title = titleFromSlug(params.id);
     return {

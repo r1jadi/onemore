@@ -29,10 +29,12 @@ import { DONT_TOUCH_RUNTIME } from "@/lib/games/dont-touch";
 import { MEMORY_FLASH_RUNTIME } from "@/lib/games/memory-flash";
 import { ONE_MOVE_RUNTIME } from "@/lib/games/one-move";
 import { RunProgressContext } from "@/lib/games/run-progress";
+import { prefetchPlay } from "@/lib/prefetch";
 import { SEVEN_SECOND_RUNTIME } from "@/lib/games/seven-second";
 import { STACK10_RUNTIME } from "@/lib/games/stack10";
 
 export const Route = createFileRoute("/play/$id")({
+  loader: ({ context, params }) => prefetchPlay(context.queryClient, params.id),
   head: ({ params }) => {
     const title = titleFromSlug(params.id);
     return {

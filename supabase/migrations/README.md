@@ -43,6 +43,7 @@ The schema's only history. Applied in filename order by the Supabase CLI and by
 | `20261031120000_endless_one_move.sql`             | One Move becomes endless under a new `one-move@2` version: no final board, a board that grows a row and a column every four levels, and no cap on the growth. `one-move@1` keeps its exact twelve-board, 5×5-maximum verification, including the 120-point perfect line and its `cleared` ending. The start gate accepts both, a `one-move@2` session reports the 4096-tap submission bound and lives twelve hours, and the catalogue stops promising a twelfth board. Apply before the client sends `one-move@2`. |
 | `20261101120000_dont_touch_miss_ends_run.sql`     | Don't Touch the Black copy: a white tile that passes the line now ends the run (a client-side ending, like "End run"). `dont-touch@2` verification is unchanged. |
 | `20261102120000_catalogue_copy.sql`               | Catalogue copy: Memory Flash's flash length, Color Merge's tagline, and 7 Second's daily-attempt wording (ranked players only). |
+| `20261103120000_game_engagement_counts.sql`       | `game_engagement_counts`: like and comment counts for many games in one read, for the feed. `security_invoker`, so counts match the per-game reads. Safe in either order with the app deploy (the client falls back). |
 
 Two migrations exist for one feature — the play schema and the catalogue flip — because
 the flip is a claim about shipped code. Applying it before the service that answers

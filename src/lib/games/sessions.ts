@@ -30,10 +30,12 @@
  * should not leave behind on a shared machine.
  */
 
+import { queryOptions, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ApiError, apiFetch } from "@/lib/api/client";
-import { getAccessToken } from "@/lib/auth/session";
+import { getAccessToken, getSessionUserId } from "@/lib/auth/session";
+import { getQueryClient } from "@/lib/query";
 import {
   createRun as createChainRun,
   submission as chainSubmission,
@@ -213,6 +215,23 @@ export function completeRun(
   options: RequestOptions = {},
 ): Promise<RunResult> {
   const token = getAccessToken();
+  return postCompletion(sessionId, submissionBody, durationMs, token, options).then((result) => {
+    // A verified run changes the game's board and its play count; the next
+    // visit to either should read them fresh rather than from cache.
+    const client = getQueryClient();
+    void client.invalidateQueries({ queryKey: ["leaderboard", result.gameSlug] });
+    void client.invalidateQueries({ queryKey: ["games"] });
+    return result;
+  });
+}
+
+function postCompletion(
+  sessionId: string,
+  submissionBody: RunSubmission,
+  durationMs: number,
+  token: string | undefined,
+  options: RequestOptions,
+): Promise<RunResult> {
   return apiFetch<RunResult>(Routes.complete(sessionId), {
     method: "POST",
     body: {
@@ -1363,30 +1382,35 @@ export function useLeaderboard(
   gameSlug: string,
   query: { scope?: BoardScope; period?: BoardPeriod; limit?: number } = {},
 ): LeaderboardState & { retry: () => void } {
+  const board = useQuery(
+    {
+      ...leaderboardQuery(gameSlug, query),
+      // No slug, no board: a caller that has nothing to show yet asks for nothing.
+      enabled: gameSlug !== "",
+    },
+    getQueryClient(),
+  );
+  const { refetch } = board;
+  const retry = useCallback(() => void refetch(), [refetch]);
+
+  if (board.data !== undefined) return { status: "ready", board: board.data, retry };
+  if (board.isError) return { status: "error", error: asApiError(board.error), retry };
+  return { status: "loading", retry };
+}
+
+/** One game's board, for `useLeaderboard` and for a route that prefetches it. */
+export function leaderboardQuery(
+  gameSlug: string,
+  query: { scope?: BoardScope; period?: BoardPeriod; limit?: number } = {},
+) {
   const scope = query.scope ?? "global";
   const period = query.period ?? "all";
   const limit = query.limit ?? DEFAULT_BOARD_SIZE;
-
-  const [attempt, setAttempt] = useState(0);
-  const [state, setState] = useState<LeaderboardState>({ status: "loading" });
-
-  useEffect(() => {
-    if (!gameSlug) return;
-    const controller = new AbortController();
-    setState({ status: "loading" });
-
-    fetchLeaderboard(gameSlug, { scope, period, limit }, { signal: controller.signal })
-      .then((board) => {
-        if (controller.signal.aborted) return;
-        setState({ status: "ready", board });
-      })
-      .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
-        setState({ status: "error", error: asApiError(error) });
-      });
-
-    return () => controller.abort();
-  }, [gameSlug, scope, period, limit, attempt]);
-
-  return { ...state, retry: useCallback(() => setAttempt((n) => n + 1), []) };
+  return queryOptions({
+    // The response carries the caller's own standing, so the viewer is part of the key.
+    queryKey: ["leaderboard", gameSlug, scope, period, limit, getSessionUserId() ?? null] as const,
+    queryFn: ({ signal }) => fetchLeaderboard(gameSlug, { scope, period, limit }, { signal }),
+    // A score just recorded should show up on the next visit, not a minute later.
+    staleTime: 10_000,
+  });
 }

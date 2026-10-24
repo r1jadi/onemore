@@ -31,6 +31,8 @@ import {
   saveGame,
   unlikeGame,
   unsaveGame,
+  loadEngagement,
+  resetEngagementBatching,
   useGameEngagement,
 } from "@/lib/social/engagement";
 
@@ -167,6 +169,13 @@ function createSupabaseDouble() {
     return match[1].split(",").map(decodeURIComponent).includes(value);
   }
 
+  /** A PostgREST filter: absent, `eq.x`, or `in.(x,y)`. */
+  function matches(value: string, clause: string | null): boolean {
+    return (
+      clause === null || eq(value, clause) || (clause.startsWith("in.") && inList(value, clause))
+    );
+  }
+
   function counted(rows: unknown[], init?: RequestInit): Response {
     const headers = new Headers(init?.headers);
     if ((headers.get("Prefer") ?? "").includes("count=exact")) {
@@ -188,6 +197,18 @@ function createSupabaseDouble() {
       );
       return jsonResponse(rows);
     }
+    if (table === "game_engagement_counts" && method === "GET") {
+      const rows = db.games
+        .filter((g) => g.published && matches(g.slug, params.get("slug")))
+        .map((g) => ({
+          game_id: g.id,
+          slug: g.slug,
+          like_count: db.likes.filter((r) => r.target_kind === "game" && r.target_id === g.id)
+            .length,
+          comment_count: db.comments.filter((r) => r.game_id === g.id).length,
+        }));
+      return jsonResponse(rows);
+    }
     if (table === "game_stats" && method === "GET") {
       return jsonResponse(db.stats);
     }
@@ -200,7 +221,7 @@ function createSupabaseDouble() {
           (r) =>
             eq(r.user_id, params.get("user_id")) &&
             eq(r.target_kind, params.get("target_kind")) &&
-            eq(r.target_id, params.get("target_id")),
+            matches(r.target_id, params.get("target_id")),
         );
         return counted(rows, init);
       }
@@ -244,7 +265,7 @@ function createSupabaseDouble() {
       if (method === "GET") {
         if (!me) return errorResponse(401, "JWT missing");
         const rows = db.saves.filter(
-          (r) => r.user_id === me && eq(r.game_id, params.get("game_id")),
+          (r) => r.user_id === me && matches(r.game_id, params.get("game_id")),
         );
         return jsonResponse(rows);
       }
@@ -609,6 +630,38 @@ describe("engagement hook", () => {
     expect(screen.getByTestId("saved").textContent).toBe("false");
     expect(screen.getByTestId("like-count").textContent).toBe("1");
     expect(screen.getByTestId("comment-count").textContent).toBe("0");
+  });
+
+  it("reads a whole feed's engagement in one request, and falls back per game", async () => {
+    const { handler, db } = createSupabaseDouble();
+    db.likes.push({ user_id: OTHER, target_kind: "game", target_id: GAME_ID });
+    const spy = stubApiAndSupabase(handler);
+
+    // Two cards asking in the same tick: one batched read of the counts view.
+    const [known, unknown] = await Promise.all([
+      loadEngagement(GAME_SLUG),
+      loadEngagement("not-a-game"),
+    ]);
+    expect(known).toMatchObject({ gameId: GAME_ID, likeCount: 1, commentCount: 0 });
+    expect(unknown.gameId).toBeNull();
+    const reads = spy.mock.calls.map((call) => String(call[0]));
+    expect(reads.filter((url) => url.includes("/game_engagement_counts"))).toHaveLength(1);
+    expect(reads.some((url) => url.includes("/rest/v1/likes"))).toBe(false);
+
+    // Without the view (an older database), each game is read the per-game way.
+    resetEngagementBatching();
+    stubApiAndSupabase((url, init) => {
+      if (url.includes("/game_engagement_counts")) {
+        return new Response(JSON.stringify({ message: "relation does not exist" }), {
+          status: 404,
+        });
+      }
+      return handler(url, init);
+    });
+    await expect(loadEngagement(GAME_SLUG)).resolves.toMatchObject({
+      gameId: GAME_ID,
+      likeCount: 1,
+    });
   });
 
   it("toggles like and save through the database when signed in", async () => {

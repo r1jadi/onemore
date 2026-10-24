@@ -1,9 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Feed } from "@/components/game/Feed";
 import { useGames } from "@/lib/games/catalog";
+import { prefetchFeed } from "@/lib/prefetch";
 import { seo } from "@/lib/seo";
 
 export const Route = createFileRoute("/")({
+  loader: ({ context }) => prefetchFeed(context.queryClient),
   head: () =>
     seo("For You", "Swipe through playable games. Play, score, and swipe to the next one."),
   component: ForYou,

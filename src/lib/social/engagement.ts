@@ -24,10 +24,17 @@
  * placeholder.
  */
 
+import { queryOptions, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
 
 import { ApiError } from "@/lib/api/client";
-import { getAccessToken, getAuthState, subscribe as subscribeToAuth } from "@/lib/auth/session";
+import {
+  getAccessToken,
+  getAuthState,
+  subscribe as subscribeToAuth,
+  useAuth,
+} from "@/lib/auth/session";
+import { getQueryClient } from "@/lib/query";
 import type { Game } from "@/lib/games/catalog";
 import { fetchProfilesByIds, type PublicProfile } from "@/lib/social/follows";
 import { restCount, restGet, restMutate, SupabaseRestError } from "@/lib/supabase/rest";
@@ -597,122 +604,258 @@ export type EngagementState = {
   refresh: () => void;
 };
 
+// ── Engagement, batched ─────────────────────────────────────────────────────
+
+/** What one game's like/save controls need, for one viewer. */
+export type Engagement = {
+  gameId: string | null;
+  likeCount: number | null;
+  commentCount: number | null;
+  liked: boolean;
+  saved: boolean;
+};
+
+type CountsRow = { game_id: string; slug: string; like_count: number; comment_count: number };
+
+/** The cache key for one game's engagement as one viewer sees it. */
+export function engagementKey(slug: string, viewer: string | null) {
+  return ["engagement", slug, viewer] as const;
+}
+
+/**
+ * Reads engagement for many games at once: one read of the counts view, plus
+ * the viewer's own likes and saves for those games when signed in — three
+ * requests for a whole feed instead of four per card.
+ */
+export async function fetchEngagementBatch(slugs: string[]): Promise<Map<string, Engagement>> {
+  const unique = [...new Set(slugs.filter((slug) => slug !== ""))];
+  if (unique.length === 0) return new Map();
+  const slugFilter = unique.map((slug) => encodeURIComponent(slug)).join(",");
+  const counts = await restGet<CountsRow[]>(
+    `game_engagement_counts?slug=in.(${slugFilter})&select=game_id,slug,like_count,comment_count`,
+  );
+
+  const token = getAccessToken();
+  const auth = getAuthState();
+  const ids = counts.map((row) => row.game_id);
+  let liked = new Set<string>();
+  let saved = new Set<string>();
+  if (token && auth.status === "authenticated" && ids.length > 0) {
+    const idFilter = ids.map((id) => encodeURIComponent(id)).join(",");
+    const userId = auth.session.userId;
+    const [likeRows, saveRows] = await Promise.all([
+      restGet<LikeRow[]>(
+        `likes?user_id=eq.${userId}&target_kind=eq.game&target_id=in.(${idFilter})&select=target_id`,
+        token,
+      ).catch(() => [] as LikeRow[]),
+      restGet<SaveRow[]>(
+        `saves?user_id=eq.${userId}&game_id=in.(${idFilter})&select=game_id`,
+        token,
+      ).catch(() => [] as SaveRow[]),
+    ]);
+    liked = new Set(likeRows.map((row) => row.target_id));
+    saved = new Set(saveRows.map((row) => row.game_id));
+  }
+
+  const bySlug = new Map(counts.map((row) => [row.slug, row]));
+  return new Map(
+    unique.map((slug) => {
+      const row = bySlug.get(slug);
+      return [
+        slug,
+        row
+          ? {
+              gameId: row.game_id,
+              likeCount: row.like_count,
+              commentCount: row.comment_count,
+              liked: liked.has(row.game_id),
+              saved: saved.has(row.game_id),
+            }
+          : { gameId: null, likeCount: null, commentCount: null, liked: false, saved: false },
+      ];
+    }),
+  );
+}
+
+/** One game's engagement, the per-game way: the fallback when the view is missing. */
+async function fetchEngagementOne(slug: string): Promise<Engagement> {
+  const gameId = await resolveGameId(slug);
+  if (!gameId)
+    return { gameId: null, likeCount: null, commentCount: null, liked: false, saved: false };
+  const [likeCount, commentCount, liked, saved] = await Promise.all([
+    fetchLikeCount(gameId).catch(() => null),
+    fetchCommentCount(gameId).catch(() => null),
+    isLiked(gameId).catch(() => false),
+    isSaved(gameId).catch(() => false),
+  ]);
+  return { gameId, likeCount, commentCount, liked, saved };
+}
+
+// Requests made in the same tick are collected and sent as one batch: a feed
+// mounts all its cards at once, and each card asks for its own game.
+let queued: Array<{
+  slug: string;
+  resolve: (e: Engagement) => void;
+  reject: (e: unknown) => void;
+}> = [];
+let flushScheduled = false;
+// Set once the batch view has failed, so the rest of the session goes straight
+// to the per-game reads instead of failing a batch first every time.
+let batchUnavailable = false;
+
+function flushEngagement(): void {
+  flushScheduled = false;
+  const pending = queued;
+  queued = [];
+  const perGame = () =>
+    pending.forEach(({ slug, resolve, reject }) => fetchEngagementOne(slug).then(resolve, reject));
+  if (batchUnavailable) {
+    perGame();
+    return;
+  }
+  fetchEngagementBatch(pending.map((item) => item.slug))
+    .then((bySlug) => {
+      pending.forEach(({ slug, resolve }) =>
+        resolve(
+          bySlug.get(slug) ?? {
+            gameId: null,
+            likeCount: null,
+            commentCount: null,
+            liked: false,
+            saved: false,
+          },
+        ),
+      );
+    })
+    .catch(() => {
+      batchUnavailable = true;
+      perGame();
+    });
+}
+
+/** Forgets batching state between tests, so one test's missing view cannot leak. */
+export function resetEngagementBatching(): void {
+  queued = [];
+  flushScheduled = false;
+  batchUnavailable = false;
+}
+
+/** One game's engagement, batched with every other request made in the same tick. */
+export function loadEngagement(slug: string): Promise<Engagement> {
+  return new Promise((resolve, reject) => {
+    queued.push({ slug, resolve, reject });
+    if (!flushScheduled) {
+      flushScheduled = true;
+      setTimeout(flushEngagement, 0);
+    }
+  });
+}
+
+/** One game's engagement as a cacheable query, for the hook and for prefetching. */
+export function engagementQuery(slug: string, viewer: string | null) {
+  return queryOptions({
+    queryKey: engagementKey(slug, viewer),
+    queryFn: () => loadEngagement(slug),
+    // Likes move faster than the catalogue; keep it fresh-ish without refetching
+    // on every scroll.
+    staleTime: 30_000,
+  });
+}
+
 /**
  * Like/save state plus measured counts for one game slug. Anonymous visitors
  * get counts and `false` states; toggling as one throws the unauthorized error
  * the screen turns into a sign-in nudge.
  */
 export function useGameEngagement(slug: string | undefined): EngagementState {
-  const [state, setState] = useState({
-    gameId: null as string | null,
-    liked: false,
-    saved: false,
-    likeCount: null as number | null,
-    commentCount: null as number | null,
-    loading: true,
-    busy: false,
-    error: undefined as string | undefined,
-  });
-  const [tick, setTick] = useState(0);
+  const auth = useAuth();
+  const viewer = auth.status === "authenticated" ? auth.session.userId : null;
+  const client = getQueryClient();
+  const query = useQuery(
+    { ...engagementQuery(slug ?? "", viewer), enabled: !!slug && auth.status !== "restoring" },
+    client,
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>();
 
-  useEffect(() => {
-    if (!slug) {
-      setState((s) => ({ ...s, loading: false }));
-      return;
-    }
-    let cancelled = false;
-    setState((s) => ({ ...s, loading: true, error: undefined }));
-    resolveGameId(slug)
-      .then(async (gameId) => {
-        if (cancelled || !gameId) {
-          if (!cancelled) {
-            setState((s) => ({ ...s, gameId: null, loading: false }));
-          }
-          return;
-        }
-        const [likeCount, commentCount, liked, saved] = await Promise.all([
-          fetchLikeCount(gameId).catch(() => null),
-          fetchCommentCount(gameId).catch(() => null),
-          isLiked(gameId).catch(() => false),
-          isSaved(gameId).catch(() => false),
-        ]);
-        if (!cancelled) {
-          setState((s) => ({
-            ...s,
-            gameId,
-            likeCount,
-            commentCount,
-            liked,
-            saved,
-            loading: false,
-          }));
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setState((s) => ({ ...s, loading: false }));
-      });
-    const unsubscribe = subscribeToAuth(() => setTick((n) => n + 1));
-    return () => {
-      cancelled = true;
-      unsubscribe();
-    };
-  }, [slug, tick]);
+  const data = query.data;
+  const key = engagementKey(slug ?? "", viewer);
+  const patch = useCallback(
+    (change: (current: Engagement) => Engagement) =>
+      client.setQueryData<Engagement>(key, (current) => (current ? change(current) : current)),
+    // `key` is rebuilt every render; its parts are what matter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [client, slug, viewer],
+  );
 
   const toggleLike = useCallback(async () => {
-    const gameId = state.gameId;
-    if (!gameId || state.busy) return;
-    setState((s) => ({ ...s, busy: true, error: undefined }));
+    const gameId = data?.gameId;
+    if (!gameId || busy) return;
+    setBusy(true);
+    setError(undefined);
     try {
-      if (state.liked) {
+      if (data.liked) {
         await unlikeGame(gameId);
-        setState((s) => ({
-          ...s,
+        patch((e) => ({
+          ...e,
           liked: false,
-          likeCount: s.likeCount === null ? null : Math.max(0, s.likeCount - 1),
+          likeCount: e.likeCount === null ? null : Math.max(0, e.likeCount - 1),
         }));
       } else {
         await likeGame(gameId);
-        setState((s) => ({
-          ...s,
+        patch((e) => ({
+          ...e,
           liked: true,
-          likeCount: s.likeCount === null ? null : s.likeCount + 1,
+          likeCount: e.likeCount === null ? null : e.likeCount + 1,
         }));
       }
     } catch (err) {
-      const message =
-        err instanceof ApiError ? err.message : "Couldn't update the like. Try again.";
-      setState((s) => ({ ...s, error: message }));
+      setError(err instanceof ApiError ? err.message : "Couldn't update the like. Try again.");
       throw err;
     } finally {
-      setState((s) => ({ ...s, busy: false }));
+      setBusy(false);
     }
-  }, [state.gameId, state.busy, state.liked]);
+  }, [data, busy, patch]);
 
   const toggleSave = useCallback(async () => {
-    const gameId = state.gameId;
-    if (!gameId || state.busy) return;
-    setState((s) => ({ ...s, busy: true, error: undefined }));
+    const gameId = data?.gameId;
+    if (!gameId || busy) return;
+    setBusy(true);
+    setError(undefined);
     try {
-      if (state.saved) {
+      if (data.saved) {
         await unsaveGame(gameId);
-        setState((s) => ({ ...s, saved: false }));
+        patch((e) => ({ ...e, saved: false }));
       } else {
         await saveGame(gameId);
-        setState((s) => ({ ...s, saved: true }));
+        patch((e) => ({ ...e, saved: true }));
       }
     } catch (err) {
-      const message =
-        err instanceof ApiError ? err.message : "Couldn't update the saved games. Try again.";
-      setState((s) => ({ ...s, error: message }));
+      setError(
+        err instanceof ApiError ? err.message : "Couldn't update the saved games. Try again.",
+      );
       throw err;
     } finally {
-      setState((s) => ({ ...s, busy: false }));
+      setBusy(false);
     }
-  }, [state.gameId, state.busy, state.saved]);
+  }, [data, busy, patch]);
 
-  const refresh = useCallback(() => setTick((n) => n + 1), []);
+  const { refetch } = query;
+  const refresh = useCallback(() => void refetch(), [refetch]);
 
-  return { ...state, toggleLike, toggleSave, refresh };
+  return {
+    gameId: data?.gameId ?? null,
+    liked: data?.liked ?? false,
+    saved: data?.saved ?? false,
+    likeCount: data?.likeCount ?? null,
+    commentCount: data?.commentCount ?? null,
+    loading: !!slug && data === undefined && !query.isError,
+    busy,
+    error,
+    toggleLike,
+    toggleSave,
+    refresh,
+  };
 }
 
 export type CommentsState = {

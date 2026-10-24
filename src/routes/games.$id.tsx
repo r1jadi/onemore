@@ -21,9 +21,11 @@ import {
 } from "@/lib/games/catalog";
 import { useGameEngagement } from "@/lib/social/engagement";
 import { useDocumentTitle } from "@/lib/document-title";
+import { prefetchGamePage } from "@/lib/prefetch";
 import { breadcrumbJsonLd, seo, videoGameJsonLd } from "@/lib/seo";
 
 export const Route = createFileRoute("/games/$id")({
+  loader: ({ context, params }) => prefetchGamePage(context.queryClient, params.id),
   // Document metadata is built before the record arrives, so the title comes from
   // the URL. It is the same title the API will report, and nothing is claimed
   // that is not known: no description, no category, no metrics.

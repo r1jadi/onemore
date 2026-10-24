@@ -7,9 +7,11 @@ import { GameCard } from "@/components/game/GameCard";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth/session";
 import { MAX_PAGE_SIZE, mostPlayed, useCategories, useGames } from "@/lib/games/catalog";
+import { prefetchExplore } from "@/lib/prefetch";
 import { seo } from "@/lib/seo";
 
 export const Route = createFileRoute("/explore")({
+  loader: ({ context }) => prefetchExplore(context.queryClient),
   head: () => seo("Explore", "Discover new games and browse every category."),
   component: Explore,
 });
@@ -57,8 +59,11 @@ function SectionError({ children, onRetry }: { children: ReactNode; onRetry: () 
  */
 export function Explore() {
   const daily = useGames({ category: "daily", limit: 1 });
-  const newest = useGames({ limit: 5 });
+  // One catalogue read feeds both "New" (its first five, newest first) and
+  // "Popular" (all of it, by plays).
   const catalogue = useGames({ limit: MAX_PAGE_SIZE });
+  const newest = catalogue;
+  const newestItems = catalogue.items.slice(0, 5);
   const popular = mostPlayed(catalogue.items).slice(0, 5);
   const categories = useCategories();
   const withGames =
@@ -151,11 +156,11 @@ export function Explore() {
               The catalogue is unavailable right now.
             </SectionError>
           </div>
-        ) : newest.items.length === 0 ? (
+        ) : newestItems.length === 0 ? (
           <EmptyState title="No games published yet" />
         ) : (
           <div className="no-scrollbar flex gap-3 overflow-x-auto px-4 md:grid md:grid-cols-4 md:px-0 lg:grid-cols-5">
-            {newest.items.map((game) => (
+            {newestItems.map((game) => (
               <GameCard key={game.slug} game={game} className="w-36 shrink-0 md:w-auto" />
             ))}
           </div>

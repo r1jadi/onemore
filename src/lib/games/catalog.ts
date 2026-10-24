@@ -17,16 +17,24 @@
  *     unknown slug and a draft, so a failed detail read is reported as "missing"
  *     rather than as an error to retry.
  *
- * Storage rule: nothing here is cached across a session. The catalogue lives in
- * React state for the lifetime of the screen that asked for it, so a signed-out
- * visitor and a signed-in one cannot be shown each other's results, and a
- * deployment that changes the catalogue cannot serve a stale page from disk.
+ * Storage rule: the catalogue is cached in memory only, in the app's query cache
+ * (`lib/query.ts`), for as long as the tab is open. It is public and the same for
+ * every visitor, so nothing personal can leak between accounts through it, and
+ * nothing is written to disk, so a new deployment is never served from a stale
+ * copy. A cached screen opens instantly and refreshes in the background.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  infiniteQueryOptions,
+  queryOptions,
+  useInfiniteQuery,
+  useQuery,
+} from "@tanstack/react-query";
+import { useCallback, useMemo } from "react";
 
 import { ApiError, apiFetch, type ApiRequestOptions } from "@/lib/api/client";
 import { publicConfig } from "@/lib/config";
+import { getQueryClient } from "@/lib/query";
 
 /** Routes implemented by `services/games`. Kept together so they cannot drift. */
 const Routes = {
@@ -281,10 +289,53 @@ function asApiError(error: unknown): ApiError {
 
 // ── React bindings ──────────────────────────────────────────────────────────
 //
-// There is no global store. A catalogue page is public and read-only, so the
-// only state that matters is the screen's own: which page it has loaded, and
-// whether that read failed. Mounting a screen is what triggers the read, and
-// leaving it abandons the request.
+// Every read goes through the shared query cache (`lib/query.ts`). The query
+// definitions are exported so a route can prefetch exactly what its screen will
+// ask for — the cache key is the contract between the two.
+
+export const catalogKeys = {
+  games: (query: Required<Pick<GameQuery, "limit" | "sort">> & Omit<GameQuery, "cursor">) =>
+    ["games", "list", query] as const,
+  game: (slug: string) => ["games", "detail", slug] as const,
+  categories: () => ["categories"] as const,
+};
+
+function normaliseQuery(query: GameQuery = {}) {
+  return {
+    limit: query.limit ?? DEFAULT_PAGE_SIZE,
+    sort: query.sort ?? ("latest" as GameSort),
+    ...(query.category ? { category: query.category } : {}),
+    ...(query.q ? { q: query.q } : {}),
+  };
+}
+
+/** One game by slug, for `useGame` and for a route that prefetches it. */
+export function gameQuery(slug: string) {
+  return queryOptions({
+    queryKey: catalogKeys.game(slug),
+    queryFn: ({ signal }) => fetchGame(slug, { signal }),
+  });
+}
+
+/** Every category, for `useCategories` and for prefetching. */
+export function categoriesQuery() {
+  return queryOptions({
+    queryKey: catalogKeys.categories(),
+    queryFn: ({ signal }) => fetchCategories({ signal }),
+  });
+}
+
+/** A catalogue listing, page by page, for `useGames` and for prefetching. */
+export function gamesQuery(query: GameQuery = {}) {
+  const normalised = normaliseQuery(query);
+  return infiniteQueryOptions({
+    queryKey: catalogKeys.games(normalised),
+    queryFn: ({ pageParam, signal }) =>
+      fetchGames({ ...normalised, cursor: pageParam }, { signal }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page: GameList) => page.nextCursor ?? undefined,
+  });
+}
 
 export type GameListState = {
   status: "loading" | "ready" | "error";
@@ -308,92 +359,49 @@ export type GameListResult = GameListState & {
 };
 
 /**
- * Reads a page of the catalogue, loading it on first use and reloading it when
- * the query changes.
+ * Reads a page of the catalogue, from cache when it is there.
  *
  * `retry` is what every error affordance calls, and it is deliberately a re-read
- * rather than a fallback: there is no cached or hardcoded catalogue to fall back
- * to, so a failed request shows a failure.
+ * rather than a fallback: there is no hardcoded catalogue to fall back to, so a
+ * failed request shows a failure. A different query is a different cache entry,
+ * so a new filter never shows the previous filter's results under its heading.
  */
 export function useGames(query: GameQuery = {}): GameListResult {
-  const limit = query.limit ?? DEFAULT_PAGE_SIZE;
-  const category = query.category;
-  const q = query.q;
-  const sort = query.sort ?? "latest";
+  const list = useInfiniteQuery(gamesQuery(query), getQueryClient());
 
-  const [attempt, setAttempt] = useState(0);
-  const [state, setState] = useState<GameListState>({
-    status: "loading",
-    items: [],
-    nextCursor: null,
-    loadingMore: false,
-  });
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
+  const items = useMemo(() => list.data?.pages.flatMap((page) => page.items) ?? [], [list.data]);
+  const lastPage = list.data?.pages.at(-1);
+  const { refetch, fetchNextPage, hasNextPage, isFetchingNextPage } = list;
 
-  useEffect(() => {
-    // A new query starts from nothing: showing the previous filter's results
-    // under a new heading is how a screen ends up lying about what it lists.
-    const controller = new AbortController();
-    setState({ status: "loading", items: [], nextCursor: null, loadingMore: false });
+  const retry = useCallback(() => void refetch(), [refetch]);
+  const loadMore = useCallback(() => {
+    if (!hasNextPage || isFetchingNextPage) return;
+    void fetchNextPage();
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
 
-    fetchGames({ limit, category, q, sort }, { signal: controller.signal })
-      .then((page) => {
-        if (controller.signal.aborted) return;
-        setState({
-          status: "ready",
-          items: page.items,
-          nextCursor: page.nextCursor,
-          loadingMore: false,
-        });
-      })
-      .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
-        setState({
+  if (list.data === undefined) {
+    return list.isError
+      ? {
           status: "error",
           items: [],
           nextCursor: null,
           loadingMore: false,
-          error: asApiError(error),
-        });
-      });
+          error: asApiError(list.error),
+          retry,
+          loadMore,
+        }
+      : { status: "loading", items: [], nextCursor: null, loadingMore: false, retry, loadMore };
+  }
 
-    return () => controller.abort();
-  }, [limit, category, q, sort, attempt]);
-
-  const loadMore = useCallback(() => {
-    const cursor = state.nextCursor;
-    if (!cursor || state.loadingMore) return;
-
-    setState((current) => ({ ...current, loadingMore: true, loadMoreError: undefined }));
-    fetchGames({ limit, category, q, sort, cursor })
-      .then((page) => {
-        if (!mounted.current) return;
-        setState((current) => ({
-          ...current,
-          items: [...current.items, ...page.items],
-          nextCursor: page.nextCursor,
-          loadingMore: false,
-        }));
-      })
-      .catch((error: unknown) => {
-        if (!mounted.current) return;
-        setState((current) => ({
-          ...current,
-          loadingMore: false,
-          loadMoreError: asApiError(error),
-        }));
-      });
-  }, [limit, category, q, sort, state.nextCursor, state.loadingMore]);
-
-  const retry = useCallback(() => setAttempt((n) => n + 1), []);
-
-  return { ...state, retry, loadMore };
+  return {
+    status: "ready",
+    items,
+    nextCursor: lastPage?.nextCursor ?? null,
+    loadingMore: isFetchingNextPage,
+    loadMoreError: list.isFetchNextPageError ? asApiError(list.error) : undefined,
+    retry,
+    loadMore,
+  };
 }
 
 /**
@@ -410,30 +418,18 @@ export type GameState =
   | { status: "error"; error: ApiError };
 
 export function useGame(slug: string): GameState & { retry: () => void } {
-  const [attempt, setAttempt] = useState(0);
-  const [state, setState] = useState<GameState>({ status: "loading" });
+  const game = useQuery(gameQuery(slug), getQueryClient());
+  const { refetch } = game;
+  const retry = useCallback(() => void refetch(), [refetch]);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    setState({ status: "loading" });
-
-    fetchGame(slug, { signal: controller.signal })
-      .then((game) => {
-        if (controller.signal.aborted) return;
-        setState({ status: "ready", game });
-      })
-      .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
-        const apiError = asApiError(error);
-        setState(
-          apiError.status === 404 ? { status: "missing" } : { status: "error", error: apiError },
-        );
-      });
-
-    return () => controller.abort();
-  }, [slug, attempt]);
-
-  return { ...state, retry: useCallback(() => setAttempt((n) => n + 1), []) };
+  if (game.data !== undefined) return { status: "ready", game: game.data, retry };
+  if (game.isError) {
+    const apiError = asApiError(game.error);
+    return apiError.status === 404
+      ? { status: "missing", retry }
+      : { status: "error", error: apiError, retry };
+  }
+  return { status: "loading", retry };
 }
 
 export type CategoryState =
@@ -442,27 +438,15 @@ export type CategoryState =
   | { status: "error"; error: ApiError };
 
 export function useCategories(): CategoryState & { retry: () => void } {
-  const [attempt, setAttempt] = useState(0);
-  const [state, setState] = useState<CategoryState>({ status: "loading" });
+  const categories = useQuery(categoriesQuery(), getQueryClient());
+  const { refetch } = categories;
+  const retry = useCallback(() => void refetch(), [refetch]);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    setState({ status: "loading" });
-
-    fetchCategories({ signal: controller.signal })
-      .then((page) => {
-        if (controller.signal.aborted) return;
-        setState({ status: "ready", items: page.items });
-      })
-      .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
-        setState({ status: "error", error: asApiError(error) });
-      });
-
-    return () => controller.abort();
-  }, [attempt]);
-
-  return { ...state, retry: useCallback(() => setAttempt((n) => n + 1), []) };
+  if (categories.data !== undefined) {
+    return { status: "ready", items: categories.data.items, retry };
+  }
+  if (categories.isError) return { status: "error", error: asApiError(categories.error), retry };
+  return { status: "loading", retry };
 }
 
 /** Re-exported so a caller building a custom request keeps the same header rules. */
