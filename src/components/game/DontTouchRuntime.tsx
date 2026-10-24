@@ -233,8 +233,8 @@ function Conveyor({
             <p>
               <span className="font-medium text-foreground">Tap</span> the white tiles in the row at
               the line. Number keys <span className="tabular">1</span>–
-              <span className="tabular">3</span> or <span className="tabular">A</span>–
-              <span className="tabular">D</span> work too.
+              <span className="tabular">3</span> or <span className="tabular">A</span>,{" "}
+              <span className="tabular">S</span> and <span className="tabular">D</span> work too.
             </p>
             <p>
               <span className="font-medium text-foreground">Never touch a black tile.</span> One

@@ -97,7 +97,7 @@ export const settingsGroups: { label: string; items: SettingsItem[] }[] = [
         title: "About",
         desc: "Version and source",
         icon: Info,
-        pageTitle: "About Unbored",
+        pageTitle: "About",
       },
     ],
   },

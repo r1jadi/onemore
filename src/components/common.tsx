@@ -20,7 +20,7 @@ export function PageHeader({
 }) {
   const router = useRouter();
   return (
-    <header className="sticky top-0 z-30 glass border-x-0 border-t-0 pt-[env(safe-area-inset-top)] md:static md:border-0 md:bg-transparent md:pt-0 md:backdrop-blur-none">
+    <header className="sticky top-0 z-30 border-b border-border bg-background pt-[env(safe-area-inset-top)] md:static md:border-0 md:bg-transparent md:pt-0">
       <div className="flex h-14 items-center gap-2 px-4 md:h-auto md:px-0 md:pt-8 md:pb-6">
         {back && (
           <Button

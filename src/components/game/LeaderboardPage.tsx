@@ -41,7 +41,9 @@ export function LeaderboardPage({ gameId }: { gameId?: string }) {
   return (
     <Page>
       <PageHeader
-        back={!!gameId}
+        // No back arrow: Leaderboards is a top-level tab, and its index already
+        // redirects to a game's board, so there is no list page to go back to.
+        back={false}
         title={game ? `${game.title} leaderboard` : "Leaderboards"}
         subtitle="Verified scores only."
       />

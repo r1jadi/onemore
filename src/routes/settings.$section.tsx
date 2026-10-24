@@ -185,7 +185,11 @@ function Body({ section }: { section: string }) {
   const { choice, setChoice } = useTheme();
   const { prefs: a11y, setPrefs: setA11y } = useAccessibility();
 
-  switch (section) {
+  // The language page is only a choice when there is more than one language to
+  // pick; until then an old link to it lands on "Setting not found".
+  const page = section === "language" && offeredLanguages.length < 2 ? "" : section;
+
+  switch (page) {
     case "account":
       return <AccountSection signedIn={signedIn} />;
     case "profile":
