@@ -32,12 +32,14 @@ const (
 	stack10EndlessRules = "stack-10@2"
 	// Seed 1's first pattern is one cell, then two: a rebuilt pattern and a
 	// losing tap, for ten points and one cleared round.
-	memoryFlashRules = "memory-flash@1"
-	memoryFlashRun   = "[8,8,0]"
+	memoryFlashRules        = "memory-flash@1"
+	memoryFlashEndlessRules = "memory-flash@2"
+	memoryFlashRun          = "[8,8,0]"
 	// Seed 1's first board wins on cell 7; the second tap misses, for ten points
 	// and one restored board.
-	oneMoveRules = "one-move@1"
-	oneMoveRun   = "[7,0]"
+	oneMoveRules        = "one-move@1"
+	oneMoveEndlessRules = "one-move@2"
+	oneMoveRun          = "[7,0]"
 	// Seed 1 opens with two shade-1 tiles side by side: sliding left merges them
 	// for four points, and the next slide deals another tile.
 	colorMergeRules        = "color-merge@1"
@@ -706,6 +708,54 @@ func TestCompleteSessionRejectsAMemoryFlashCellPastTheBoard(t *testing.T) {
 	}
 }
 
+func TestCompleteSessionAcceptsAMemoryFlashEndlessRun(t *testing.T) {
+	// The endless rules address a growing board and carry up to 4096 taps, so a
+	// run past the retired ninety-sixth cell and past the ordinary sixty-move
+	// request bound must reach the Memory Flash verifier untouched. Whether the
+	// sequence is possible is the verifier's call, not the transport's.
+	backend := testBackend()
+	server := testServer(t, backend)
+
+	taps := make([]string, 61)
+	for i := range taps {
+		taps[i] = "24"
+	}
+	status, body := post(t, server,
+		"/api/v1/sessions/"+sessionID+"/complete",
+		completeBodyRules(memoryFlashEndlessRules, "120", "45000", "["+strings.Join(taps, ",")+"]"), "")
+
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%#v)", status, body)
+	}
+	if backend.lastRun.RulesVersion != memoryFlashEndlessRules {
+		t.Fatalf("rules version = %q, want the run's pinned memory-flash@2", backend.lastRun.RulesVersion)
+	}
+	if len(backend.lastRun.Actions) != 61 || backend.lastRun.Actions[60] != 24 {
+		t.Fatalf("actions = %v, want sixty-one taps on the grown board", backend.lastRun.Actions)
+	}
+}
+
+func TestCompleteSessionRejectsAMemoryFlashCellPastTheGrownBoard(t *testing.T) {
+	// The endless board is bounded by the submission bound (a 15×15 board at the
+	// furthest reachable round); a cell past it is malformed input, not a bad run.
+	backend := testBackend()
+	server := testServer(t, backend)
+
+	status, body := post(t, server,
+		"/api/v1/sessions/"+sessionID+"/complete",
+		completeBodyRules(memoryFlashEndlessRules, "0", "45000", "[225]"), "")
+
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (%#v)", status, body)
+	}
+	if errorCode(t, body) != "bad_request" {
+		t.Fatalf("code = %s, want bad_request", errorCode(t, body))
+	}
+	if backend.runCalls != 0 {
+		t.Fatal("a cell outside the endless board reached the verifier")
+	}
+}
+
 func TestCompleteSessionVerifiesAOneMoveRun(t *testing.T) {
 	backend := testBackend()
 	started := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
@@ -743,6 +793,55 @@ func TestCompleteSessionVerifiesAOneMoveRun(t *testing.T) {
 	}
 	if len(backend.lastRun.Actions) != 2 || backend.lastRun.Actions[0] != 7 {
 		t.Fatalf("actions = %v, want the submitted taps", backend.lastRun.Actions)
+	}
+}
+
+func TestCompleteSessionAcceptsAOneMoveEndlessRun(t *testing.T) {
+	// The endless rules address a growing board and carry up to 4096 taps, so a
+	// run past the retired twenty-fifth cell and past the ordinary sixty-move
+	// request bound must reach the One Move verifier untouched. Whether the
+	// sequence is possible is the verifier's call, not the transport's.
+	backend := testBackend()
+	server := testServer(t, backend)
+
+	taps := make([]string, 61)
+	for i := range taps {
+		taps[i] = "35"
+	}
+	status, body := post(t, server,
+		"/api/v1/sessions/"+sessionID+"/complete",
+		completeBodyRules(oneMoveEndlessRules, "0", "45000", "["+strings.Join(taps, ",")+"]"), "")
+
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%#v)", status, body)
+	}
+	if backend.lastRun.RulesVersion != oneMoveEndlessRules {
+		t.Fatalf("rules version = %q, want the run's pinned one-move@2", backend.lastRun.RulesVersion)
+	}
+	if len(backend.lastRun.Actions) != 61 || backend.lastRun.Actions[60] != 35 {
+		t.Fatalf("actions = %v, want sixty-one taps on the grown board", backend.lastRun.Actions)
+	}
+}
+
+func TestCompleteSessionRejectsAOneMoveCellPastTheGrownBoard(t *testing.T) {
+	// The endless board is bounded by the submission bound (a 1026×1026 board at
+	// the furthest reachable level); a cell past it is malformed input, not a bad
+	// run.
+	backend := testBackend()
+	server := testServer(t, backend)
+
+	status, body := post(t, server,
+		"/api/v1/sessions/"+sessionID+"/complete",
+		completeBodyRules(oneMoveEndlessRules, "0", "45000", "[1052676]"), "")
+
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (%#v)", status, body)
+	}
+	if errorCode(t, body) != "bad_request" {
+		t.Fatalf("code = %s, want bad_request", errorCode(t, body))
+	}
+	if backend.runCalls != 0 {
+		t.Fatal("a cell outside the endless board reached the verifier")
 	}
 }
 

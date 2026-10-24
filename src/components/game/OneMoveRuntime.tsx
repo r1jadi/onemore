@@ -6,7 +6,7 @@ import { ErrorState } from "@/components/common";
 import { ExitGameLink } from "@/components/game/ExitGameLink";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { ONE_MOVE_LEVELS, boardPattern, type OneMoveRun } from "@/lib/games/one-move";
+import { boardPattern, type OneMoveRun } from "@/lib/games/one-move";
 import { useReportRunProgress } from "@/lib/games/run-progress";
 import {
   playErrorMessage,
@@ -99,7 +99,7 @@ export function OneMoveRuntime({ slug, title }: { slug: string; title: string })
   }
 
   if (state.status === "finished") {
-    return <Finished slug={slug} run={state.run} result={state.result} onRestart={state.restart} />;
+    return <Finished slug={slug} result={state.result} onRestart={state.restart} />;
   }
 
   // The only remaining shape is an error with no run to show, which the branches
@@ -169,7 +169,8 @@ function Board({
             </p>
             <p>
               <span className="font-medium text-foreground">A wrong tap</span> ends the run. The
-              board grows from 3×3 to 5×5 as you go; twelve boards, ten points each.
+              board grows as you go; every restored board is ten points, and there is no final
+              board.
             </p>
           </div>
 
@@ -202,7 +203,6 @@ function Board({
 
   const board = boardPattern(run.seed, run.level);
   const accepting = !verifying && run.outcome === "playing";
-  const last = run.level === ONE_MOVE_LEVELS && run.outcome === "playing";
 
   return (
     <div className="flex flex-1 flex-col px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
@@ -212,9 +212,7 @@ function Board({
           <dd className="text-2xl font-semibold tabular">{run.score}</dd>
         </dl>
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <span className="tabular">
-            Board {Math.min(run.level, ONE_MOVE_LEVELS)}/{ONE_MOVE_LEVELS}
-          </span>
+          <span className="tabular">Board {run.level}</span>
           {session.ranked ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-surface-2 px-2 py-1">
               <ShieldCheck className="size-3.5" />
@@ -231,55 +229,80 @@ function Board({
           ? "Verifying your run with the server…"
           : run.outcome === "over"
             ? "One move missed."
-            : last
-              ? "Last board — one move restores it."
-              : `Board ${run.level} of ${ONE_MOVE_LEVELS} — one move restores the checkerboard.`}
+            : `Board ${run.level} — one move restores the checkerboard.`}
+      </p>
+
+      {/* The difficulty of this board, read from the rules rather than guessed:
+          the board grows a row and a column every four levels, without cap, so
+          the space to search keeps growing and the readout keeps being true. */}
+      <p className="pb-1 text-center text-xs text-muted-foreground">
+        <span className="tabular">
+          {board.size}×{board.size}
+        </span>{" "}
+        board · <span className="tabular">{board.size * board.size}</span> cells
       </p>
 
       {/* A square board, centred in whatever height is left. The width is capped
           against the viewport height as well, minus the chrome above and below
           it, so a landscape phone shows a board that fits instead of one whose
-          bottom row is off screen. */}
+          bottom row is off screen. Past 12×12 the cells would shrink below a
+          comfortable target, so the board keeps a 36 px cell and scrolls inside
+          this box instead of becoming untappable. */}
       <div className="flex min-h-0 flex-1 items-center justify-center py-3">
         <div
-          className="grid aspect-square w-full gap-2"
-          style={{
-            maxWidth: "min(28rem, calc(100dvh - 12rem))",
-            gridTemplateColumns: `repeat(${board.size}, minmax(0, 1fr))`,
-            gridTemplateRows: `repeat(${board.size}, minmax(0, 1fr))`,
-          }}
-          role="group"
-          aria-label={`Board ${run.level} of ${ONE_MOVE_LEVELS}`}
+          className={cn(
+            "flex max-h-full w-full",
+            board.size > 12
+              ? "justify-start overflow-auto rounded-xl p-1"
+              : "justify-center",
+          )}
         >
-          {board.cells.map((dark, index) => (
-            <button
-              key={index}
-              ref={index === 0 ? firstCell : undefined}
-              type="button"
-              disabled={!accepting}
-              onClick={() => onTap(index)}
-              aria-label={cellLabel(index, board.size, dark, run, verifying)}
-              className={cn(
-                "press rounded-lg border transition-colors",
-                "motion-reduce:transition-none",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                "active:scale-[0.97]",
-                dark ? "border-transparent bg-foreground" : "border-border bg-surface-2",
-                accepting ? "hover:opacity-90" : "opacity-60",
-              )}
-            >
-              <span className="sr-only">{`Row ${Math.floor(index / board.size) + 1} column ${
-                (index % board.size) + 1
-              }`}</span>
-            </button>
-          ))}
+          <div
+            className={cn(
+              "grid aspect-square w-full",
+              board.size > 12 && "shrink-0",
+              board.size > 9 ? "gap-1" : board.size > 6 ? "gap-1.5" : "gap-2",
+            )}
+            style={{
+              width: board.size > 12 ? `${board.size * 2.25}rem` : undefined,
+              maxWidth: board.size > 12 ? undefined : "min(28rem, calc(100dvh - 12rem))",
+              gridTemplateColumns: `repeat(${board.size}, minmax(0, 1fr))`,
+              gridTemplateRows: `repeat(${board.size}, minmax(0, 1fr))`,
+            }}
+            role="group"
+            aria-label={`Board ${run.level}, ${board.size} by ${board.size}`}
+          >
+            {board.cells.map((dark, index) => (
+              <button
+                key={index}
+                ref={index === 0 ? firstCell : undefined}
+                type="button"
+                disabled={!accepting}
+                onClick={() => onTap(index)}
+                aria-label={cellLabel(index, board.size, dark, run, verifying)}
+                className={cn(
+                  "press rounded-lg border transition-colors",
+                  board.size > 9 ? "rounded-md" : "rounded-lg",
+                  "motion-reduce:transition-none",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  "active:scale-[0.97]",
+                  dark ? "border-transparent bg-foreground" : "border-border bg-surface-2",
+                  accepting ? "hover:opacity-90" : "opacity-60",
+                )}
+              >
+                <span className="sr-only">{`Row ${Math.floor(index / board.size) + 1} column ${
+                  (index % board.size) + 1
+                }`}</span>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
       <p className="pt-1 text-center text-xs text-muted-foreground" aria-live="polite">
         {verifying
           ? "The taps you made are your score if the server agrees."
-          : "A move flips a cross. Find the one that restores the pattern. Ten points a board."}
+          : "A move flips a cross. Find the one that restores the pattern. Ten points a board, with no final board."}
       </p>
     </div>
   );
@@ -304,12 +327,10 @@ function cellLabel(
 /** The end of a run: the score the server verified, or a guest's unranked result. */
 function Finished({
   slug,
-  run,
   result,
   onRestart,
 }: {
   slug: string;
-  run: OneMoveRun;
   result: RunResult;
   onRestart: () => void;
 }) {
@@ -323,16 +344,12 @@ function Finished({
             <ShieldCheck className="size-5 text-muted-foreground" />
           )}
         </div>
-        <p className="text-sm text-muted-foreground">
-          {run.outcome === "cleared" ? "All twelve boards restored" : "One move missed"}
-        </p>
+        <p className="text-sm text-muted-foreground">One move missed</p>
         <p className="text-5xl font-semibold tabular">{result.score}</p>
         <p className="text-sm text-muted-foreground">
-          {run.outcome === "cleared"
-            ? `Every board restored — ${result.tilesPlaced} taps.`
-            : `${result.tilesPlaced} ${result.tilesPlaced === 1 ? "tap" : "taps"}, ${
-                result.clearedColumns
-              } ${result.clearedColumns === 1 ? "board" : "boards"} restored.`}
+          {`${result.tilesPlaced} ${result.tilesPlaced === 1 ? "tap" : "taps"}, ${
+            result.clearedColumns
+          } ${result.clearedColumns === 1 ? "board" : "boards"} restored.`}
         </p>
       </div>
 

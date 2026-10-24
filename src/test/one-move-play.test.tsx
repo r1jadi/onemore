@@ -20,8 +20,9 @@ import { clearSession, signIn } from "@/lib/auth/session";
  * shown, boards are restored, the taps are submitted, and the number that appears
  * is the one the server verified.
  *
- * Seed 1 wins on cells 7, 8, 7, 7, 0, 8, 6, 2, 5, 18, 13, 5. The states that
- * matter are the ones a careless implementation fudges:
+ * Seed 1 wins on cells 7, 8, 7, 7, 0, 8, 6, 2, 5, 18, 13, 5, 11, 21, 33, 20,
+ * 20, 9, 47, 39. The states that matter are the ones a careless implementation
+ * fudges:
  *
  *   - no board is playable before the player has read the rules and started;
  *   - a score is never shown as verified before it is;
@@ -34,9 +35,9 @@ function sessionPayload(overrides: Record<string, unknown> = {}) {
   return {
     id: "ffffffff-1111-4111-8111-ffffffffffff",
     gameSlug: "one-move",
-    rulesVersion: "one-move@1",
+    rulesVersion: "one-move@2",
     seed: "1",
-    tileCount: 12,
+    tileCount: 4096,
     startedAt: "2026-10-21T12:00:00.000Z",
     expiresAt: "2026-10-21T14:00:00.000Z",
     ranked: true,
@@ -116,13 +117,11 @@ async function renderRuntime() {
 }
 
 /** Seed 1's winning cells, in level order. */
-const SEED_ONE_PERFECT = [7, 8, 7, 7, 0, 8, 6, 2, 5, 18, 13, 5];
+const SEED_ONE_PERFECT = [7, 8, 7, 7, 0, 8, 6, 2, 5, 18, 13, 5, 11, 21, 33, 20, 20, 9, 47, 39];
 
 /** The side of each level's board, matching `boardSize` in the engine. */
 function sizeOf(level: number): number {
-  if (level <= 4) return 3;
-  if (level <= 8) return 4;
-  return 5;
+  return 3 + Math.floor((level - 1) / 4);
 }
 
 /** Clicks the cell at a board index, addressed by the row and column it names. */
@@ -138,7 +137,7 @@ function tapIndex(index: number, level: number) {
 /** Presses Start and returns the live board. */
 async function startRun() {
   fireEvent.click(await screen.findByRole("button", { name: "Start run" }));
-  await screen.findByRole("group", { name: "Board 1 of 12" });
+  await screen.findByRole("group", { name: "Board 1, 3 by 3" });
 }
 
 afterEach(() => {
@@ -185,7 +184,7 @@ describe("starting a run", () => {
     const start = spy.mock.calls.find((call) => String(call[0]).endsWith("/api/v1/sessions"));
     expect(JSON.parse(String(start?.[1]?.body ?? "{}"))).toEqual({
       gameSlug: "one-move",
-      rulesVersion: "one-move@1",
+      rulesVersion: "one-move@2",
       client: "web/1.0",
     });
   });
@@ -204,7 +203,8 @@ describe("starting a run", () => {
 
     await startRun();
 
-    expect(screen.getByText("Board 1/12")).toBeInTheDocument();
+    expect(screen.getByText("Board 1")).toBeInTheDocument();
+    expect(screen.getByText("3×3")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /^Row \d+ column \d+,/ })).toHaveLength(9);
   });
 
@@ -252,15 +252,15 @@ describe("playing the board", () => {
     // Board one wins on cell 7: row three, column two.
     tapIndex(7, 1);
 
-    expect(screen.getByText("Board 2/12")).toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "Board 2 of 12" })).toBeInTheDocument();
+    expect(screen.getByText("Board 2")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Board 2, 3 by 3" })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /^Row \d+ column \d+,/ })).toHaveLength(9);
     expect(screen.getByText("Score").closest("dl")?.querySelector("dd")?.textContent).toBe("10");
     expect(screen.queryByText(/saved/i)).not.toBeInTheDocument();
 
     // Board two wins on cell 8: row three, column three.
     tapIndex(8, 2);
-    expect(screen.getByText("Board 3/12")).toBeInTheDocument();
+    expect(screen.getByText("Board 3")).toBeInTheDocument();
   });
 
   it("keeps every cell a real button, so the board is keyboard reachable", async () => {
@@ -279,7 +279,7 @@ describe("playing the board", () => {
     }
   });
 
-  it("grows the board to 4×4 and then 5×5 as the run goes on", async () => {
+  it("grows the board at every fourth level and keeps going past 5×5", async () => {
     mockPlayback();
     await renderRuntime();
     await startRun();
@@ -288,15 +288,25 @@ describe("playing the board", () => {
       tapIndex(index, levelIndex + 1);
     });
 
-    expect(screen.getByRole("group", { name: "Board 5 of 12" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Board 5, 4 by 4" })).toBeInTheDocument();
+    expect(screen.getByText("4×4")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /^Row \d+ column \d+,/ })).toHaveLength(16);
 
-    SEED_ONE_PERFECT.slice(4, 8).forEach((index, levelIndex) => {
+    SEED_ONE_PERFECT.slice(4, 12).forEach((index, levelIndex) => {
       tapIndex(index, levelIndex + 5);
     });
 
-    expect(screen.getByRole("group", { name: "Board 9 of 12" })).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /^Row \d+ column \d+,/ })).toHaveLength(25);
+    expect(screen.getByRole("group", { name: "Board 13, 6 by 6" })).toBeInTheDocument();
+    expect(screen.getByText("6×6")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^Row \d+ column \d+,/ })).toHaveLength(36);
+
+    SEED_ONE_PERFECT.slice(12, 16).forEach((index, levelIndex) => {
+      tapIndex(index, levelIndex + 13);
+    });
+
+    expect(screen.getByRole("group", { name: "Board 17, 7 by 7" })).toBeInTheDocument();
+    expect(screen.getByText("7×7")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^Row \d+ column \d+,/ })).toHaveLength(49);
   });
 });
 
@@ -315,7 +325,7 @@ describe("finishing a run", () => {
     const completion = spy.mock.calls.find((call) => String(call[0]).includes("/complete"));
     const body = JSON.parse(String(completion?.[1]?.body ?? "{}"));
     expect(body.progress.actions).toEqual([0]);
-    expect(body.progress.rulesVersion).toBe("one-move@1");
+    expect(body.progress.rulesVersion).toBe("one-move@2");
     expect(body.score).toBe(0);
   });
 
@@ -341,10 +351,10 @@ describe("finishing a run", () => {
     expect(screen.getByText(/Verified by replaying your taps on the server/)).toBeInTheDocument();
   });
 
-  it("plays all twelve boards and submits the perfect line", async () => {
+  it("plays past the retired twelfth board and submits the endless line", async () => {
     const spy = mockFetch((url) =>
       url.includes("/complete")
-        ? jsonResponse(resultPayload({ score: 120, clearedColumns: 12, tilesPlaced: 12 }))
+        ? jsonResponse(resultPayload({ score: 200, clearedColumns: 20, tilesPlaced: 21 }))
         : jsonResponse(sessionPayload(), 201),
     );
     await renderRuntime();
@@ -354,17 +364,26 @@ describe("finishing a run", () => {
       tapIndex(index, levelIndex + 1);
     });
 
+    // Twenty boards restored, and the game is still asking for twenty-one. The
+    // retired game ended at twelve; this screen has no such state.
+    expect(screen.getByText("Board 21")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Board 21, 8 by 8" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^Row \d+ column \d+,/ })).toHaveLength(64);
+    expect(screen.queryByRole("button", { name: /play again/i })).toBeNull();
+
+    // Board twenty-one wins on 7; a corner is not the move, and ends the run.
+    tapIndex(0, 21);
+
     await screen.findByRole("button", { name: /play again/i });
-    expect(screen.getByText("All twelve boards restored")).toBeInTheDocument();
-    // The verified score and the personal best are both 120 in this payload.
-    expect(screen.getAllByText("120")).toHaveLength(2);
-    expect(screen.getByText("Every board restored — 12 taps.")).toBeInTheDocument();
+    expect(screen.getByText("One move missed")).toBeInTheDocument();
+    expect(screen.getByText("21 taps, 20 boards restored.")).toBeInTheDocument();
 
     const completion = spy.mock.calls.find((call) => String(call[0]).includes("/complete"));
     const body = JSON.parse(String(completion?.[1]?.body ?? "{}"));
-    expect(body.progress.actions).toEqual(SEED_ONE_PERFECT);
-    expect(body.progress.rulesVersion).toBe("one-move@1");
-    expect(body.score).toBe(120);
+    expect(body.progress.actions).toEqual([...SEED_ONE_PERFECT, 0]);
+    expect(body.progress.actions).toHaveLength(21);
+    expect(body.progress.rulesVersion).toBe("one-move@2");
+    expect(body.score).toBe(200);
   });
 
   it("starts a fresh run from the end-of-run screen, rules first", async () => {

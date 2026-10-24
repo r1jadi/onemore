@@ -9,6 +9,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MemoryFlashRuntime } from "@/components/game/MemoryFlashRuntime";
+import { boardCells, patternAt } from "@/lib/games/memory-flash";
 import { clearSession, signIn } from "@/lib/auth/session";
 
 /**
@@ -34,9 +35,9 @@ function sessionPayload(overrides: Record<string, unknown> = {}) {
   return {
     id: "eeeeeeee-1111-4111-8111-eeeeeeeeeeee",
     gameSlug: "memory-flash",
-    rulesVersion: "memory-flash@1",
+    rulesVersion: "memory-flash@2",
     seed: "1",
-    tileCount: 55,
+    tileCount: 4096,
     startedAt: "2026-10-20T12:00:00.000Z",
     expiresAt: "2026-10-20T14:00:00.000Z",
     ranked: true,
@@ -169,7 +170,10 @@ describe("starting a run", () => {
     await screen.findByText(/Watch the pattern/);
     expect(screen.getByText("Ranked")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /^Cell \d+,/ })).toHaveLength(16);
-    expect(screen.getByText("Round 1/10")).toBeInTheDocument();
+    expect(screen.getByText("Round 1")).toBeInTheDocument();
+    // The difficulty of the round is the rules', not the screen's invention.
+    expect(screen.getByText("4×4")).toBeInTheDocument();
+    expect(screen.getByText("700 ms")).toBeInTheDocument();
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
@@ -181,7 +185,7 @@ describe("starting a run", () => {
     const start = spy.mock.calls.find((call) => String(call[0]).endsWith("/api/v1/sessions"));
     expect(JSON.parse(String(start?.[1]?.body ?? "{}"))).toEqual({
       gameSlug: "memory-flash",
-      rulesVersion: "memory-flash@1",
+      rulesVersion: "memory-flash@2",
       client: "web/1.0",
     });
   });
@@ -255,7 +259,7 @@ describe("playing the board", () => {
     // Round one is [8]: the ninth cell.
     tapCell(8);
 
-    expect(screen.getByText("Round 2/10")).toBeInTheDocument();
+    expect(screen.getByText("Round 2")).toBeInTheDocument();
     await screen.findByText(/Watch the pattern/);
     await waitForTurn(2);
 
@@ -265,6 +269,56 @@ describe("playing the board", () => {
       screen.getByRole("button", { name: /^Cell 9, row 3 column 1\. Tap to rebuild/ }),
     ).toBeInTheDocument();
   }, 15000);
+
+  it("plays past the retired tenth pattern, on a board that grows to hold it", async () => {
+    const spy = mockPlayback();
+    await renderRuntime();
+
+    // Twelve rounds, tapped from the engine's own patterns: the run has to be
+    // played, not asserted into existence. Round nine is where the 4×4 board can
+    // no longer hold the pattern, so the board grows; round ten was the retired
+    // game's last round, and round eleven is the proof it is no longer one.
+    for (let round = 1; round <= 12; round += 1) {
+      await waitForTurn(round);
+
+      if (round === 9) {
+        expect(screen.getByText("5×5")).toBeInTheDocument();
+        expect(screen.getByText("604 ms")).toBeInTheDocument();
+        expect(screen.getAllByRole("button", { name: /^Cell \d+,/ })).toHaveLength(25);
+      }
+
+      for (const cell of patternAt("1", round)) tapCell(cell);
+
+      if (round === 10) {
+        expect(screen.getByText("Round 11")).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /play again/i })).toBeNull();
+      }
+    }
+
+    // Still playing, at the score the twelve clears earned, on the next board.
+    expect(screen.getByText("Round 13")).toBeInTheDocument();
+    expect(screen.getByText("Score").closest("dl")?.querySelector("dd")?.textContent).toBe("120");
+    expect(screen.queryByRole("button", { name: /play again/i })).toBeNull();
+    expect(screen.getAllByRole("button", { name: /^Cell \d+,/ })).toHaveLength(25);
+
+    // A wrong tap on round thirteen ends it, and the whole endless line is what
+    // gets submitted — 78 taps that cleared twelve patterns, plus the losing one.
+    // The tap waits for the flash: a cell is not pressable while it is showing.
+    await waitForTurn(13);
+    const roundThirteen = patternAt("1", 13);
+    const wrong = Array.from({ length: boardCells(13) }, (_, cell) => cell).find(
+      (cell) => !roundThirteen.includes(cell),
+    );
+    tapCell(wrong as number);
+
+    await screen.findByRole("button", { name: /play again/i });
+    const completion = spy.mock.calls.find((call) => String(call[0]).includes("/complete"));
+    const body = JSON.parse(String(completion?.[1]?.body ?? "{}"));
+    expect(body.score).toBe(120);
+    expect(body.progress.actions).toHaveLength(79);
+    expect(body.progress.actions.slice(78)).toEqual([wrong]);
+    expect(body.progress.rulesVersion).toBe("memory-flash@2");
+  }, 40000);
 
   it("shows the run's own score as it plays, which is not a claim that anything was saved", async () => {
     mockPlayback();
@@ -296,7 +350,7 @@ describe("finishing a run", () => {
     const completion = spy.mock.calls.find((call) => String(call[0]).includes("/complete"));
     const body = JSON.parse(String(completion?.[1]?.body ?? "{}"));
     expect(body.progress.actions).toEqual([0]);
-    expect(body.progress.rulesVersion).toBe("memory-flash@1");
+    expect(body.progress.rulesVersion).toBe("memory-flash@2");
     expect(body.score).toBe(0);
   });
 
@@ -336,7 +390,7 @@ describe("finishing a run", () => {
     fireEvent.click(screen.getByRole("button", { name: /play again/i }));
 
     await screen.findByText(/Watch the pattern/);
-    expect(screen.getByText("Round 1/10")).toBeInTheDocument();
+    expect(screen.getByText("Round 1")).toBeInTheDocument();
     // A reload's worth of state is gone: the score is back to zero and the board
     // is showing round one again rather than the previous run's pattern.
     expect(screen.getByText("Score").closest("dl")?.querySelector("dd")?.textContent).toBe("0");

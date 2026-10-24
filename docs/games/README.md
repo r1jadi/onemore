@@ -5,11 +5,11 @@ game earns the right to be called playable.
 
 Seven games are implemented today: **Stack 10**, **Chain** (Don't Break the
 Chain), **Memory Flash**, **One Move**, **Color Merge**, **Don't Touch the Black**
-and **7 Second**. Four of them — Stack 10, Chain, Color Merge and Don't Touch the
-Black — are endless, with no final tile, round, slide or row. Every catalogue
-record is playable, and each one names the runtime that plays it; the "no runtime
-yet" screen remains for any future entry that is published before its runtime
-ships.
+and **7 Second**. Six of them — Stack 10, Chain, Memory Flash, One Move, Color
+Merge and Don't Touch the Black — are endless, with no final tile, round, pattern,
+board, slide or row. Every catalogue record is playable, and each one names the runtime that plays
+it; the "no runtime yet" screen remains for any future entry that is published
+before its runtime ships.
 
 ## Stack 10
 
@@ -392,17 +392,21 @@ suites fails.
 
 Watch the pattern light, then tap the same cells back **in any order**. Each round
 shows one cell more than the last; a tap outside the pattern — or a second tap on a
-cell already lit — ends the run.
+cell already lit — ends the run. There is no final pattern.
 
 ### The board
 
-| Thing   | Value                                                             |
-| ------- | ----------------------------------------------------------------- |
-| Board   | 4×4, sixteen cells (indexes 0–15)                                 |
-| Rounds  | 10 per run — the run always ends, so two scores measure one thing |
-| Taps    | 55 in a perfect run (1 + 2 + … + 10)                              |
-| Rules   | `memory-flash@1`                                                  |
-| Runtime | `memory-flash` (the catalogue's `games.runtime` value)            |
+| Thing   | Value                                                        |
+| ------- | ------------------------------------------------------------ |
+| Board   | 4×4, growing by a row and a column every eight rounds        |
+| Rounds  | none — the pattern grows by one cell until the run ends      |
+| Taps    | 4096 at most in one submission: a request bound, not a level |
+| Rules   | `memory-flash@2`                                             |
+| Runtime | `memory-flash` (the catalogue's `games.runtime` value)       |
+
+The retired game — `memory-flash@1`, still verified for sessions opened under it —
+was ten patterns on a fixed 4×4 board, fifty-five taps and a `cleared` ending.
+Everything else about it is the game that still runs; only the ending was artificial.
 
 ### The patterns
 
@@ -412,53 +416,87 @@ the same patterns or its submission is refused, so the generator is written out 
 full rather than described:
 
 ```
+side(r) = 4 + floor((r - 1) / 8)               // 4 for rounds 1–8, 5 for 9–16, …
 state₀ = ((seed mod 2³²) + 2³²) mod 2³²        // the seed is a bigint, reduced to 32 bits
 if state₀ = 0 then state₀ = 2654435769         // 0x9E3779B9: a zero state would be degenerate
 stateₙ = (stateₙ₋₁ × 1664525 + 1013904223) mod 2³²
-cellₙ  = (stateₙ >> 16) mod 16                 // 0..15
+cellₙ  = (stateₙ >> 16) mod side(r)²           // 0 .. side(r)²-1
 ```
 
 Round `r` lights exactly `r` **distinct** cells: the generator is advanced until
 `r` cells the round does not already hold have been drawn, and the rejection is
 part of the rules rather than a drawing detail. The state carries across rounds —
-round two starts drawing where round one stopped — so the ten patterns are one
-sequence, not ten independent draws.
+round two starts drawing where round one stopped — so the patterns are one
+sequence, not independent draws.
+
+The board a round is played on is part of the rules, because it is part of the
+draw: the same state is reduced modulo sixteen on a 4×4 board and modulo
+twenty-five on a 5×5 one. Rounds 1–8 are therefore the patterns the retired game
+showed, cell for cell, and round nine is where an endless run parts company with
+it. `side(r)² ≥ r` holds at every round, so a pattern always fits the board it is
+drawn for.
 
 The state progression is the same LCG Stack 10's deck uses; only the digit read out
-of each state differs. Cells are read from bits 16–19, deliberately not from the low
-four bits: this LCG's low bits advance with a period of two to the power of their
-width, so `state % 16` would flash a slice of one repeated sixteen-draw cycle and a
-later round would teach nothing an earlier one had not. Bits 16–19 have the full
+of each state differs. Cells are read from bits 16 and above, deliberately not from
+the low bits: this LCG's low bits advance with a period of two to the power of
+their width, so `state % cells` would flash a slice of one repeated cycle and a
+later round would teach nothing an earlier one had not. Bits 16+ have the full
 period, so each seed flashes its own patterns.
 
 The seed travels as a **decimal string** for the same reason Stack 10's does: it is
 a `bigint` column, and parsing it as a double would round it, flash different
 patterns, and reject every honest run.
 
+### Difficulty
+
+Three levers, each a function of the round, so every player meets the same
+challenge at the same point and none of them runs out:
+
+| Lever   | Progression                                                           |
+| ------- | --------------------------------------------------------------------- |
+| Cells   | Round `r` lights `r` cells — one more than the round before, for ever |
+| Board   | A row and a column every eight rounds: 4×4, 5×5, 6×6, …, for ever     |
+| Flash   | 700 ms at round one, 12 ms less each round, floor 400 ms              |
+| Lead-in | 250 ms before the flash, 5 ms less each round, floor 120 ms           |
+
+The pattern never stops growing, which is the lever that keeps climbing after the
+flash reaches its floor; the board growing is what keeps a longer pattern possible
+rather than repeating cells. Neither floor is an ending: at round twenty-six the
+pattern is still one cell longer than round twenty-five's, and the board still
+follows it.
+
 ### A move
 
-A move is a **cell index, 0–15**. Round `r` has `r` cells lit, and a tap is correct
-when it is one of those cells that has not been entered yet. The order does not
-matter — the pattern is a set — but a tap outside the set, or a repeat, is a mistake:
+A move is a **cell index on the current round's board**: 0–15 on the 4×4 board,
+0–24 on the 5×5 board. Round `r` has `r` cells lit, and a tap is correct when it
+is one of those cells that has not been entered yet. The order does not matter —
+the pattern is a set — but a tap outside the set, or a repeat, is a mistake:
 
 1. **A cell in the pattern, not yet entered** → it stays lit, and the round
    continues. Entering the last cell clears the round.
 2. **A cell outside the pattern, or one already entered** → the run is over. The
    tap is still part of the run and is still submitted; it is a legal tap that
    loses, not an invalid one.
+3. **A cell that does not exist on the round's board** → the submission is
+   impossible and is refused. The board only offers cells it has, so this is a
+   claim no honest client can make.
 
 ### Scoring
 
 A cleared pattern scores **10 points**. A pattern is all-or-nothing: a round with
 four of its five cells entered and then a mistake scores nothing for that round.
-A perfect run clears ten patterns for **100 points**.
+There is no maximum score, because there is no last round; the score is ten times
+the number of patterns cleared.
 
 ### How a run ends
 
-| Outcome   | When                                                                       |
-| --------- | -------------------------------------------------------------------------- |
-| `over`    | A tap was outside the pattern or repeated a lit cell. The ordinary ending. |
-| `cleared` | All ten patterns were rebuilt — all fifty-five taps.                       |
+| Outcome        | When                                                                       |
+| -------------- | -------------------------------------------------------------------------- |
+| `over`         | A tap was outside the pattern or repeated a lit cell. The ordinary ending. |
+| `over` (bound) | The submission reached 4096 taps. A request bound, not a final round.      |
+
+`cleared` does not exist under `memory-flash@2`: a run that rebuilt every pattern
+it was shown has not finished, it has merely reached the end of its submission.
 
 The score already earned is kept. Every tap of the run must be submitted, losing
 tap included: a submission that stops early is refused, so a player cannot discard
@@ -467,24 +505,32 @@ single cell — so every run has at least one move.
 
 ### Verified scores
 
-**The database decides the score**, under the same rules as Stack 10 and Chain: see
-`supabase/migrations/20261020120000_memory_flash_sessions.sql` for the code.
+**The database decides the score**, under the same rules as the other verifiers: see
+`supabase/migrations/20261030120000_endless_memory_flash.sql` for the code, and
+`20261020120000_memory_flash_sessions.sql` for the game before it.
 
-- `public.memory_flash_pattern(seed, round)` draws one round's pattern. It is
+- `public.memory_flash_endless_pattern(seed, round)` draws one round's pattern on
+  that round's board, and `public.memory_flash_side(round)` /
+  `public.memory_flash_cells_at(round)` are the board it is drawn on. They are
   internals: execute is not granted to a client, because a player already holds the
   seed their own board draws from, and the verifier is the only caller.
 - `public.start_game_session(slug, rules, client)` issues the run with the seed, the
-  pinned version and the expiry. Its gate is a pair — (`stack-10`, `stack-10@1`),
-  (`chain`, `chain@1` or `chain@2`) or (`memory-flash`, `memory-flash@1`) — and anything else is
-  `unsupported_runtime`. A Memory Flash session's `tile_count` is 55: the field
-  counts the moves a complete run holds, and its moves are cell taps.
+  pinned version and the expiry. Its gate is a pair per runtime — for Memory Flash,
+  (`memory-flash`, `memory-flash@1` or `memory-flash@2`) — and anything else is
+  `unsupported_runtime`. A `memory-flash@2` session's `tile_count` is 4096: the
+  field counts the moves a complete run holds, and an endless run has no complete
+  length.
 - `public.complete_memory_flash_run(session, actions, score, duration)` replays the
   tap list pattern by pattern, derives the score, compares it with the claim, and
-  only then closes the session and records it. Its outcome vocabulary
-  (`recorded`, `duplicate`, `score_mismatch`, …) and its ledger behaviour are
-  identical to the other two verifiers, and the Go service maps them onto HTTP the
-  same way — routing at the verifier the pinned rules version names and accepting
-  cell indexes up to 15 for this game's board.
+  only then closes the session and records it. The session's pinned version chooses
+  the branch: `memory-flash@1` replays ten patterns on the 4×4 board and can still
+  end `cleared`, while `memory-flash@2` grows the board and has no last pattern. Its
+  outcome vocabulary (`recorded`, `duplicate`, `score_mismatch`, …) and its ledger
+  behaviour are identical to the other verifiers, and the Go service maps them onto
+  HTTP the same way — routing at the verifier the pinned rules version names and
+  accepting cell indexes up to 224, the 15×15 board the submission bound can reach.
+- An endless session lives twelve hours rather than two: a marathon should end when
+  the board ends it, not when the clock does.
 
 A guest can play. Their run is verified and closed exactly like a signed-in
 player's, and it is never ranked.
@@ -494,34 +540,48 @@ player's, and it is never ranked.
 Each vector is asserted by both the SQL suite and the client engine; if either side
 drifts, one of the two suites fails.
 
-1. **Seed 1's patterns** — `[8]`, `[8,6]`, `[3,0,8]`, `[6,2,8,5]`, `[13,0,7,1,8]`,
-   `[3,14,15,13,7,2]`, `[15,2,11,14,8,10,0]`, `[11,2,1,10,5,12,3,13]`,
-   `[3,14,13,9,11,8,0,4,15]`, `[1,4,7,2,10,6,9,5,14,11]`.
-2. **Seed 1, the perfect line** — those fifty-five cells in that order: ten cleared
-   patterns, **100 points**. Asserted in
+1. **Seed 1's rounds one to eight** — `[8]`, `[8,6]`, `[3,0,8]`, `[6,2,8,5]`,
+   `[13,0,7,1,8]`, `[3,14,15,13,7,2]`, `[15,2,11,14,8,10,0]`,
+   `[11,2,1,10,5,12,3,13]`. These are the retired game's patterns exactly, which is
+   what proves an endless run opens with the game that shipped.
+2. **Seed 1's rounds nine to twelve** — `[22,15,5,18,6,21,4,11,7]`,
+   `[4,3,20,22,6,13,19,10,5,16]`, `[3,16,6,12,22,0,21,8,4,2,15]`,
+   `[19,3,23,15,24,21,6,7,11,17,9,22]`. Drawn modulo twenty-five on the 5×5 board:
+   cell 22 does not exist on the retired board, which is why these are the proof the
+   board grows.
+3. **Seed 1, the endless line** — all twelve patterns in order, 78 taps: twelve
+   cleared rounds, **120 points**, round thirteen dealt, still `playing`. This passes
+   the retired game's tenth pattern and its fifty-fifth tap. Asserted in
    [`tests/security/rls_test.sql`](../../tests/security/rls_test.sql) and in
    [`src/lib/games/memory-flash.test.ts`](../../src/lib/games/memory-flash.test.ts).
-3. **Seed 1, the broken pattern** — `8, 8, 0`: round one rebuilt, the first cell of
-   round two entered, then a cell round two does not light. **10 points**, 3 taps
-   placed, 1 round cleared. Asserted in both suites.
-4. **A full-width seed** — `9223372036854775807` flashes `[5]`, `[7,3]`,
+4. **Seed 1, the broken pattern** — `8, 0`: round one rebuilt, then a cell round
+   two does not light. **10 points**, 2 taps placed, 1 round cleared. Asserted in
+   both suites.
+5. **A full-width seed** — `9223372036854775807` flashes `[5]`, `[7,3]`,
    `[15,5,4]`, `[5,0,2,11]`, … which is what catches a client that rounded the seed
    to a double.
 
 ## One Move
 
 Every board is a checkerboard with exactly one move already made. Find the cell
-that restores it; any other tap ends the run.
+that restores it; any other tap ends the run. **There is no final board**: every
+four boards the grid grows by a row and a column, and the space to search keeps
+growing with it.
 
 ### The board
 
-| Thing   | Value                                                             |
-| ------- | ----------------------------------------------------------------- |
-| Boards  | 12 per run — the run always ends, so two scores measure one thing |
-| Taps    | 12 in a perfect run — one per board                               |
-| Board   | 3×3 for boards 1–4, 4×4 for boards 5–8, 5×5 for boards 9–12       |
-| Rules   | `one-move@1`                                                      |
-| Runtime | `one-move` (the catalogue's `games.runtime` value)                |
+| Thing   | Value                                                          |
+| ------- | -------------------------------------------------------------- |
+| Board   | 3×3, growing by a row and a column every four levels           |
+| Levels  | none — the grid keeps growing until the run ends               |
+| Taps    | 4096 at most in one submission: a request bound, not a level   |
+| Rules   | `one-move@2`                                                   |
+| Runtime | `one-move` (the catalogue's `games.runtime` value)             |
+
+The retired game — `one-move@1`, still verified for sessions opened under it — was
+twelve boards on 3×3, 4×4 and 5×5 grids, twelve taps and a `cleared` ending.
+Everything else about it is the game that still runs; only the ending was
+artificial.
 
 ### The boards
 
@@ -531,18 +591,23 @@ produce exactly the same cells or its submission is refused, so the generator is
 written out in full rather than described:
 
 ```
+side(n) = 3 + floor((n - 1) / 4)               // 3 for levels 1–4, 4 for 5–8, …
 state₀ = ((seed mod 2³²) + 2³²) mod 2³²        // the seed is a bigint, reduced to 32 bits
 if state₀ = 0 then state₀ = 2654435769         // 0x9E3779B9: a zero state would be degenerate
 stateₙ = (stateₙ₋₁ × 1664525 + 1013904223) mod 2³²
-cells(n) = side(n)²                             // 9, 16 or 25
-centerₙ = (stateₙ >> 16) mod cells(n)           // the winning cell of board n
+centerₙ = (stateₙ >> 16) mod side(n)²          // the winning cell of board n
 ```
 
 The state advances once per board, so board two draws from the second state and
-not the first. Cells are read from bits 16–19 rather than the low bits for the
-same reason Memory Flash reads them there: this LCG's low bits cycle with a
+not the first. Cells are read from bits 16 and above rather than the low bits for
+the same reason Memory Flash reads them there: this LCG's low bits cycle with a
 period of two to the power of the bit width. The cell count changes with the
 board, so the value is reduced modulo the current board's cells, not modulo 16.
+
+The board a level is played on is part of the rules, because it is part of the
+draw: the same state is reduced modulo twenty-five on a 5×5 board and modulo
+thirty-six on a 6×6 one. Levels 1–12 are therefore the retired game's boards, cell
+for cell, and level 13 is where an endless run parts company with it.
 
 The seed travels as a **decimal string** for the same reason Stack 10's does: it
 is a `bigint` column, and parsing it as a double would win on different cells and
@@ -559,27 +624,55 @@ cross, and two different crosses are different sets, so their symmetric differen
 is non-empty and the board cannot come back solved. Both engine copies derive the
 same cell, and both the winning-cell vector and the uniqueness property are tested.
 
+### Difficulty
+
+One lever, a function of the level, and it never stops:
+
+| Level | Board | Cells to search |
+| ----- | ----- | --------------- |
+| 1–4   | 3×3   | 9               |
+| 5–8   | 4×4   | 16              |
+| 9–12  | 5×5   | 25              |
+| 13–16 | 6×6   | 36              |
+| 17–20 | 7×7   | 49              |
+| 21–24 | 8×8   | 64              |
+| …     | …     | the next square |
+
+The question never changes — exactly one cell restores the checkerboard — while
+the space to search grows quadratically. That is what keeps the curve rising after
+the retired game stopped: there is no level at which the board stops growing. The
+client keeps the cells at a tappable size and lets the board scroll past 12×12
+rather than shrinking the targets; growth is not capped to fit a phone.
+
 ### A move
 
 A move is a **cell index on the current board**. Exactly one of two things happens:
 
 1. **The cell is the board's winning cell** → the checkerboard is restored, the
-   board scores ten points, and the next board is drawn — a larger one when the
-   run reaches 5×5, or the run clears after the twelfth.
+   board scores ten points, and the next board is drawn — one row and one column
+   larger every four levels, and never the last one.
 2. **Any other cell** → the run is over. The tap is still part of the run and is
    still submitted; it is a legal move that loses, not an invalid one.
 
+A cell that does not exist on the current board is not a move at all: the
+submission is impossible and is refused. The board only offers cells it has, so
+this is a claim no honest client can make.
+
 ### Scoring
 
-Each restored board scores **10 points**. A perfect run restores all twelve for
-**120 points**. A losing run keeps the boards it restored before the losing tap.
+Each restored board scores **10 points**. A board is all-or-nothing: the wrong tap
+that ends a run scores nothing for that board. There is no maximum score, because
+there is no last board; the score is ten times the number of boards restored.
 
 ### How a run ends
 
-| Outcome   | When                                                         |
-| --------- | ------------------------------------------------------------ |
-| `over`    | A tap was not the board's winning cell. The ordinary ending. |
-| `cleared` | All twelve boards were restored — all twelve taps.           |
+| Outcome        | When                                                                  |
+| -------------- | --------------------------------------------------------------------- |
+| `over`         | A tap was not the board's winning cell. The ordinary ending.          |
+| `over` (bound) | The submission reached 4096 taps. A request bound, not a final board. |
+
+`cleared` does not exist under `one-move@2`: a run that restored every board it
+was shown has not finished, it has merely reached the end of its submission.
 
 The score already earned is kept. Every tap of the run must be submitted, losing
 tap included: a submission that stops early is refused, so a player cannot discard
@@ -588,25 +681,32 @@ winning cell — so every run has at least one move.
 
 ### Verified scores
 
-**The database decides the score**, under the same rules as the other three: see
-`supabase/migrations/20261021120000_one_move_sessions.sql` for the code.
+**The database decides the score**, under the same rules as the other verifiers:
+see `supabase/migrations/20261031120000_endless_one_move.sql` for the code, and
+`20261021120000_one_move_sessions.sql` for the game before it.
 
-- `public.one_move_center(seed, level)` draws one board's winning cell. It is
+- `public.one_move_endless_center(seed, level)` draws one board's winning cell on
+  that level's board, and `public.one_move_side(level)` /
+  `public.one_move_cells_at(level)` are the board it is drawn on. They are
   internals: execute is not granted to a client, because a player already holds
-  the seed their own boards draw from, and the verifier is the only caller.
-- `public.start_game_session(slug, rules, client)` issues the run with the seed,
-  the pinned version and the expiry. Its gate is a pair — (`stack-10`,
-  `stack-10@1`), (`chain`, `chain@1` or `chain@2`), (`memory-flash`, `memory-flash@1`) or
-  (`one-move`, `one-move@1`) — and anything else is `unsupported_runtime`. A One
-  Move session's `tile_count` is 12: the field counts the moves a complete run
-  holds, and its moves are board taps.
+  the seed their own boards draw from, and the verifier is the only caller. The
+  retired `one_move_center` still draws the twelve-board game's cells.
+- `public.start_game_session(slug, rules, client)` issues the run with the seed, the
+  pinned version and the expiry. Its gate is a pair per runtime — for One Move,
+  (`one-move`, `one-move@1` or `one-move@2`) — and anything else is
+  `unsupported_runtime`. A `one-move@2` session's `tile_count` is 4096: the field
+  counts the moves a complete run holds, and an endless run has no complete length.
 - `public.complete_one_move_run(session, actions, score, duration)` replays the tap
-  list board by board, derives the score, compares it with the claim, and only
-  then closes the session and records it. Its outcome vocabulary (`recorded`,
-  `duplicate`, `score_mismatch`, …) and its ledger behaviour are identical to the
-  other three verifiers, and the Go service maps them onto HTTP the same way —
-  routing at the verifier the pinned rules version names and accepting cell indexes
-  up to 24 for this game's largest board.
+  list board by board, derives the score, compares it with the claim, and only then
+  closes the session and records it. The session's pinned version chooses the
+  branch: `one-move@1` replays twelve boards up to 5×5 and can still end `cleared`,
+  while `one-move@2` grows the board and has no last one. Its outcome vocabulary
+  (`recorded`, `duplicate`, `score_mismatch`, …) and its ledger behaviour are
+  identical to the other verifiers, and the Go service maps them onto HTTP the same
+  way — routing at the verifier the pinned rules version names and accepting cell
+  indexes up to 1,052,675, the 1026×1026 board the submission bound can reach.
+- An endless session lives twelve hours rather than two: a long run should end when
+  its board ends it, not when the clock does.
 
 A guest can play. Their run is verified and closed exactly like a signed-in
 player's, and it is never ranked.
@@ -616,17 +716,26 @@ player's, and it is never ranked.
 Each vector is asserted by both the SQL suite and the client engine; if either side
 drifts, one of the two suites fails.
 
-1. **Seed 1's winning cells** — `7, 8, 7, 7, 0, 8, 6, 2, 5, 18, 13, 5`.
-2. **Seed 1, the perfect line** — those twelve cells in that order: twelve restored
-   boards, **120 points**. Asserted in
+1. **Seed 1's levels one to twelve** — `7, 8, 7, 7, 0, 8, 6, 2, 5, 18, 13, 5`.
+   These are the retired game's winning cells exactly, which is what proves an
+   endless run opens with the game that shipped.
+2. **Seed 1's levels thirteen to twenty** — `11, 21, 33, 20` on the first 6×6
+   board, then `20, 9, 47, 39` on the first 7×7 board. Cells 33, 47 and 39 do not
+   exist on the retired 5×5 maximum, which is why these are the proof the board
+   grows.
+3. **Seed 1, the endless line** — those twenty cells in order, then cell `0` on
+   board twenty-one: twenty restored boards, **200 points**, twenty-one taps. This
+   passes the retired game's twelfth board and its twelfth tap. Asserted in
    [`tests/security/rls_test.sql`](../../tests/security/rls_test.sql) and in
    [`src/lib/games/one-move.test.ts`](../../src/lib/games/one-move.test.ts).
-3. **Seed 1, the missed move** — `7, 0`: board one restored, then a tap that is not
+4. **Seed 1, the retired perfect line** — the first twelve cells: twelve restored
+   boards, **120 points**, and the `one-move@1` verifier still records it.
+5. **Seed 1, the missed move** — `7, 0`: board one restored, then a tap that is not
    board two's winning cell. **10 points**, 2 taps placed, 1 board restored.
    Asserted in both suites.
-4. **A full-width seed** — `9223372036854775807` wins on
-   `1, 8, 6, 6, 5, 4, 5, 0, 24, 13, 3, 7`, which is what catches a client that
-   rounded the seed to a double.
+6. **A full-width seed** — `9223372036854775807` wins on
+   `1, 8, 6, 6, 5, 4, 5, 0, 24, 13, 3, 7, 20, 0, 2, 20, 35, 25, 13, 32`, which is
+   what catches a client that rounded the seed to a double.
 
 ## Color Merge
 
@@ -767,10 +876,11 @@ endless ones.
   equal neighbours.
 - `public.start_game_session(slug, rules, client)` issues the run with the seed,
   the pinned version and the expiry. Its gate is a pair — (`stack-10`,
-  `stack-10@1`), (`chain`, `chain@1` or `chain@2`), (`memory-flash`, `memory-flash@1`),
-  (`one-move`, `one-move@1`) or (`color-merge`, `color-merge@1` or
-  `color-merge@2`) — and anything else is `unsupported_runtime`. An endless
-  Color Merge session's `tile_count` is 4096, the submission bound; a legacy
+  `stack-10@1`), (`chain`, `chain@1` or `chain@2`), (`memory-flash`, `memory-flash@1`
+  or `memory-flash@2`), (`one-move`, `one-move@1` or `one-move@2`) or
+  (`color-merge`, `color-merge@1` or `color-merge@2`) — and anything else is
+  `unsupported_runtime`. An endless Color Merge session's `tile_count` is 4096, the
+  submission bound; a legacy
   session still reports 48, the slides its deck holds.
 - `public.complete_color_merge_run(session, actions, score, duration)` replays the
   direction list from the seed, deals the tiles, derives the score, compares it

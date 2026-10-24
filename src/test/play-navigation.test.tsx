@@ -65,9 +65,9 @@ function stubBackend() {
         {
           id: "ffffffff-1111-4111-8111-ffffffffffff",
           gameSlug: "one-move",
-          rulesVersion: "one-move@1",
+          rulesVersion: "one-move@2",
           seed: "1",
-          tileCount: 12,
+          tileCount: 4096,
           startedAt: "2026-10-23T12:00:00.000Z",
           expiresAt: "2026-10-23T14:00:00.000Z",
           ranked: false,
@@ -173,7 +173,7 @@ describe("quitting a game", () => {
     await load(router);
 
     await press(await screen.findByRole("button", { name: "Start run" }));
-    await screen.findByRole("group", { name: "Board 1 of 12" });
+    await screen.findByRole("group", { name: "Board 1, 3 by 3" });
 
     await press(screen.getByRole("button", { name: "Quit game" }));
     const dialog = await screen.findByRole("alertdialog");
@@ -182,7 +182,7 @@ describe("quitting a game", () => {
     await press(screen.getByRole("button", { name: "Keep playing" }));
 
     expect(pathname(router)).toBe("/play/one-move");
-    expect(screen.getByRole("group", { name: "Board 1 of 12" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Board 1, 3 by 3" })).toBeInTheDocument();
   });
 
   it("goes to the feed once the player confirms, leaving no play entry behind", async () => {
@@ -191,7 +191,7 @@ describe("quitting a game", () => {
     await load(router);
 
     await press(await screen.findByRole("button", { name: "Start run" }));
-    await screen.findByRole("group", { name: "Board 1 of 12" });
+    await screen.findByRole("group", { name: "Board 1, 3 by 3" });
 
     await press(screen.getByRole("button", { name: "Quit game" }));
     await press(await screen.findByRole("button", { name: "Leave run" }));
@@ -209,7 +209,7 @@ describe("quitting a game", () => {
     // A wrong tap ends the run: the board is replaced by the verified result, so
     // there is no longer any progress to protect.
     await press(await screen.findByRole("button", { name: "Start run" }));
-    await screen.findByRole("group", { name: "Board 1 of 12" });
+    await screen.findByRole("group", { name: "Board 1, 3 by 3" });
     await press(screen.getByRole("button", { name: /^Row 1 column 2,/ }));
     await screen.findByText(/One move missed/i);
 
@@ -244,7 +244,7 @@ describe("going back to the game", () => {
     await load(router);
 
     await press(await screen.findByRole("button", { name: "Start run" }));
-    await screen.findByRole("group", { name: "Board 1 of 12" });
+    await screen.findByRole("group", { name: "Board 1, 3 by 3" });
 
     // Back during a live run is not intercepted: it goes one step back, to the
     // info page, exactly as history says.
@@ -284,7 +284,7 @@ describe("the progress report", () => {
     expect(report).toHaveBeenLastCalledWith(false);
 
     await press(screen.getByRole("button", { name: "Start run" }));
-    await screen.findByRole("group", { name: "Board 1 of 12" });
+    await screen.findByRole("group", { name: "Board 1, 3 by 3" });
     expect(report).toHaveBeenLastCalledWith(true);
   });
 });

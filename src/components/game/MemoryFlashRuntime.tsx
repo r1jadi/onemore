@@ -14,10 +14,11 @@ import {
   type RunResult,
 } from "@/lib/games/sessions";
 import {
-  MEMORY_FLASH_CELLS,
-  MEMORY_FLASH_COLUMNS,
-  MEMORY_FLASH_ROUNDS,
+  boardCells,
+  boardSide,
+  leadInMs,
   patternAt,
+  showMs,
   type MemoryFlashRun,
 } from "@/lib/games/memory-flash";
 
@@ -30,6 +31,11 @@ import {
  * decides a number — the score shown at the end is the one that came back from
  * verification, and until it does the screen says the run is being verified rather
  * than showing a provisional total.
+ *
+ * The game is endless: the pattern grows by one cell every round, the board grows
+ * when the pattern outgrows it, and the flash shortens. There is no final round, so
+ * the screen never shows a countdown; it shows the round, the board and the flash
+ * time, which are the three things that make the next round harder than this one.
  *
  * Three things the component refuses to do, because each would be a lie:
  *
@@ -110,15 +116,7 @@ export function MemoryFlashRuntime({ slug, title }: { slug: string; title: strin
   }
 
   if (state.status === "finished") {
-    return (
-      <Finished
-        slug={slug}
-        title={title}
-        run={state.run}
-        result={state.result}
-        onRestart={state.restart}
-      />
-    );
+    return <Finished slug={slug} run={state.run} result={state.result} onRestart={state.restart} />;
   }
 
   // The only remaining shape is an error with no run to show, which the branches
@@ -130,11 +128,6 @@ export function MemoryFlashRuntime({ slug, title }: { slug: string; title: strin
     </div>
   );
 }
-
-/** The beat before the pattern lights, so the board settles first. */
-const LEAD_IN_MS = 250;
-/** How long the pattern stays lit. Long enough to read, short enough to be memory. */
-const SHOW_MS = 700;
 
 /** The live board: a showing phase, then an input phase, per round. */
 function Board({
@@ -150,14 +143,19 @@ function Board({
 }) {
   const round = run.round;
   const seed = run.seed;
+  const side = boardSide(round);
+  const cells = boardCells(round);
+  const flash = showMs(round);
   const [showing, setShowing] = useState(true);
 
-  // Each round starts by lighting its pattern, then hands over to the player.
-  // The effect re-runs only when the round (or run) changes: entering a cell
-  // within a round must not restart the showing.
+  // Each round starts by lighting its pattern, then hands over to the player. The
+  // exposure shortens as the run goes on, and the board can grow between rounds,
+  // so both the duration and the pattern are functions of the round. The effect
+  // re-runs only when the round (or run) changes: entering a cell within a round
+  // must not restart the showing.
   useEffect(() => {
     setShowing(true);
-    const hide = setTimeout(() => setShowing(false), LEAD_IN_MS + SHOW_MS);
+    const hide = setTimeout(() => setShowing(false), leadInMs(round) + showMs(round));
     return () => {
       clearTimeout(hide);
       setShowing(false);
@@ -180,9 +178,7 @@ function Board({
           <dd className="text-2xl font-semibold tabular">{run.score}</dd>
         </dl>
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <span className="tabular">
-            Round {Math.min(round, MEMORY_FLASH_ROUNDS)}/{MEMORY_FLASH_ROUNDS}
-          </span>
+          <span className="tabular">Round {round}</span>
           {session.ranked ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-surface-2 px-2 py-1">
               <ShieldCheck className="size-3.5" />
@@ -204,16 +200,28 @@ function Board({
               : `Your turn — ${remaining} more ${remaining === 1 ? "cell" : "cells"} in this pattern.`}
       </p>
 
+      {/* The difficulty of this round, read from the rules rather than guessed:
+          the board the pattern is played on and how long it stays lit. Both are
+          functions of the round, so they are the same for every player. */}
+      <p className="pb-1 text-center text-xs text-muted-foreground">
+        <span className="tabular">
+          {side}×{side}
+        </span>{" "}
+        board · flash <span className="tabular">{flash} ms</span>
+      </p>
+
       {/* A square board, centred in whatever height is left: the grid's own
           aspect ratio sizes the cells, so they stay square at every viewport
-          instead of stretching to fill a tall column. */}
+          instead of stretching to fill a tall column. The column count comes from
+          the rules, because the board grows with the pattern. */}
       <div className="flex flex-1 items-center justify-center py-3">
         <div
-          className="grid aspect-square w-full max-w-md grid-cols-4 grid-rows-4 gap-2"
+          className={cn("grid aspect-square w-full max-w-md", side <= 5 ? "gap-2" : "gap-1")}
+          style={{ gridTemplateColumns: `repeat(${side}, minmax(0, 1fr))` }}
           role="group"
-          aria-label="Pattern grid"
+          aria-label={`Pattern grid, ${side} by ${side}`}
         >
-          {Array.from({ length: MEMORY_FLASH_CELLS }, (_, index) => {
+          {Array.from({ length: cells }, (_, index) => {
             const lit = showing ? pattern.includes(index) : run.entered.includes(index);
             const entered = !showing && run.entered.includes(index);
             return (
@@ -222,9 +230,10 @@ function Board({
                 type="button"
                 disabled={!accepting}
                 onClick={() => onTap(index)}
-                aria-label={cellLabel(index, run, showing, verifying, entered)}
+                aria-label={cellLabel(index, side, run, showing, verifying, entered)}
                 className={cn(
-                  "press flex items-center justify-center rounded-xl border transition-colors",
+                  "press flex items-center justify-center border transition-colors",
+                  side <= 5 ? "rounded-xl" : "rounded-md",
                   "motion-reduce:transition-none",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   "active:scale-[0.97]",
@@ -247,7 +256,7 @@ function Board({
       <p className="pt-1 text-center text-xs text-muted-foreground" aria-live="polite">
         {verifying
           ? "The cells entered so far are your score if the server agrees."
-          : "Rebuild each pattern in any order. A wrong cell ends the run. Ten points a round."}
+          : "Rebuild each pattern in any order. A wrong cell ends the run. Ten points a round, with no final pattern."}
       </p>
     </div>
   );
@@ -256,13 +265,14 @@ function Board({
 /** The accessible name of a cell, which states why a tap is or is not playable. */
 function cellLabel(
   index: number,
+  side: number,
   run: MemoryFlashRun,
   showing: boolean,
   verifying: boolean,
   entered: boolean,
 ): string {
-  const row = Math.floor(index / MEMORY_FLASH_COLUMNS) + 1;
-  const column = (index % MEMORY_FLASH_COLUMNS) + 1;
+  const row = Math.floor(index / side) + 1;
+  const column = (index % side) + 1;
   const position = `Cell ${index + 1}, row ${row} column ${column}`;
   if (verifying) return `${position}. The run is being verified.`;
   if (run.outcome !== "playing") return `${position}. The run has ended.`;
@@ -274,13 +284,11 @@ function cellLabel(
 /** The end of a run: the score the server verified, or a guest's unranked result. */
 function Finished({
   slug,
-  title,
   run,
   result,
   onRestart,
 }: {
   slug: string;
-  title: string;
   run: MemoryFlashRun;
   result: RunResult;
   onRestart: () => void;
@@ -295,14 +303,10 @@ function Finished({
             <ShieldCheck className="size-5 text-muted-foreground" />
           )}
         </div>
-        <p className="text-sm text-muted-foreground">
-          {run.outcome === "cleared" ? "Pattern complete" : "Pattern broken"}
-        </p>
+        <p className="text-sm text-muted-foreground">Pattern broken</p>
         <p className="text-5xl font-semibold tabular">{result.score}</p>
         <p className="text-sm text-muted-foreground">
-          {run.outcome === "cleared"
-            ? `All ten patterns rebuilt — ${result.tilesPlaced} cells.`
-            : `${result.tilesPlaced} cells tapped, ${result.clearedColumns} rounds cleared.`}
+          {`${result.tilesPlaced} cells tapped, ${result.clearedColumns} rounds cleared.`}
         </p>
       </div>
 

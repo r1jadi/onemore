@@ -1343,10 +1343,24 @@ reset role;
 -- order, 55 taps, ten clears, 100 points. See the Memory Flash section of
 -- docs/games/README.md.
 \set memory_perfect 'array[8,8,6,3,0,8,6,2,8,5,13,0,7,1,8,3,14,15,13,7,2,15,2,11,14,8,10,0,11,2,1,10,5,12,3,13,3,14,13,9,11,8,0,4,15,1,4,7,2,10,6,9,5,14,11]'
+-- Seed 1's endless line, past the retired tenth pattern: the same taps for rounds
+-- one to eight, then the 5×5 patterns of rounds nine to twelve, and finally cell 0
+-- on round thirteen — a cell that pattern does not light. Seventy-nine taps, twelve
+-- cleared patterns, 120 points. Cut to seventy-eight taps it is a partial run, and
+-- the SQL suite asserts both.
+\set memory_endless 'array[8,8,6,3,0,8,6,2,8,5,13,0,7,1,8,3,14,15,13,7,2,15,2,11,14,8,10,0,11,2,1,10,5,12,3,13,22,15,5,18,6,21,4,11,7,4,3,20,22,6,13,19,10,5,16,3,16,6,12,22,0,21,8,4,2,15,19,3,23,15,24,21,6,7,11,17,9,22,0]'
+-- The same line stopped after round eight: thirty-six taps, no clear to reach.
+\set memory_eight_rounds 'array[8,8,6,3,0,8,6,2,8,5,13,0,7,1,8,3,14,15,13,7,2,15,2,11,14,8,10,0,11,2,1,10,5,12,3,13]'
 -- Seed 1's One Move line: the winning cells of boards 1–12 in order, one tap each,
 -- twelve restored boards, 120 points. See the One Move section of
 -- docs/games/README.md.
 \set one_move_perfect 'array[7,8,7,7,0,8,6,2,5,18,13,5]'
+-- Seed 1's endless One Move line: twenty winning cells in order, then cell 0 on
+-- board twenty-one — a board the retired game never showed. Twenty restored
+-- boards, twenty-one taps, 200 points. Cut after the twelfth tap it is a partial
+-- run, and the SQL suite asserts that too. See the One Move section of
+-- docs/games/README.md.
+\set one_move_endless 'array[7,8,7,7,0,8,6,2,5,18,13,5,11,21,33,20,20,9,47,39,0]'
 -- Seed 1's legacy color-merge@1 deck line: forty-eight slides, ending on the
 -- last one with 272 points; seed 15's legacy line locks the board after
 -- forty-two slides for 184. Both are still verified exactly as they shipped.
@@ -1385,7 +1399,9 @@ reset role;
 \set chain_endless_game 'aaaaaaaa-dddd-4ddd-8ddd-aaaaaaaaaaaa'
 \set stack10_endless_game 'aaaaaaaa-eeee-4eee-8eee-aaaaaaaaaaaa'
 \set memory_game   'aaaaaaaa-7777-4777-8777-aaaaaaaaaaaa'
+\set memory_endless_game 'aaaaaaaa-1a1a-4a1a-8a1a-aaaaaaaaaaaa'
 \set one_move_game 'aaaaaaaa-8888-4888-8888-aaaaaaaaaaaa'
+\set one_move_endless_game 'aaaaaaaa-8899-4899-8899-aaaaaaaaaaaa'
 \set pending_session   'cccccccc-1111-4111-8111-cccccccccccc'
 \set expired_session   'cccccccc-2222-4222-8222-cccccccccccc'
 \set abandoned_session 'cccccccc-3333-4333-8333-cccccccccccc'
@@ -1405,10 +1421,16 @@ reset role;
 \set memory_loss_session  'eeeeeeee-2222-4222-8222-eeeeeeeeeeee'
 \set memory_guest_session 'eeeeeeee-4444-4444-8444-eeeeeeeeeeee'
 \set memory_old_session   'eeeeeeee-5555-4555-8555-eeeeeeeeeeee'
+\set memory_endless_session      'eeeeeeee-3333-4333-8333-eeeeeeeeeeee'
+\set memory_endless_open_session 'eeeeeeee-6666-4666-8666-eeeeeeeeeeee'
+\set memory_endless_guest_session 'eeeeeeee-7777-4777-8777-eeeeeeeeeeee'
 \set one_move_session       'ffffffff-1111-4111-8111-ffffffffffff'
 \set one_move_loss_session  'ffffffff-2222-4222-8222-ffffffffffff'
 \set one_move_guest_session 'ffffffff-4444-4444-8444-ffffffffffff'
 \set one_move_old_session   'ffffffff-5555-4555-8555-ffffffffffff'
+\set one_move_endless_session      'ffffffff-3333-4333-8333-ffffffffffff'
+\set one_move_endless_open_session 'ffffffff-6666-4666-8666-ffffffffffff'
+\set one_move_endless_guest_session 'ffffffff-7777-4777-8777-ffffffffffff'
 \set color_merge_game           'aaaaaaaa-bbbb-4bbb-8bbb-aaaaaaaaaaaa'
 \set color_merge_session        '99999999-1111-4111-8111-999999999999'
 \set color_merge_loss_session   '99999999-2222-4222-8222-999999999999'
@@ -1448,7 +1470,11 @@ insert into public.games (id, owner_id, slug, title, status, published_at, runti
    (select id from public.categories where slug = 'puzzle')),
   (:'memory_game',    :'alice', 'fixture-memory',   'Fixture Memory',   'published', now(), 'memory-flash', true,
    (select id from public.categories where slug = 'memory')),
+  (:'memory_endless_game', :'alice', 'fixture-memory-endless', 'Fixture Memory Endless', 'published', now(), 'memory-flash', true,
+   (select id from public.categories where slug = 'memory')),
   (:'one_move_game',  :'alice', 'fixture-one-move', 'Fixture One Move', 'published', now(), 'one-move', true,
+   (select id from public.categories where slug = 'logic')),
+  (:'one_move_endless_game', :'alice', 'fixture-one-move-endless', 'Fixture One Move Endless', 'published', now(), 'one-move', true,
    (select id from public.categories where slug = 'logic')),
   (:'color_merge_game', :'alice', 'fixture-color-merge', 'Fixture Color Merge', 'published', now(), 'color-merge', true,
    (select id from public.categories where slug = 'puzzle')),
@@ -1490,12 +1516,24 @@ insert into public.game_sessions (id, game_id, user_id, seed, rules_version, sta
   (:'memory_loss_session',  :'memory_game', :'alice', 1, 'memory-flash@1', now() - interval '5 minutes', now() + interval '2 hours', null),
   (:'memory_guest_session', :'memory_game', null,     1, 'memory-flash@1', now() - interval '5 minutes', now() + interval '2 hours', null),
   (:'memory_old_session',   :'memory_game', :'alice', 1, 'memory-flash@0', now() - interval '5 minutes', now() + interval '2 hours', null),
+  -- Endless Memory Flash fixtures. Seed 1 under memory-flash@2: rounds one to
+  -- eight are the retired game's patterns, round nine is drawn on the 5×5 board,
+  -- and a run ends only on a mistake or the submission bound.
+  (:'memory_endless_session',       :'memory_endless_game', :'alice', 1, 'memory-flash@2', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'memory_endless_open_session',  :'memory_endless_game', :'alice', 1, 'memory-flash@2', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'memory_endless_guest_session', :'memory_endless_game', null,     1, 'memory-flash@2', now() - interval '5 minutes', now() + interval '2 hours', null),
   -- One Move fixtures. Seed 1 wins on cells 7, 8, 7, 7, 0, 8, 6, 2, 5, 18, 13, 5:
   -- a 3×3 board for the first four, 4×4 for the next four, 5×5 for the last four.
   (:'one_move_session',       :'one_move_game', :'alice', 1, 'one-move@1', now() - interval '5 minutes', now() + interval '2 hours', null),
   (:'one_move_loss_session',  :'one_move_game', :'alice', 1, 'one-move@1', now() - interval '5 minutes', now() + interval '2 hours', null),
   (:'one_move_guest_session', :'one_move_game', null,     1, 'one-move@1', now() - interval '5 minutes', now() + interval '2 hours', null),
   (:'one_move_old_session',   :'one_move_game', :'alice', 1, 'one-move@0', now() - interval '5 minutes', now() + interval '2 hours', null),
+  -- Endless One Move fixtures. Seed 1 under one-move@2: levels one to twelve are
+  -- the retired game's boards, level thirteen is the first 6×6 board, and a run
+  -- ends only on a miss or the submission bound.
+  (:'one_move_endless_session',       :'one_move_endless_game', :'alice', 1, 'one-move@2', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'one_move_endless_open_session',  :'one_move_endless_game', :'alice', 1, 'one-move@2', now() - interval '5 minutes', now() + interval '2 hours', null),
+  (:'one_move_endless_guest_session', :'one_move_endless_game', null,     1, 'one-move@2', now() - interval '5 minutes', now() + interval '2 hours', null),
   -- Color Merge fixtures. Seed 1 opens with two shade-1 tiles side by side;
   -- seed 15's legacy line locks the board after forty-two slides.
   (:'color_merge_session',        :'color_merge_game', :'alice', 1,  'color-merge@1', now() - interval '5 minutes', now() + interval '2 hours', null),
@@ -1557,6 +1595,21 @@ select rls_test.ok(
 select rls_test.ok(
   public.one_move_size(1) = 3 and public.one_move_size(5) = 4 and public.one_move_size(9) = 5,
   'a One Move board grows from 3×3 to 4×4 to 5×5'
+);
+select rls_test.ok(
+  (select array_agg(public.one_move_endless_center(1, level) order by level)
+          = array[7,8,7,7,0,8,6,2,5,18,13,5,11,21,33,20,20,9,47,39]::integer[]
+     from generate_series(1, 20) as level),
+  'the endless One Move generator draws seed 1''s twenty winning cells'
+);
+select rls_test.ok(
+  public.one_move_side(13) = 6 and public.one_move_cells_at(13) = 36
+    and public.one_move_side(17) = 7 and public.one_move_cells_at(21) = 64,
+  'an endless One Move board grows past 5×5 and keeps growing'
+);
+select rls_test.ok(
+  public.one_move_endless_center(9223372036854775807, 20) = 32,
+  'the endless One Move generator replays a full-width seed exactly'
 );
 -- The Color Merge generator, asserted directly: the opening board and the
 -- spawns after it are the ones the client engine computes and the verifier
@@ -1934,6 +1987,31 @@ select rls_test.says_field(
   $$public.start_game_session('memory-flash', 'memory-flash@1', 'test/1.0')$$,
   'tile_count', '55', 'a Memory Flash session counts the taps of a perfect run'
 );
+-- Memory Flash also accepts the endless version, and reports the submission bound
+-- instead of a complete-run length: an endless run has no complete length.
+select rls_test.says(
+  $$public.start_game_session('memory-flash', 'memory-flash@2', 'test/1.0')$$,
+  'started', 'the shipped Memory Flash game starts an endless run'
+);
+select rls_test.says_field(
+  $$public.start_game_session('memory-flash', 'memory-flash@2', 'test/1.0')$$,
+  'tile_count', '4096', 'an endless Memory Flash session reports the submission bound, not a final round'
+);
+select rls_test.says(
+  $$public.start_game_session('fixture-memory', 'memory-flash@2', 'test/1.0')$$,
+  'started', 'a guest can start an endless Memory Flash run'
+);
+-- The session clock is long enough for a marathon: twelve hours, not two.
+select rls_test.ok(
+  (select expires_at - started_at between interval '11 hours 59 minutes' and interval '12 hours 1 minute'
+     from public.start_game_session('memory-flash', 'memory-flash@2', 'test/1.0')),
+  'an endless Memory Flash session lives twelve hours so the clock does not end a run'
+);
+-- A version no verifier implements is still refused, endless game or not.
+select rls_test.says(
+  $$public.start_game_session('memory-flash', 'memory-flash@3', 'test/1.0')$$,
+  'unsupported_runtime', 'a Memory Flash rules version nothing implements is refused at the gate'
+);
 select rls_test.says(
   $$public.start_game_session('fixture-runnable', 'stack-10@1', 'test/1.0')$$,
   'started', 'a guest can start a run'
@@ -2001,6 +2079,20 @@ select rls_test.says(
 select rls_test.says(
   $$public.start_game_session('fixture-runnable', 'one-move@1', 'test/1.0')$$,
   'unsupported_runtime', 'a Stack 10 game cannot start a One Move run'
+);
+select rls_test.says_field(
+  $$public.start_game_session('one-move', 'one-move@2', 'test/1.0')$$,
+  'rules_version', 'one-move@2', 'the shipped One Move game issues the endless rules'
+);
+select rls_test.says_field(
+  $$public.start_game_session('one-move', 'one-move@2', 'test/1.0')$$,
+  'tile_count', '4096', 'an endless One Move session reports the submission bound, not a final board'
+);
+-- The session clock is long enough for a marathon: twelve hours, not two.
+select rls_test.ok(
+  (select expires_at - started_at between interval '11 hours 59 minutes' and interval '12 hours 1 minute'
+     from public.start_game_session('one-move', 'one-move@2', 'test/1.0')),
+  'an endless One Move session lives twelve hours so the clock does not end a run'
 );
 -- The shipped Color Merge game, same shape: playable, naming its runtime,
 -- issuing a run whose move count is the deck's slides.
@@ -2183,6 +2275,27 @@ select rls_test.says_field(
   format($$public.complete_memory_flash_run('eeeeeeee-4444-4444-8444-eeeeeeeeeeee'::uuid, %s, 100, 45000)$$, :'memory_perfect'),
   'ranked', 'false', 'a guest Memory Flash run is never ranked'
 );
+-- A guest's endless run is verified, closed and never ranked. It clears rounds one
+-- to eight and then taps cell 24 — a cell the retired 4×4 board did not have, and
+-- not one round nine lights — so the record proves the board really did grow, and
+-- that a cell outside the pattern is still the ordinary way a run ends.
+select rls_test.ok(
+  (select r.outcome = 'recorded'
+      and r.score = 80
+      and r.cleared_columns = 8
+      and r.tiles_placed = 37
+     from public.complete_memory_flash_run(
+       'eeeeeeee-7777-4777-8777-eeeeeeeeeeee'::uuid, :memory_eight_rounds || 24, 80, 45000) r),
+  'a guest completes an endless run: eight patterns cleared on the retired board, then cell 24 on the grown one'
+);
+select rls_test.says_field(
+  format($$public.complete_memory_flash_run('eeeeeeee-7777-4777-8777-eeeeeeeeeeee'::uuid, %s || 24, 80, 45000)$$, :'memory_eight_rounds'),
+  'ranked', 'false', 'a guest''s endless run is not ranked'
+);
+select rls_test.ok(
+  rls_test.count_rows($$select 1 from public.scores where session_id = 'eeeeeeee-7777-4777-8777-eeeeeeeeeeee'$$) = 0,
+  'a guest''s endless run leaves no score behind'
+);
 -- A guest One Move run completes the same way: verified, recorded, unranked.
 select rls_test.says(
   format($$public.complete_one_move_run('ffffffff-4444-4444-8444-ffffffffffff'::uuid, %s, 120, 45000)$$, :'one_move_perfect'),
@@ -2195,6 +2308,24 @@ select rls_test.says(
 select rls_test.says_field(
   format($$public.complete_one_move_run('ffffffff-4444-4444-8444-ffffffffffff'::uuid, %s, 120, 45000)$$, :'one_move_perfect'),
   'ranked', 'false', 'a guest One Move run is never ranked'
+);
+-- A guest's endless run is verified and closed the same way, and its twentieth
+-- board is one the retired twelve-board game never dealt.
+select rls_test.says(
+  format($$public.complete_one_move_run('ffffffff-7777-4777-8777-ffffffffffff'::uuid, %s, 200, 45000)$$, :'one_move_endless'),
+  'recorded', 'a guest completes an endless One Move run past the retired twelfth board'
+);
+select rls_test.says(
+  format($$public.complete_one_move_run('ffffffff-7777-4777-8777-ffffffffffff'::uuid, %s, 200, 45000)$$, :'one_move_endless'),
+  'duplicate', 'a repeated guest endless One Move submission is recognised, not recorded again'
+);
+select rls_test.says_field(
+  format($$public.complete_one_move_run('ffffffff-7777-4777-8777-ffffffffffff'::uuid, %s, 200, 45000)$$, :'one_move_endless'),
+  'ranked', 'false', 'a guest''s endless One Move run is not ranked'
+);
+select rls_test.ok(
+  rls_test.count_rows($$select 1 from public.scores where session_id = 'ffffffff-7777-4777-8777-ffffffffffff'$$) = 0,
+  'a guest''s endless One Move run leaves no score behind'
 );
 -- A guest Color Merge run completes the same way: verified, recorded, unranked.
 select rls_test.says(
@@ -2629,6 +2760,122 @@ select rls_test.ok(
   'your Memory Flash standing is your recorded best at its real rank'
 );
 
+-- ── Memory Flash: the endless game, past the old tenth pattern ──
+--
+-- Seed 1 under memory-flash@2. Rounds one to eight are the retired game's
+-- patterns, drawn on its 4×4 board; round nine is drawn on the 5×5 board the
+-- pattern outgrew, and cell 22 — which the retired board did not have — is one of
+-- its cells. The seventy-nine-tap line below clears rounds one to twelve, worth
+-- 120 points, and ends with a cell round thirteen does not light.
+--
+-- The twelve taps of rounds nine to twelve are the point: a verifier that still
+-- stopped at ten would call this line impossible (or record it as a ten-round
+-- clear), so a recorded result with twelve cleared patterns is the proof the
+-- former endpoint is gone.
+--
+-- The expected numbers are arithmetic from the seed, not values read back.
+select rls_test.ok(
+  (select public.memory_flash_rules_version() = 'memory-flash@2'),
+  'the rules version a new Memory Flash session pins is the endless one'
+);
+select rls_test.ok(
+  (select public.memory_flash_max_taps() = 4096),
+  'the endless submission bound is a request ceiling, not a final round'
+);
+-- The board grows by a row and a column every eight rounds, without cap.
+select rls_test.ok(
+  (select public.memory_flash_side(1) = 4
+      and public.memory_flash_side(8) = 4
+      and public.memory_flash_side(9) = 5
+      and public.memory_flash_side(17) = 6
+      and public.memory_flash_side(90) = 15
+      and public.memory_flash_cells_at(9) = 25
+      and public.memory_flash_cells_at(90) = 225),
+  'the board grows with the pattern: 4×4, then a row and a column every eight rounds'
+);
+-- The generator is internals — execute is not granted to a client, because the
+-- verifier is its only caller — so the rounds are proved through the verifier
+-- itself. The seventy-nine-tap line opens with the retired game's first eight
+-- patterns (the fixture is those taps, cell for cell) and then taps cell 22, which
+-- only the 5×5 board round nine is drawn on has. A recorded twelve-round result is
+-- the proof that both holds.
+--
+-- The board can always hold the pattern it is asked to show: side(r)² ≥ r at every
+-- round, for ever.
+select rls_test.ok(
+  (select bool_and(public.memory_flash_cells_at(r) >= r)
+     from generate_series(1, 400) as r),
+  'every round between one and four hundred fits on the board that round is drawn on'
+);
+
+-- The twelve-round line, recorded: twelve cleared patterns, 120 points, 79 taps
+-- including the tap that broke round thirteen.
+select rls_test.ok(
+  (select r.outcome = 'recorded'
+      and r.score = 120
+      and r.cleared_columns = 12
+      and r.tiles_placed = 79
+     from public.complete_memory_flash_run(
+       'eeeeeeee-3333-4333-8333-eeeeeeeeeeee'::uuid, :memory_endless, 120, 45000) r),
+  'a run past the retired tenth pattern is recorded: twelve patterns, 79 taps, 120 points'
+);
+select rls_test.says(
+  format($$public.complete_memory_flash_run('eeeeeeee-3333-4333-8333-eeeeeeeeeeee'::uuid, %s, 120, 45000)$$, :'memory_endless'),
+  'duplicate', 'a retry of the same endless Memory Flash run is safe to repeat'
+);
+select rls_test.says(
+  $$public.complete_memory_flash_run('eeeeeeee-3333-4333-8333-eeeeeeeeeeee'::uuid, array[8], 10, 45000)$$,
+  'closed', 'a closed endless Memory Flash session does not accept a different run'
+);
+select rls_test.ok(
+  (select verified_score = 120 from public.game_sessions where id = 'eeeeeeee-3333-4333-8333-eeeeeeeeeeee'),
+  'the endless run closes with its verified score on the session'
+);
+select rls_test.ok(
+  (select rank = 1 and score = 120 from public.game_standing('fixture-memory-endless', :'alice'::uuid, null)),
+  'a run past ten patterns ranks on the endless board at its real score'
+);
+-- Refusals, each leaving the open session open for the next attempt. An endless
+-- run has to be submitted in the state it ended in: a run that stops before its
+-- mistake is partial, even when it is the retired game's perfect line.
+select rls_test.says(
+  format($$public.complete_memory_flash_run('eeeeeeee-6666-4666-8666-eeeeeeeeeeee'::uuid, (%s::integer[])[1:78], 120, 45000)$$, :'memory_endless'),
+  'invalid_actions', 'the endless line cut before its losing tap is a partial run, not a clear'
+);
+select rls_test.says(
+  format($$public.complete_memory_flash_run('eeeeeeee-6666-4666-8666-eeeeeeeeeeee'::uuid, %s, 80, 45000)$$, :'memory_eight_rounds'),
+  'invalid_actions', 'a run that stops after round eight is partial: there is no ten-round clear to reach'
+);
+select rls_test.says(
+  format($$public.complete_memory_flash_run('eeeeeeee-6666-4666-8666-eeeeeeeeeeee'::uuid, %s, 100, 45000)$$, :'memory_perfect'),
+  'invalid_actions', 'the retired ten-pattern perfect line is not a finished endless run: round nine is drawn differently'
+);
+select rls_test.says(
+  format($$public.complete_memory_flash_run('eeeeeeee-6666-4666-8666-eeeeeeeeeeee'::uuid, %s || 0, 120, 45000)$$, :'memory_endless'),
+  'invalid_actions', 'a tap after the tap that broke an endless pattern is impossible play'
+);
+select rls_test.says(
+  $$public.complete_memory_flash_run('eeeeeeee-6666-4666-8666-eeeeeeeeeeee'::uuid, array[8,22], 10, 45000)$$,
+  'invalid_actions', 'a cell only a later board has is impossible play in round one'
+);
+select rls_test.says(
+  format($$public.complete_memory_flash_run('eeeeeeee-6666-4666-8666-eeeeeeeeeeee'::uuid, %s, 999, 45000)$$, :'memory_endless'),
+  'score_mismatch', 'an endless score the replay does not produce is refused'
+);
+select rls_test.says_field(
+  format($$public.complete_memory_flash_run('eeeeeeee-6666-4666-8666-eeeeeeeeeeee'::uuid, %s, 999, 45000)$$, :'memory_endless'),
+  'score', '120', 'the endless replay is the score, and it is reported back'
+);
+-- And the same run, from the open session, is recorded exactly once.
+select rls_test.says(
+  format($$public.complete_memory_flash_run('eeeeeeee-6666-4666-8666-eeeeeeeeeeee'::uuid, %s, 120, 45000)$$, :'memory_endless'),
+  'recorded', 'an endless run is recorded after the refused attempts leave the session open'
+);
+select rls_test.ok(
+  rls_test.count_rows($$select 1 from public.scores where session_id = 'eeeeeeee-6666-4666-8666-eeeeeeeeeeee'$$) = 1,
+  'an endless Memory Flash run leaves exactly one score for its session'
+);
+
 -- ── One Move: the same properties, replayed against growing boards ──
 --
 -- Seed 1 wins on cells 7, 8, 7, 7, 0, 8, 6, 2, 5, 18, 13, 5. The perfect line
@@ -2701,6 +2948,65 @@ select rls_test.ok(
 select rls_test.ok(
   (select rank = 1 and score = 120 from public.game_standing('fixture-one-move', '11111111-1111-4111-8111-111111111111', null)),
   'your One Move standing is your recorded best at its real rank'
+);
+
+-- ── Endless One Move: a board that keeps growing ──
+--
+-- Seed 1 wins on cells 7, 8, 7, 7, 0, 8, 6, 2, 5, 18, 13, 5 on the retired
+-- boards, then 11, 21, 33, 20 on the first 6×6 board, then 20, 9, 47, 39 on the
+-- first 7×7 board. Board twenty-one wins on 7; cell 0 is not its move, so the
+-- line below is twenty restored boards for 200 points and ends on that miss.
+--
+-- The expected numbers are arithmetic from the seed, not values read back.
+select rls_test.ok(
+  (select r.outcome = 'recorded'
+      and r.score = 200
+      and r.cleared_columns = 20
+      and r.tiles_placed = 21
+     from public.complete_one_move_run(
+       'ffffffff-3333-4333-8333-ffffffffffff'::uuid, :one_move_endless, 200, 45000) r),
+  'an endless One Move run is recorded: twenty boards, twenty-one taps, 200 points'
+);
+select rls_test.says(
+  format($$public.complete_one_move_run('ffffffff-3333-4333-8333-ffffffffffff'::uuid, %s, 200, 45000)$$, :'one_move_endless'),
+  'duplicate', 'a retry of the same endless One Move run is safe to repeat'
+);
+select rls_test.says(
+  $$public.complete_one_move_run('ffffffff-3333-4333-8333-ffffffffffff'::uuid, array[7], 10, 45000)$$,
+  'closed', 'a closed endless One Move session does not accept a different run'
+);
+-- Refusals, all leaving the open fixture open for the run that follows.
+select rls_test.says(
+  format($$public.complete_one_move_run('ffffffff-6666-4666-8666-ffffffffffff'::uuid, %s, 999, 45000)$$, :'one_move_endless'),
+  'score_mismatch', 'an endless One Move score the replay does not produce is refused'
+);
+select rls_test.says_field(
+  format($$public.complete_one_move_run('ffffffff-6666-4666-8666-ffffffffffff'::uuid, %s, 999, 45000)$$, :'one_move_endless'),
+  'score', '200', 'the endless One Move replay is the score, and it is reported back'
+);
+select rls_test.says(
+  format($$public.complete_one_move_run('ffffffff-6666-4666-8666-ffffffffffff'::uuid, %s, 120, 45000)$$, :'one_move_perfect'),
+  'invalid_actions', 'a run that stops after the retired twelfth board is partial, not a clear'
+);
+select rls_test.says(
+  format($$public.complete_one_move_run('ffffffff-6666-4666-8666-ffffffffffff'::uuid, %s || 36, 120, 45000)$$, :'one_move_perfect'),
+  'invalid_actions', 'a cell past board thirteen''s 6×6 board is impossible play'
+);
+select rls_test.says(
+  $$public.complete_one_move_run('ffffffff-6666-4666-8666-ffffffffffff'::uuid, array[7,0,7], 10, 45000)$$,
+  'invalid_actions', 'taps after the tap that ended an endless run are impossible play'
+);
+select rls_test.says(
+  format($$public.complete_one_move_run('ffffffff-6666-4666-8666-ffffffffffff'::uuid, %s, 200, 45000)$$, :'one_move_endless'),
+  'recorded', 'the endless run is recorded after the refused attempts leave the session open'
+);
+select rls_test.ok(
+  rls_test.count_rows($$select 1 from public.scores where session_id = 'ffffffff-6666-4666-8666-ffffffffffff'$$) = 1,
+  'an endless One Move run leaves exactly one score for its session'
+);
+select rls_test.ok(
+  (select rank = 1 and score = 200 from public.game_standing('fixture-one-move-endless', '11111111-1111-4111-8111-111111111111', null)),
+  'your endless One Move standing is your recorded best at its real rank'
 );
 
 -- ── Color Merge: the same properties, replayed against a sliding board ──

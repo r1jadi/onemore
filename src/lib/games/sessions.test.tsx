@@ -720,9 +720,9 @@ function memoryFlashSessionPayload(overrides: Partial<PlaySession> = {}): PlaySe
   return {
     id: "eeeeeeee-1111-4111-8111-eeeeeeeeeeee",
     gameSlug: "memory-flash",
-    rulesVersion: "memory-flash@1",
+    rulesVersion: "memory-flash@2",
     seed: "1",
-    tileCount: 55,
+    tileCount: 4096,
     startedAt: "2026-10-20T12:00:00.000Z",
     expiresAt: "2026-10-20T14:00:00.000Z",
     ranked: true,
@@ -761,7 +761,7 @@ describe("useMemoryFlashRun", () => {
     // The session asked for Memory Flash rules, and the board is the seed's
     // first pattern.
     const body = requestBody(spy);
-    expect(body.rulesVersion).toBe("memory-flash@1");
+    expect(body.rulesVersion).toBe("memory-flash@2");
     expect(hook.result.session.seed).toBe("1");
     expect(hook.result.run.round).toBe(1);
     expect(hook.result.run.score).toBe(0);
@@ -824,7 +824,7 @@ describe("useMemoryFlashRun", () => {
       spy.mock.calls.findIndex((c) => String(c[0]).includes("/complete")),
     );
     expect(body.progress.actions).toEqual([8, 8, 0]);
-    expect(body.progress.rulesVersion).toBe("memory-flash@1");
+    expect(body.progress.rulesVersion).toBe("memory-flash@2");
     expect(body.score).toBe(10);
     expect(body.durationMs).toBeGreaterThan(0);
   });
