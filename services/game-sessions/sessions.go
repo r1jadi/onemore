@@ -62,24 +62,34 @@ const (
 	// absurd body from reaching the database at all.
 	maxActions = 60
 	// The endless games' submission bounds. These are request ceilings rather than
-	// complete-run lengths: stack-10@2, chain@2 and color-merge@2 carry at most
-	// 4096 moves, and dont-touch@2 at most 4095 cell taps (a cell can be tapped
-	// once). Every other runtime keeps the bound its own verifier owns.
-	stack10MaxActions    = 4096
-	chainMaxActions      = 4096
-	colorMergeMaxActions = 4096
-	dontTouchMaxActions  = 4095
+	// complete-run lengths: stack-10@2, chain@2, color-merge@2, memory-flash@2 and
+	// one-move@2 carry at most 4096 moves, and dont-touch@2 at most 4095 cell taps
+	// (a cell can be tapped once). Every other runtime keeps the bound its own
+	// verifier owns.
+	stack10MaxActions     = 4096
+	chainMaxActions       = 4096
+	colorMergeMaxActions  = 4096
+	memoryFlashMaxActions = 4096
+	oneMoveMaxActions     = 4096
+	dontTouchMaxActions   = 4095
 	// The bounds a move has to fit. Stack 10 addresses a column and Chain a pad,
 	// both 0 to 3; Color Merge addresses one of its four directions, also 0 to 3;
-	// Memory Flash addresses one of the sixteen cells of its 4×4 board; One Move
-	// addresses one of the twenty-five cells of its largest 5×5 board; Don't
-	// Touch the Black addresses its deck's cells — sixty for the legacy rules,
-	// 4095 for the endless conveyor. The pinned rules version picks the bound,
-	// because the games live behind one endpoint.
-	stackChainPositions  = 4
-	colorMergeDirections = 4
-	memoryFlashCells     = 16
-	oneMoveCells         = 25
+	// Memory Flash addresses a cell of its board — sixteen for the retired 4×4
+	// rules, the largest board the endless rules can reach for memory-flash@2
+	// (fifteen by fifteen at the submission bound); One Move addresses a cell of
+	// its board — twenty-five cells for the retired 5×5 maximum, and for
+	// one-move@2 the 1026×1026 board the submission bound can reach; Don't Touch
+	// the Black addresses its deck's cells — sixty for the legacy rules, 4095 for
+	// the endless conveyor. The pinned rules version picks the bound, because the
+	// games live behind one endpoint.
+	stackChainPositions     = 4
+	colorMergeDirections    = 4
+	memoryFlashCells        = 16
+	memoryFlashEndlessCells = 225
+	oneMoveCells            = 25
+	// 1026², the side of the board at level 4096: one correct tap per level is
+	// the only way to reach the bound, and the level's side is 3 + (level-1)/4.
+	oneMoveEndlessCells = 1026 * 1026
 	// dontTouchCells is the legacy dont-touch@1 deck; dont-touch@2 addresses the
 	// endless conveyor's 4095 cells.
 	dontTouchCells     = 60
@@ -320,6 +330,10 @@ func (s *service) completeSession(w http.ResponseWriter, r *http.Request) {
 		limit = chainMaxActions
 	case rules == "color-merge@2":
 		limit = colorMergeMaxActions
+	case rules == "memory-flash@2":
+		limit = memoryFlashMaxActions
+	case rules == "one-move@2":
+		limit = oneMoveMaxActions
 	case strings.HasPrefix(rules, "dont-touch@") && rules != "dont-touch@1":
 		limit = dontTouchMaxActions
 	}
@@ -413,10 +427,14 @@ func (s *service) completeSession(w http.ResponseWriter, r *http.Request) {
 // run as `wrong_rules` rather than this layer guessing.
 func boardSize(rulesVersion string) int {
 	switch {
-	case strings.HasPrefix(rulesVersion, "memory-flash@"):
+	case rulesVersion == "memory-flash@1":
 		return memoryFlashCells
-	case strings.HasPrefix(rulesVersion, "one-move@"):
+	case strings.HasPrefix(rulesVersion, "memory-flash@"):
+		return memoryFlashEndlessCells
+	case rulesVersion == "one-move@1":
 		return oneMoveCells
+	case strings.HasPrefix(rulesVersion, "one-move@"):
+		return oneMoveEndlessCells
 	case strings.HasPrefix(rulesVersion, "color-merge@"):
 		return colorMergeDirections
 	case rulesVersion == "dont-touch@1":
